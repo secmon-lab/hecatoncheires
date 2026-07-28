@@ -54,6 +54,7 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 			ThreadTS:                ts,
 			LastMentionTS:           ts,
 			LastAction:              model.SessionEndedWithQuestion,
+			Kind:                    model.SessionKindWorkspaceAgent,
 			WorkspaceID:             "ws-1",
 			CaseID:                  42,
 			ActionID:                7,
@@ -75,6 +76,7 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Value(t, got.ThreadTS).Equal(ts)
 		gt.Value(t, got.LastMentionTS).Equal(ts)
 		gt.Value(t, got.LastAction).Equal(model.SessionEndedWithQuestion)
+		gt.Value(t, got.Kind).Equal(model.SessionKindWorkspaceAgent)
 		gt.Value(t, got.WorkspaceID).Equal("ws-1")
 		gt.Value(t, got.CaseID).Equal(int64(42))
 		gt.Value(t, got.ActionID).Equal(int64(7))
@@ -84,6 +86,152 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Value(t, got.ReactionSourceMessageTS).Equal("1700000000.000100")
 		gt.Bool(t, got.CreatedAt.Equal(now)).True()
 		gt.Bool(t, got.UpdatedAt.Equal(now)).True()
+	})
+
+	// Kind is the discriminator the Slack dispatcher reads to keep a
+	// workspace-agent thread out of the case-creation path. Sessions written
+	// before the field existed carry no Kind at all; they must read back as the
+	// zero value (SessionKindCase) so the old routing still applies to them.
+	t.Run("Kind defaults to SessionKindCase when unset", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("kind-default")
+		s := &model.Session{
+			ID:        uuid.Must(uuid.NewV7()).String(),
+			ChannelID: ch,
+			ThreadTS:  ts,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, s)).Required()
+
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.Value(t, got.Kind).Equal(model.SessionKindCase)
+	})
+
+	// Claim is what a host takes before its setup work so a concurrent event
+	// already observes who owns the thread. It must create on first call and
+	// return the stored record untouched on every later one.
+	t.Run("Claim creates once and never overwrites", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("claim")
+
+		first, err := repo.Session().Claim(ctx, ch, ts, func() *model.Session {
+			return &model.Session{
+				ID:          "claim-first",
+				ChannelID:   ch,
+				ThreadTS:    ts,
+				WorkspaceID: "ws-claim",
+				Kind:        model.SessionKindWorkspaceAgent,
+			}
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, first).NotNil().Required()
+		gt.Value(t, first.ID).Equal("claim-first")
+		gt.Value(t, first.Kind).Equal(model.SessionKindWorkspaceAgent)
+		gt.Bool(t, first.CreatedAt.IsZero()).False()
+		gt.Bool(t, first.UpdatedAt.IsZero()).False()
+
+		// A second claim with a different seed must lose: the first decision
+		// about what owns this thread stands.
+		second, err := repo.Session().Claim(ctx, ch, ts, func() *model.Session {
+			return &model.Session{
+				ID:          "claim-second",
+				ChannelID:   ch,
+				ThreadTS:    ts,
+				WorkspaceID: "ws-claim",
+				Kind:        model.SessionKindCase,
+			}
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, second).NotNil().Required()
+		gt.Value(t, second.ID).Equal("claim-first")
+		gt.Value(t, second.Kind).Equal(model.SessionKindWorkspaceAgent)
+
+		stored, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored).NotNil().Required()
+		gt.Value(t, stored.ID).Equal("claim-first")
+		gt.Value(t, stored.Kind).Equal(model.SessionKindWorkspaceAgent)
+	})
+
+	// Concurrent claims are the whole point: exactly one seed may win, and every
+	// caller must be told the same winner.
+	t.Run("Claim is atomic under concurrency", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("claim-race")
+
+		const racers = 8
+		var wg sync.WaitGroup
+		results := make([]*model.Session, racers)
+		errs := make([]error, racers)
+		for i := 0; i < racers; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				id := fmt.Sprintf("claim-%d", i)
+				kind := model.SessionKindCase
+				if i%2 == 0 {
+					kind = model.SessionKindWorkspaceAgent
+				}
+				results[i], errs[i] = repo.Session().Claim(ctx, ch, ts, func() *model.Session {
+					return &model.Session{
+						ID:          id,
+						ChannelID:   ch,
+						ThreadTS:    ts,
+						WorkspaceID: "ws-claim",
+						Kind:        kind,
+					}
+				})
+			}(i)
+		}
+		wg.Wait()
+
+		stored, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored).NotNil().Required()
+
+		for i := 0; i < racers; i++ {
+			gt.NoError(t, errs[i]).Required()
+			gt.Value(t, results[i]).NotNil().Required()
+			gt.Value(t, results[i].ID).Equal(stored.ID)
+			gt.Value(t, results[i].Kind).Equal(stored.Kind)
+		}
+	})
+
+	t.Run("Claim rejects missing keys and a nil seed", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("claim-invalid")
+		seed := makeSeed(ch, ts)
+
+		_, err := repo.Session().Claim(ctx, "", ts, seed)
+		gt.Error(t, err)
+		_, err = repo.Session().Claim(ctx, ch, "", seed)
+		gt.Error(t, err)
+		_, err = repo.Session().Claim(ctx, ch, ts, nil)
+		gt.Error(t, err)
+	})
+
+	// AcquireTurnLock persists the seeded Session on first acquisition, so the
+	// Kind set by the host must survive that path too — not just Put.
+	t.Run("AcquireTurnLock persists the seeded Kind", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("kind-seed")
+		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trigger-1", "owner-1", time.Hour, func() *model.Session {
+			return &model.Session{
+				ID:        uuid.Must(uuid.NewV7()).String(),
+				ChannelID: ch,
+				ThreadTS:  ts,
+				Kind:      model.SessionKindWorkspaceAgent,
+			}
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, res.Acquired).True().Required()
+		gt.Value(t, res.Session.Kind).Equal(model.SessionKindWorkspaceAgent)
+
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.Value(t, got.Kind).Equal(model.SessionKindWorkspaceAgent)
 	})
 
 	t.Run("rejects missing required fields on Put", func(t *testing.T) {

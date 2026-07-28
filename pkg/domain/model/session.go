@@ -33,6 +33,21 @@ const (
 	SessionTurnInterrupted SessionTurnState = "interrupted"
 )
 
+// SessionKind discriminates what kind of agent conversation owns a thread.
+// The zero value is SessionKindCase so every Session persisted before this
+// field existed keeps its original meaning without a migration.
+type SessionKind string
+
+const (
+	// SessionKindCase is a thread owned by a Case: either a Case-bound thread
+	// (CaseID != 0) or a thread whose Case is still being formed by the
+	// creation agent (CaseID == 0).
+	SessionKindCase SessionKind = ""
+	// SessionKindWorkspaceAgent is a thread owned by the workspace agent. An
+	// @mention in such a thread never starts a Case.
+	SessionKindWorkspaceAgent SessionKind = "workspace_agent"
+)
+
 // Session represents an ongoing agent conversation bound to a Slack thread.
 // It unifies what was previously split between AgentSession (case-bound) and
 // per-mention draft state (open mode). One Session per (channelID, threadTS).
@@ -45,6 +60,13 @@ type Session struct {
 	ThreadTS      string
 	LastMentionTS string
 	LastAction    SessionEndReason
+
+	// Kind discriminates the conversation that owns this thread. It is set when
+	// the Session is created and never changed afterwards: the Slack dispatcher
+	// reads it to decide whether an @mention in a case-less thread starts a Case
+	// (SessionKindCase) or continues the workspace agent
+	// (SessionKindWorkspaceAgent).
+	Kind SessionKind
 
 	// Case binding — zero values when the thread is not in a case-bound channel.
 	WorkspaceID string

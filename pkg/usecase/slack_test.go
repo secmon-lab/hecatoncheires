@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -290,6 +293,24 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		gt.Value(t, ssn).Nil()
 	})
 
+	// Instant mode is deliberately unchanged by the mention-mode root-mention
+	// rework: the accompanying `message` event is what creates the Case, so
+	// acting on the app_mention here too would double-handle the same post.
+	t.Run("channel-root mention is ignored in instant mode", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire(false)
+
+		rootTS := "1700000050.000001"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", rootTS, ""))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(false)
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
 	t.Run("channel-root post initiates case creation", func(t *testing.T) {
 		ctx := context.Background()
 		uc, _, llmInvoked := wire(false)
@@ -401,17 +422,68 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 	})
 }
 
+// wsAgentPromptMarker appears only in the workspace agent's system prompt
+// (pkg/usecase/agent/wsagent/prompts/system.md), never in the thread-mode case
+// planner's. Recording the system prompt is therefore the precise way to tell
+// which agent a dispatch decision actually reached — both paths invoke the LLM,
+// so "the planner ran" alone cannot distinguish them.
+const wsAgentPromptMarker = "workspace-level assistant"
+
+// promptRecorder captures every system prompt handed to the probe LLM.
+type promptRecorder struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (p *promptRecorder) record(opts ...gollem.SessionOption) {
+	cfg := gollem.NewSessionConfig(opts...)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prompts = append(p.prompts, cfg.SystemPrompt())
+}
+
+// sawWorkspaceAgent reports whether any recorded system prompt belongs to the
+// workspace agent.
+func (p *promptRecorder) sawWorkspaceAgent() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, s := range p.prompts {
+		if strings.Contains(s, wsAgentPromptMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// allWorkspaceAgent reports whether EVERY recorded system prompt belongs to the
+// workspace agent — i.e. no turn slipped into the case planner. It is false when
+// nothing was recorded at all.
+func (p *promptRecorder) allWorkspaceAgent() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.prompts) == 0 {
+		return false
+	}
+	for _, s := range p.prompts {
+		if !strings.Contains(s, wsAgentPromptMarker) {
+			return false
+		}
+	}
+	return true
+}
+
 // TestSlackUseCases_ThreadModeMentionTrigger exercises the mention-trigger sub-mode
-// ([slack] trigger = "mention"): a Case is started only on an @mention (channel
-// root or a case-less thread), a plain post never starts one, and bot-authored
-// mentions are gated by accept_bot.
+// ([slack] trigger = "mention"): a channel-root @mention runs the workspace
+// agent, an @mention in a case-less thread starts a Case, a plain post never
+// starts one, and bot-authored mentions are gated by accept_bot.
 func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 	const channel = "C-MONITOR"
 
 	// wire builds a mention-trigger thread-mode workspace and a probe LLM that
-	// records whether the create planner was ever invoked. acceptBot toggles the
-	// workspace's [slack] accept_bot (which gates bot-authored mentions).
-	wire := func(acceptBot bool) (*usecase.SlackUseCases, *memory.Memory, *atomic.Bool) {
+	// records whether a planner was invoked and which system prompt it got.
+	// acceptBot toggles the workspace's [slack] accept_bot (which gates
+	// bot-authored mentions).
+	wire := func(acceptBot bool) (*usecase.SlackUseCases, *memory.Memory, *atomic.Bool, *promptRecorder) {
 		repo := memory.New()
 		reg := newThreadWorkspaceRegistry()
 		if e, err := reg.Get("support"); err == nil {
@@ -422,9 +494,11 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
 
 		var llmInvoked atomic.Bool
+		prompts := &promptRecorder{}
 		probe := &mockLLMClient{
-			newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			newSessionFn: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
 				llmInvoked.Store(true)
+				prompts.record(opts...)
 				return &mockLLMSession{
 					generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
 						return nil, errors.New("planner generate not scripted in dispatch test")
@@ -442,7 +516,7 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 			SlackService: slackMock,
 			CaseUC:       caseUC,
 		})
-		return usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock), repo, &llmInvoked
+		return usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock), repo, &llmInvoked, prompts
 	}
 
 	mentionEvent := func(user, botID, ts, threadTS string) *slackevents.EventsAPIEvent {
@@ -484,39 +558,106 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 		}
 	}
 
-	t.Run("channel-root mention initiates creation", func(t *testing.T) {
+	// A channel-root mention no longer starts a Case: it opens a workspace-agent
+	// conversation in its own thread. Cases in mention mode come from an
+	// in-thread mention instead.
+	t.Run("channel-root mention runs the workspace agent instead of creating a case", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire(false)
+		uc, repo, llmInvoked, prompts := wire(false)
 
 		rootTS := "1700000010.000001"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", rootTS, ""))).Required()
 		async.Wait()
 
 		gt.Value(t, llmInvoked.Load()).Equal(true)
-		// A session was created for the thread rooted at the mention's own ts.
+		gt.Bool(t, prompts.sawWorkspaceAgent()).True()
+
+		// The session anchoring the mention's thread is tagged as workspace-agent
+		// owned, which is what keeps follow-up mentions off the creation path.
 		ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
 		gt.NoError(t, err).Required()
-		gt.Value(t, ssn).NotNil()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.Kind).Equal(model.SessionKindWorkspaceAgent)
+
+		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, c).Nil()
 	})
 
 	t.Run("mention in a case-less thread initiates creation", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire(false)
+		uc, repo, llmInvoked, prompts := wire(false)
 
 		threadTS := "1700000000.000100"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", "1700000020.000009", threadTS))).Required()
 		async.Wait()
 
 		gt.Value(t, llmInvoked.Load()).Equal(true)
+		gt.Bool(t, prompts.sawWorkspaceAgent()).False()
+
 		// The case is bound to the thread root, not the mention's own ts.
 		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
 		gt.NoError(t, err).Required()
-		gt.Value(t, ssn).NotNil()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.Kind).Equal(model.SessionKindCase)
+	})
+
+	// The follow-up half of the root-mention change: inside the thread the
+	// workspace agent opened, a mention continues that conversation and must
+	// never start a Case.
+	t.Run("mention inside a workspace-agent thread does not initiate creation", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, _, prompts := wire(false)
+
+		threadTS := "1700000080.000001"
+		gt.NoError(t, repo.Session().Put(ctx, &model.Session{
+			ID:          "ws-agent-session",
+			ChannelID:   channel,
+			ThreadTS:    threadTS,
+			WorkspaceID: "support",
+			Kind:        model.SessionKindWorkspaceAgent,
+		})).Required()
+
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", "1700000080.000002", threadTS))).Required()
+		async.Wait()
+
+		gt.Bool(t, prompts.sawWorkspaceAgent()).True()
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.ID).Equal("ws-agent-session")
+		gt.Value(t, ssn.Kind).Equal(model.SessionKindWorkspaceAgent)
+
+		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, c).Nil()
+	})
+
+	// A Session written before Kind existed decodes with the zero value, which
+	// must keep meaning "case thread" so existing in-flight creations still work.
+	t.Run("mention in a thread with a legacy case-kind session still initiates creation", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked, prompts := wire(false)
+
+		threadTS := "1700000090.000001"
+		gt.NoError(t, repo.Session().Put(ctx, &model.Session{
+			ID:          "legacy-session",
+			ChannelID:   channel,
+			ThreadTS:    threadTS,
+			WorkspaceID: "support",
+		})).Required()
+
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", "1700000090.000002", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+		gt.Bool(t, prompts.sawWorkspaceAgent()).False()
 	})
 
 	t.Run("plain channel-root post does not initiate creation", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire(false)
+		uc, repo, llmInvoked, _ := wire(false)
 
 		rootTS := "1700000030.000001"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent(rootTS, ""))).Required()
@@ -530,7 +671,7 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 
 	t.Run("plain thread reply does not initiate creation", func(t *testing.T) {
 		ctx := context.Background()
-		uc, _, llmInvoked := wire(false)
+		uc, _, llmInvoked, _ := wire(false)
 
 		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent("1700000040.000002", "1700000040.000001"))).Required()
 		async.Wait()
@@ -538,9 +679,9 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 		gt.Value(t, llmInvoked.Load()).Equal(false)
 	})
 
-	t.Run("bot-authored mention is ignored when accept_bot is off", func(t *testing.T) {
+	t.Run("bot-authored root mention is ignored when accept_bot is off", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire(false)
+		uc, repo, llmInvoked, _ := wire(false)
 
 		rootTS := "1700000050.000001"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("", "B-FORMBOT", rootTS, ""))).Required()
@@ -552,28 +693,265 @@ func TestSlackUseCases_ThreadModeMentionTrigger(t *testing.T) {
 		gt.Value(t, ssn).Nil()
 	})
 
-	t.Run("bot-authored mention initiates creation when accept_bot is on", func(t *testing.T) {
+	// An app has no Slack user identity, so it cannot be the workspace agent's
+	// access actor — running the agent unattributed would bypass private-case
+	// scoping entirely. accept_bot keeps its documented meaning instead: the
+	// bot-authored root mention files a Case.
+	t.Run("bot-authored root mention initiates creation when accept_bot is on", func(t *testing.T) {
 		ctx := context.Background()
-		uc, _, llmInvoked := wire(true)
+		uc, repo, llmInvoked, prompts := wire(true)
 
 		rootTS := "1700000060.000001"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("", "B-FORMBOT", rootTS, ""))).Required()
 		async.Wait()
 
 		gt.Value(t, llmInvoked.Load()).Equal(true)
+		gt.Bool(t, prompts.sawWorkspaceAgent()).False()
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.Kind).Equal(model.SessionKindCase)
+	})
+
+	// Inside a thread the workspace agent owns, a bot-authored mention is
+	// dropped outright: it cannot run the agent (no user identity) and turning
+	// the thread into a Case would contradict what the Session records.
+	t.Run("bot-authored mention inside a workspace-agent thread is dropped", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked, _ := wire(true)
+
+		threadTS := "1700000110.000001"
+		gt.NoError(t, repo.Session().Put(ctx, &model.Session{
+			ID:          "ws-agent-session-bot",
+			ChannelID:   channel,
+			ThreadTS:    threadTS,
+			WorkspaceID: "support",
+			Kind:        model.SessionKindWorkspaceAgent,
+		})).Required()
+
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("", "B-FORMBOT", "1700000110.000002", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(false)
+
+		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, c).Nil()
 	})
 
 	t.Run("bot's own mention is ignored even with accept_bot on", func(t *testing.T) {
 		ctx := context.Background()
-		uc, _, llmInvoked := wire(true)
+		uc, _, llmInvoked, _ := wire(true)
 
-		// A mention authored by our own bot user must never self-trigger a case.
+		// A mention authored by our own bot user must never self-trigger.
 		rootTS := "1700000070.000001"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("UBOT001", "B-SELF", rootTS, ""))).Required()
 		async.Wait()
 
 		gt.Value(t, llmInvoked.Load()).Equal(false)
 	})
+}
+
+// TestLifecycle_ThreadModeWorkspaceAgentThread drives the whole root-mention
+// flow through the public entry point, with no hand-seeded state: the root
+// mention opens the thread, a follow-up mention inside it continues the same
+// conversation, and no Case is ever created.
+//
+// Pre-seeding the Session with Put (as the per-branch dispatch tests do) cannot
+// catch the ordering bug this guards: the Session that marks the thread as
+// workspace-agent owned has to be written by the root turn itself, early enough
+// that the follow-up's lookup sees it.
+func TestLifecycle_ThreadModeWorkspaceAgentThread(t *testing.T) {
+	ctx := context.Background()
+	const channel = "C-MONITOR"
+
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	e, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+	e.CaseTrigger = model.CaseTriggerMention
+
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	// Two scripted direct-reply turns (planner "direct" round + the reply).
+	var turn atomic.Int32
+	prompts := &promptRecorder{}
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			prompts.record(opts...)
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+					switch turn.Add(1) {
+					case 1, 3:
+						return &gollem.Response{Texts: []string{`{"message":"answering directly","direct":{}}`}}, nil
+					case 2:
+						return &gollem.Response{Texts: []string{"Nothing is on fire."}}, nil
+					case 4:
+						return &gollem.Response{Texts: []string{"Still nothing."}}, nil
+					}
+					return nil, errors.New("unexpected extra LLM call")
+				},
+			}, nil
+		},
+	}
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	uc := usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock)
+
+	mention := func(ts, threadTS string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.AppMention),
+				Data: &slackevents.AppMentionEvent{
+					Type:            "app_mention",
+					User:            "U-ASKER",
+					Text:            "<@UBOT001> anything on fire?",
+					TimeStamp:       ts,
+					ThreadTimeStamp: threadTS,
+					Channel:         channel,
+					EventTimeStamp:  ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+
+	// 1. Channel-root mention opens the workspace-agent thread.
+	const rootTS = "1700000200.000001"
+	gt.NoError(t, uc.HandleSlackEvent(ctx, mention(rootTS, ""))).Required()
+	async.Wait()
+
+	ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.Kind).Equal(model.SessionKindWorkspaceAgent)
+	firstSessionID := ssn.ID
+
+	gt.Array(t, slackMock.postedMessages).Length(2).Required()
+	gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal(rootTS)
+	gt.Value(t, slackMock.postedMessages[1].Text).Equal("Nothing is on fire.")
+
+	// 2. Follow-up mention inside that thread continues the same conversation.
+	gt.NoError(t, uc.HandleSlackEvent(ctx, mention("1700000200.000002", rootTS))).Required()
+	async.Wait()
+
+	gt.Array(t, slackMock.postedMessages).Length(4).Required()
+	gt.Value(t, slackMock.postedMessages[3].ThreadTS).Equal(rootTS)
+	gt.Value(t, slackMock.postedMessages[3].Text).Equal("Still nothing.")
+
+	// 3. Both turns went to the workspace agent, on one Session, and nothing in
+	// this thread ever became a Case.
+	gt.Bool(t, prompts.sawWorkspaceAgent()).True()
+	gt.Bool(t, prompts.allWorkspaceAgent()).True()
+
+	ssn, err = repo.Session().GetByThread(ctx, channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.ID).Equal(firstSessionID)
+	gt.Value(t, ssn.Kind).Equal(model.SessionKindWorkspaceAgent)
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).Nil()
+}
+
+// sessionLookupFailureRepo makes Session().GetByThread fail while leaving every
+// other repository intact, so a test can exercise the dispatcher's behaviour
+// when it cannot tell a workspace-agent thread from a case-forming one.
+type sessionLookupFailureRepo struct {
+	interfaces.Repository
+	err error
+}
+
+func (r *sessionLookupFailureRepo) Session() interfaces.SessionRepository {
+	return &failingSessionRepo{SessionRepository: r.Repository.Session(), err: r.err}
+}
+
+type failingSessionRepo struct {
+	interfaces.SessionRepository
+	err error
+}
+
+func (r *failingSessionRepo) GetByThread(_ context.Context, _, _ string) (*model.Session, error) {
+	return nil, r.err
+}
+
+// When the Session lookup fails the dispatcher cannot distinguish a
+// workspace-agent thread from a thread whose Case is still forming. Creating a
+// stray Case in someone's agent conversation is worse than not answering, so
+// the mention must be dropped rather than guessed at.
+func TestSlackUseCases_ThreadModeMentionSessionLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	const channel = "C-MONITOR"
+
+	base := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	if e, err := reg.Get("support"); err == nil {
+		e.CaseTrigger = model.CaseTriggerMention
+	}
+	slackMock := &agentTestSlackService{}
+	repo := &sessionLookupFailureRepo{Repository: base, err: errors.New("session backend unavailable")}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	var llmInvoked atomic.Bool
+	probe := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			llmInvoked.Store(true)
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+					return nil, errors.New("planner generate not scripted in dispatch test")
+				},
+			}, nil
+		},
+	}
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          probe,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	uc := usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock)
+
+	threadTS := "1700000100.000001"
+	ev := &slackevents.EventsAPIEvent{
+		Type: slackevents.CallbackEvent,
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: string(slackevents.AppMention),
+			Data: &slackevents.AppMentionEvent{
+				Type:            "app_mention",
+				User:            "U-ASKER",
+				Text:            "<@UBOT001> please make this a case",
+				TimeStamp:       "1700000100.000002",
+				ThreadTimeStamp: threadTS,
+				Channel:         channel,
+				EventTimeStamp:  "1700000100.000002",
+			},
+		},
+		TeamID: "T1",
+	}
+	gt.NoError(t, uc.HandleSlackEvent(ctx, ev)).Required()
+	async.Wait()
+
+	gt.Value(t, llmInvoked.Load()).Equal(false)
+
+	c, err := base.Case().GetBySlackThread(ctx, "support", channel, threadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).Nil()
 }
 
 func TestSlackUseCases_HandleSlackMessage(t *testing.T) {

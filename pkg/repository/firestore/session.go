@@ -74,6 +74,64 @@ func (r *sessionRepository) Put(ctx context.Context, s *model.Session) error {
 	return nil
 }
 
+func (r *sessionRepository) Claim(ctx context.Context, channelID, threadTS string, newSessionFn func() *model.Session) (*model.Session, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, goerr.New("channelID and threadTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	if newSessionFn == nil {
+		return nil, goerr.New("newSessionFn is required")
+	}
+
+	doc := r.docRef(channelID, threadTS)
+	var claimed *model.Session
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(doc)
+		if err != nil && status.Code(err) != codes.NotFound {
+			return goerr.Wrap(err, "tx get session")
+		}
+		if err == nil {
+			// Already claimed: return it untouched so the first claimer's
+			// decision about what owns this thread stands.
+			var cur model.Session
+			if err := snap.DataTo(&cur); err != nil {
+				return goerr.Wrap(err, "decode session")
+			}
+			claimed = &cur
+			return nil
+		}
+
+		fresh := newSessionFn()
+		if fresh == nil {
+			return goerr.New("newSessionFn returned nil")
+		}
+		fresh.ChannelID = channelID
+		fresh.ThreadTS = threadTS
+		now := r.now()
+		if fresh.CreatedAt.IsZero() {
+			fresh.CreatedAt = now
+		}
+		fresh.UpdatedAt = now
+		if err := fresh.Validate(); err != nil {
+			return goerr.Wrap(err, "session validation failed before claim")
+		}
+		if err := tx.Create(doc, fresh); err != nil {
+			return goerr.Wrap(err, "tx create session")
+		}
+		claimed = fresh
+		return nil
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "claim session",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	return claimed, nil
+}
+
 func (r *sessionRepository) AcquireTurnLock(
 	ctx context.Context,
 	channelID, threadTS, triggerTS, ownerID string,

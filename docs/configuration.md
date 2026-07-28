@@ -480,7 +480,7 @@ channel_prefix = "risk"
 | `trigger` | string | No | `instant` | Thread mode only. What starts a Case: `instant` (every channel-root post) or `mention` (only an @mention of the bot — at the channel root or inside a thread that has no Case yet). Ignored in channel mode (startup warning). See [Case trigger](#case-trigger-thread-mode). |
 | `accept_bot` | bool | No | `false` | Thread mode only. When `true`, **bot-authored** events also start a Case (a channel-root post in `instant` mode, an @mention in `mention` mode) — e.g. an intake-form app's relayed request. When `false`, only human-authored events start a Case, so the channel is not flooded with a Case per bot notification. |
 | `reaction` | string | No | — | Thread mode only. Emoji name (with or without surrounding colons, e.g. `incident` or `:incident:`) that starts a Case when added to a message. Must be **unique across workspaces**. Setting it in channel mode is a config error. Requires the `reactions:read` scope and the `reaction_added` event subscription; the bot must be a member of any channel where the emoji is used. See [Reaction-triggered case creation](slack.md#reaction-triggered-case-creation). |
-| `workspace_channel` | string | No | — | **Channel mode only.** A workspace-level shared channel ID (e.g. `C0123456789`) where the cross-case **workspace agent** runs. Parallels `channel` (the thread-mode monitored channel) but is a distinct role. Must be **unique across workspaces** (and must not collide with any workspace's monitored `channel`). Setting it in thread mode is a config error. The bot must be a member. See [Workspace channel & agent](#workspace-channel--agent-channel-mode). |
+| `workspace_channel` | string | No | — | **Channel mode only.** A workspace-level shared channel ID (e.g. `C0123456789`) where the cross-case **workspace agent** runs. Parallels `channel` (the thread-mode monitored channel) but is a distinct role. Must be **unique across workspaces** (and must not collide with any workspace's monitored `channel`). Setting it in thread mode is a config error — there the monitored channel already hosts the agent. The bot must be a member. See [Workspace agent](#workspace-agent). |
 
 When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 
@@ -494,14 +494,16 @@ to the `message.channels` (and `message.groups` for private channels) events. A
 [Case Section](#case-section-thread-mode). See also
 [Slack Integration → Thread mode](slack.md#thread-mode-monitored-channel).
 
-### Workspace channel & agent (channel mode)
+### Workspace agent
 
-In channel mode each Case lives in its own dedicated channel. A **workspace
-channel** is an optional, separate, workspace-level channel that is *not* bound
-to any single Case. When the bot is @mentioned there, a **workspace agent** runs
-that can read across, and act on, **every Case the mentioning user can access** —
-it can answer questions, create a Case, or add an Action to the right existing
-Case, all from one place. Each mention thread is one continuing conversation.
+The **workspace agent** is *not* bound to any single Case: when the bot is
+@mentioned it can read across, and act on, **every Case the mentioning user can
+access** — answer questions, create a Case, update or move an existing one, all
+from one place. Each mention thread is one continuing conversation.
+
+Where it runs depends on the case mode.
+
+**Channel mode** — in a separate, optional workspace-level channel:
 
 ```toml
 [slack]
@@ -514,14 +516,33 @@ prompt = "This workspace tracks security risks. Prefer concise Japanese replies.
 # prompt_file = "prompts/ws_agent.md"   # or load from a file (relative to this config)
 ```
 
+**Thread mode** — in the monitored channel itself, on a channel-root @mention. No
+`workspace_channel` is involved (setting one in thread mode is a config error):
+
+```toml
+[slack]
+mode = "thread"
+channel = "C_CASES"     # the monitored channel; a root @mention here runs the agent
+trigger = "mention"
+
+[slack.workspace_agent]
+prompt = "Prefer concise Japanese replies."
+```
+
 - `workspace_channel` is **channel mode only** and must be **unique** across all
   workspaces (it must not equal another workspace's `workspace_channel` or
-  monitored `channel`). Omit it to leave the feature dormant.
-- `[slack.workspace_agent]` configures the agent that runs in that channel.
+  monitored `channel`). Omit it to leave the channel-mode agent dormant.
+- `[slack.workspace_agent]` configures the agent and is valid in **both** modes.
   `prompt` / `prompt_file` are optional and **mutually exclusive** (both set is a
   config error); `prompt_file` is resolved relative to the config file's
-  directory and behaves like a Job `prompt_file`. The section requires
-  `workspace_channel` to be set.
+  directory and behaves like a Job `prompt_file`. In channel mode the section
+  requires `workspace_channel`; in thread mode it stands alone.
+- **Thread mode differences:** a thread-mode workspace has no Actions, so the
+  agent gets no Action tools, and it finishes a Case by moving it to a closed
+  board status (`case__update_case_status`) rather than with a separate close
+  tool. In thread mode the agent runs on a channel-root mention **instead of**
+  starting a Case there; Cases come from an @mention inside a thread. See
+  [Slack Integration → Thread mode](slack.md#thread-mode-monitored-channel).
 - **Write safety:** the workspace agent has broad, cross-case write access, so it
   is held to a strict guardrail — it **never** creates/updates/closes/reassigns
   anything unless your message explicitly asks for that specific change; by
@@ -529,7 +550,9 @@ prompt = "This workspace tracks security risks. Prefer concise Japanese replies.
   **cannot relax** this guardrail.
 - **Access control:** the agent acts with the **mentioning user's** permissions —
   it can only read or change Cases that user is allowed to access, so private
-  Cases stay invisible to non-members.
+  Cases stay invisible to non-members. For the same reason it runs only for a
+  mention authored by a Slack user; an app-authored mention (`accept_bot`) has no
+  identity to act on behalf of and never reaches the agent.
 
 ### Auto-Invite (`[slack.invite]`)
 

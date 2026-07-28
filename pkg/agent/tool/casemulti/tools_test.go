@@ -49,6 +49,15 @@ type fakeCaseUC struct {
 	closeCalls []int64
 	closeResp  *model.Case
 	closeErr   error
+
+	statusCalls []updateStatusCall
+	statusResp  *model.Case
+	statusErr   error
+}
+
+type updateStatusCall struct {
+	id          int64
+	boardStatus string
 }
 
 func (f *fakeCaseUC) ListCases(_ context.Context, _ string, status *types.CaseStatus) ([]*model.Case, error) {
@@ -92,6 +101,14 @@ func (f *fakeCaseUC) CloseCase(_ context.Context, _ string, id int64) (*model.Ca
 		return nil, f.closeErr
 	}
 	return f.closeResp, nil
+}
+
+func (f *fakeCaseUC) UpdateCaseStatus(_ context.Context, _ string, id int64, boardStatus string) (*model.Case, error) {
+	f.statusCalls = append(f.statusCalls, updateStatusCall{id: id, boardStatus: boardStatus})
+	if f.statusErr != nil {
+		return nil, f.statusErr
+	}
+	return f.statusResp, nil
 }
 
 type createActionCall struct {
@@ -215,6 +232,19 @@ func testSchema() *config.FieldSchema {
 	}
 }
 
+// testStatusSet is the board status set a thread-mode workspace carries, with
+// "done" configured as the closed status.
+func testStatusSet(t *testing.T) *model.ActionStatusSet {
+	t.Helper()
+	set, err := model.NewActionStatusSet("todo", []string{"done"}, []model.ActionStatusDefinition{
+		{ID: "todo", Name: "To Do"},
+		{ID: "doing", Name: "Doing"},
+		{ID: "done", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	return set
+}
+
 // ---------------------------------------------------------------------------
 // New
 // ---------------------------------------------------------------------------
@@ -229,6 +259,28 @@ func TestNew_CaseOnly(t *testing.T) {
 	// list_cases, get_case, create_case, update_case, close_case
 	gt.Array(t, tools).Length(5).Required()
 	gt.Value(t, toolByName(t, tools, "case__list_actions")).Nil()
+}
+
+// Exactly one "mark done" tool is built, chosen by StatusSet. Offering both
+// would show the model two redundant ways to finish a case, and in thread mode
+// case__close_case would fail outright (CloseCase rejects thread-bound cases).
+func TestNew_MarkDoneToolIsModeExclusive(t *testing.T) {
+	t.Run("NoStatusSetGivesCloseCase", func(t *testing.T) {
+		tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}})
+		gt.Value(t, toolByName(t, tools, "case__close_case")).NotNil()
+		gt.Value(t, toolByName(t, tools, "case__update_case_status")).Nil()
+	})
+
+	t.Run("StatusSetGivesUpdateCaseStatus", func(t *testing.T) {
+		tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}, StatusSet: testStatusSet(t)})
+		gt.Array(t, tools).Length(5).Required()
+		gt.Value(t, toolByName(t, tools, "case__update_case_status")).NotNil()
+		gt.Value(t, toolByName(t, tools, "case__close_case")).Nil()
+		// The other case-level tools are unaffected by the swap.
+		for _, name := range []string{"case__list_cases", "case__get_case", "case__create_case", "case__update_case"} {
+			gt.Value(t, toolByName(t, tools, name)).NotNil()
+		}
+	})
 }
 
 func TestNew_CaseAndAction(t *testing.T) {
@@ -453,6 +505,84 @@ func TestCloseCaseTool(t *testing.T) {
 	gt.Array(t, uc.closeCalls).Length(1).Required()
 	gt.Number(t, uc.closeCalls[0]).Equal(int64(9))
 	gt.String(t, out["status"].(string)).Equal(types.CaseStatusClosed.String())
+}
+
+// ---------------------------------------------------------------------------
+// case__update_case_status
+// ---------------------------------------------------------------------------
+
+func newStatusTool(t *testing.T, uc *fakeCaseUC) gollem.Tool {
+	t.Helper()
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc, StatusSet: testStatusSet(t)})
+	tl := toolByName(t, tools, "case__update_case_status")
+	gt.Value(t, tl).NotNil().Required()
+	return tl
+}
+
+func TestUpdateCaseStatusTool_Spec(t *testing.T) {
+	spec := newStatusTool(t, &fakeCaseUC{}).Spec()
+	gt.String(t, spec.Name).Equal("case__update_case_status")
+
+	caseParam := spec.Parameters["case_id"]
+	gt.Value(t, caseParam).NotNil().Required()
+	gt.Bool(t, caseParam.Required).True()
+	gt.Value(t, caseParam.Type).Equal(gollem.TypeInteger)
+
+	statusParam := spec.Parameters["status"]
+	gt.Value(t, statusParam).NotNil().Required()
+	gt.Bool(t, statusParam.Required).True()
+	gt.Value(t, statusParam.Type).Equal(gollem.TypeString)
+	// The enum must mirror the workspace's configured board statuses, or the
+	// model can only guess at valid ids.
+	gt.Array(t, statusParam.Enum).Equal([]string{"todo", "doing", "done"})
+}
+
+func TestUpdateCaseStatusTool(t *testing.T) {
+	uc := &fakeCaseUC{statusResp: &model.Case{ID: 42, Status: types.CaseStatusClosed, BoardStatus: "done"}}
+	tl := newStatusTool(t, uc)
+
+	out, err := tl.Run(context.Background(), map[string]any{"case_id": int64(42), "status": "done"})
+	gt.NoError(t, err).Required()
+	gt.Array(t, uc.statusCalls).Length(1).Required()
+	gt.Number(t, uc.statusCalls[0].id).Equal(int64(42))
+	gt.String(t, uc.statusCalls[0].boardStatus).Equal("done")
+	gt.Number(t, out["id"].(int64)).Equal(int64(42))
+	gt.String(t, out["status"].(string)).Equal(types.CaseStatusClosed.String())
+	gt.String(t, out["board_status"].(string)).Equal("done")
+}
+
+func TestUpdateCaseStatusTool_InvalidArguments(t *testing.T) {
+	// Each malformed call must fail before reaching the usecase: a partially
+	// understood status change is worse than a tool error the model can retry.
+	testCases := map[string]map[string]any{
+		"MissingCaseID":    {"status": "done"},
+		"MissingStatus":    {"case_id": int64(42)},
+		"NilStatus":        {"case_id": int64(42), "status": nil},
+		"EmptyStatus":      {"case_id": int64(42), "status": ""},
+		"NonStringStatus":  {"case_id": int64(42), "status": 7},
+		"NonNumericCaseID": {"case_id": "forty-two", "status": "done"},
+	}
+	for name, args := range testCases {
+		t.Run(name, func(t *testing.T) {
+			uc := &fakeCaseUC{statusResp: &model.Case{ID: 42}}
+			tl := newStatusTool(t, uc)
+			_, err := tl.Run(context.Background(), args)
+			gt.Error(t, err)
+			gt.Array(t, uc.statusCalls).Length(0)
+		})
+	}
+}
+
+// A usecase error (an unknown board status id, an access-denied case) must
+// reach the model as a tool error rather than being swallowed into a success.
+func TestUpdateCaseStatusTool_PropagatesUseCaseError(t *testing.T) {
+	sentinel := goerr.New("invalid board status id")
+	uc := &fakeCaseUC{statusErr: sentinel}
+	tl := newStatusTool(t, uc)
+
+	_, err := tl.Run(context.Background(), map[string]any{"case_id": int64(42), "status": "todo"})
+	gt.Error(t, err).Is(sentinel)
+	gt.Array(t, uc.statusCalls).Length(1)
 }
 
 // ---------------------------------------------------------------------------

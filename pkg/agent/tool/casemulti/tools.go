@@ -103,8 +103,12 @@ type CaseUsecase interface {
 	CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error)
 	// UpdateCase is invoked by case__update_case.
 	UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error)
-	// CloseCase is invoked by case__close_case.
+	// CloseCase is invoked by case__close_case (channel-mode workspaces only).
 	CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
+	// UpdateCaseStatus is invoked by case__update_case_status (thread-mode
+	// workspaces only). Board-status validation and the private-case access
+	// check both live in the usecase implementation.
+	UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error)
 }
 
 // CaseUpdate mirrors the partial-update shape of usecase.CaseUpdate (compare
@@ -180,10 +184,26 @@ type Deps struct {
 	// `fields` parameter coercion. nil disables custom-field arguments (they
 	// then error out at runtime, matching casewriter's Deps.Schema contract).
 	Schema *config.FieldSchema
+	// StatusSet, when non-nil, swaps case__close_case for
+	// case__update_case_status and lets its Spec enumerate the valid board
+	// status ids. Exactly one "mark done" tool is built either way, mirroring
+	// casewriter.statusTools — offering both would show the model two redundant
+	// ways to finish a case.
+	//
+	// The host decides, not this package: a thread-mode workspace passes its
+	// board status set (CloseCase rejects thread-bound cases outright), while a
+	// channel-mode host leaves it nil. Inferring it from WorkspaceEntry here
+	// would misfire, since a channel-mode config carrying an unused
+	// [case.status] section still resolves a non-nil status set.
+	StatusSet *model.ActionStatusSet
 }
 
 // New returns the cross-case tools. Returns nil (empty) when CaseUC == nil so
 // hosts can wire it unconditionally and degrade safely.
+//
+// Exactly one "mark done" tool is built: case__update_case_status when a board
+// status set is configured (thread mode), otherwise case__close_case (channel
+// mode). See Deps.StatusSet.
 func New(deps Deps) []gollem.Tool {
 	if deps.CaseUC == nil {
 		return nil
@@ -194,7 +214,12 @@ func New(deps Deps) []gollem.Tool {
 		&getCaseTool{deps: deps},
 		&createCaseTool{deps: deps},
 		&updateCaseTool{deps: deps},
-		&closeCaseTool{deps: deps},
+	}
+
+	if deps.StatusSet != nil {
+		tools = append(tools, &updateCaseStatusTool{deps: deps})
+	} else {
+		tools = append(tools, &closeCaseTool{deps: deps})
 	}
 
 	if deps.ActionUC != nil {
@@ -749,6 +774,76 @@ func (t *closeCaseTool) Run(ctx context.Context, args map[string]any) (map[strin
 	return map[string]any{
 		"id":     updated.ID,
 		"status": updated.Status.String(),
+	}, nil
+}
+
+// updateCaseStatusTool moves a thread-mode case across the workspace's board
+// statuses. It is the thread-mode counterpart of closeCaseTool (see New):
+// CaseUseCase.CloseCase rejects a thread-bound case outright, because closing
+// one means transitioning to a status configured as closed so BoardStatus and
+// the lifecycle Status stay in sync.
+type updateCaseStatusTool struct {
+	deps Deps
+}
+
+func (t *updateCaseStatusTool) Spec() gollem.ToolSpec {
+	var statusIDs []string
+	if t.deps.StatusSet != nil {
+		statusIDs = t.deps.StatusSet.IDs()
+	}
+	return gollem.ToolSpec{
+		Name: "case__update_case_status",
+		Description: "Move a case to a different board status (workflow column). " +
+			"Transitioning to a status configured as closed will close the case, " +
+			"so only do this when the work is genuinely resolved. Choose one of the " +
+			"status ids listed below.",
+		Parameters: map[string]*gollem.Parameter{
+			"case_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the case to move.",
+				Required:    true,
+			},
+			"status": {
+				Type:        gollem.TypeString,
+				Description: "Target board status id.",
+				Enum:        statusIDs,
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *updateCaseStatusTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	caseID, err := tool.ExtractInt64(args, "case_id")
+	if err != nil {
+		return nil, err
+	}
+	v, ok := args["status"]
+	if !ok || v == nil {
+		return nil, goerr.New("status is required")
+	}
+	status, ok := v.(string)
+	if !ok {
+		return nil, goerr.New("status must be a string", goerr.V("type", fmt.Sprintf("%T", v)))
+	}
+	if status == "" {
+		return nil, goerr.New("status must not be empty")
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Updating status of case #%d...", caseID))
+
+	updated, err := t.deps.CaseUC.UpdateCaseStatus(ctx, t.deps.WorkspaceID, caseID, status)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update case status",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", caseID),
+			goerr.V("status", status))
+	}
+
+	return map[string]any{
+		"id":           updated.ID,
+		"status":       updated.Status.String(),
+		"board_status": updated.BoardStatus,
 	}, nil
 }
 

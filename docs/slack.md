@@ -410,10 +410,17 @@ the single channel named in `[slack] channel` and turns conversations into Cases
   predating the bot), @mentioning the bot in that thread starts a Case seeded by
   the whole thread. In `mention` mode it is the primary in-thread trigger. (A
   bot-authored mention is gated by `accept_bot`, same as everywhere else.)
-- **`mention` — `@mention` → Case.** A Case is started only when the bot is
-  @mentioned, either at the channel root or inside a thread that has no Case yet.
-  Plain posts are left alone. The mention text (and, in a thread, the surrounding
-  conversation) seeds the same initialization agent as `instant`.
+- **`mention` — `@mention` in a thread → Case.** A Case is started only when the
+  bot is @mentioned inside a thread that has no Case yet. Plain posts are left
+  alone. The mention text and the surrounding conversation seed the same
+  initialization agent as `instant`.
+- **`mention` — `@mention` at the channel root → workspace agent, not a Case.**
+  Mentioning the bot at the top level of the monitored channel runs the
+  [workspace agent](#workspace-agent) and it replies in that mention's thread.
+  Mentioning the bot again inside that thread continues the same conversation —
+  it never starts a Case. (A bot-authored root mention is the exception: with
+  `accept_bot = true` it still files a Case, because an app has no Slack user
+  identity for the agent to act on behalf of.)
 - **Thread reply → recorded on the Case.** Replies in the thread are saved to the
   Case's message history.
 - **`@mention` in a thread that already has a Case → investigation agent.**
@@ -437,17 +444,34 @@ channel mode and post their output into the Case thread.
 3. Invite the bot to the monitored channel (`/invite @your-bot-name`).
 4. Set `[slack] channel` to the channel **ID** (e.g. `C0123456789`), not the name.
 
-### Workspace channel (channel mode)
+### Workspace agent
 
-A **channel-mode** workspace can designate an optional workspace-level channel
-via `[slack] workspace_channel`. It is not bound to any single Case; @mentioning
-the bot there runs the **workspace agent**, which reads across and acts on every
-Case the mentioning user can access (answer, create a Case, add an Action to the
-right Case). The bot must be a member of the channel, and app_mention events must
-be delivered (as for any mention). No new OAuth scopes are required beyond the
-existing mention / `chat:write` setup. Configure it — including the optional
+The **workspace agent** is not bound to any single Case: it reads across and acts
+on every Case the mentioning user can access (answer a question, create a Case,
+update or move an existing one). Each mention thread is one continuing
+conversation. Where it runs depends on the mode:
+
+- **Channel mode** — in the optional workspace-level channel named by
+  `[slack] workspace_channel`. @mentioning the bot there starts a turn.
+- **Thread mode** (`trigger = "mention"`) — in the monitored channel itself. A
+  channel-root @mention starts a turn and the agent replies in that mention's
+  thread; further mentions in that thread continue it. No `workspace_channel` is
+  needed (setting one in thread mode is a config error).
+
+The agent acts with the **mentioning user's** permissions, so it can only see and
+change Cases that user may access. It therefore runs only for a mention authored
+by a Slack user — an app-authored mention has no identity to act on behalf of.
+
+Available tools differ by mode: a thread-mode workspace has no Actions, so the
+agent gets no Action tools, and it finishes a Case by moving it to a closed board
+status rather than with a separate close tool. See
+[Agent tools → Workspace agent cross-case tools](agent_tools.md#workspace-agent-cross-case-tools-casemulti).
+
+The bot must be a member of the channel, and app_mention events must be delivered
+(as for any mention). No new OAuth scopes are required beyond the existing
+mention / `chat:write` setup. Configure it — including the optional
 `[slack.workspace_agent]` prompt and its write-safety guardrail — under
-[Configuration → Workspace channel & agent](configuration.md#workspace-channel--agent-channel-mode).
+[Configuration → Workspace agent](configuration.md#workspace-agent).
 
 ### Reaction-triggered case creation
 

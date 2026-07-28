@@ -2061,7 +2061,7 @@ initial = "TRIAGE"
 		gt.Bool(t, errors.Is(err, config.ErrWorkspaceChannelRequiresChannelMode)).True()
 	})
 
-	t.Run("workspace_agent without workspace_channel is rejected", func(t *testing.T) {
+	t.Run("workspace_agent without workspace_channel is rejected in channel mode", func(t *testing.T) {
 		_, err := writeAndLoad(t, `
 [workspace]
 id = "risk"
@@ -2071,6 +2071,34 @@ prompt = "Summarize open cases."
 `)
 		gt.Error(t, err).Required()
 		gt.Bool(t, errors.Is(err, config.ErrMissingWorkspaceChannel)).True()
+	})
+
+	// In thread mode the monitored channel hosts the workspace agent (a
+	// channel-root mention runs it), so the section needs no workspace_channel.
+	t.Run("workspace_agent without workspace_channel is accepted in thread mode", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+trigger = "mention"
+
+[slack.workspace_agent]
+prompt = "Summarize open cases."
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].WorkspaceAgentPrompt).Equal("Summarize open cases.")
+		gt.Value(t, configs[0].WorkspaceChannelID).Equal("")
+		gt.Value(t, configs[0].SlackMonitorChannel).Equal("C0123ABC")
 	})
 
 	t.Run("workspace_channel as a channel name (not ID) is rejected", func(t *testing.T) {
