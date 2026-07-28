@@ -912,7 +912,8 @@ Channel-side notifications then fall back to the legacy
 ## Bulk import from YAML
 
 Hecatoncheires lets a workspace member bulk-create Cases (and the Actions
-underneath them) from a YAML file.  Imported Cases are saved in **DRAFT**
+underneath them) from YAML — either a file or YAML pasted straight into
+the page.  Imported Cases are saved in **DRAFT**
 state — no Slack channel is created, no notifications fire — so a large
 import never trips Slack rate limits or fills up channel lists.  Each
 DRAFT can later be promoted to OPEN through the normal SubmitDraft path
@@ -921,9 +922,18 @@ DRAFT can later be promoted to OPEN through the normal SubmitDraft path
 ### Workflow
 
 1. **CaseList → [Import]** opens `/ws/:workspaceId/imports/new`.
-2. Drop a `.yaml` / `.yml` file (or click to pick one).  The file is
-   parsed and validated server-side; an `ImportSession` is persisted in
-   Firestore and the page redirects to `/ws/:workspaceId/imports/:id`.
+2. Hand the page the YAML in whichever way is at hand — the **File** /
+   **Paste** switch at the top of the page selects the input surface:
+   - **File** — drop a `.yaml` / `.yml` file, or click to pick one.
+   - **Paste** — paste the YAML into the text box and press
+     **Validate YAML**.  Pasting anywhere on the page (⌘V / Ctrl+V)
+     also switches to this mode and fills the box; nothing is submitted
+     until you press the button.  A pasted import carries no file name,
+     so the session page titles it `(no filename)`.
+
+   Either way the content is parsed and validated server-side; an
+   `ImportSession` is persisted in Firestore and the page redirects to
+   `/ws/:workspaceId/imports/:id`.
 3. Review the **Cases to create** preview.  Issues (missing titles,
    invalid field values, unknown users …) are shown inline with the
    exact YAML path that triggered them.
