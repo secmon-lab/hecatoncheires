@@ -18,11 +18,19 @@ export class ImportPage extends BasePage {
   private readonly statusBadge: Locator;
   private readonly schemaToggle: Locator;
   private readonly copySchemaButton: Locator;
+  private readonly pasteModeButton: Locator;
+  private readonly fileModeButton: Locator;
+  private readonly pasteTextarea: Locator;
+  private readonly pasteSubmitButton: Locator;
 
   constructor(page: Page) {
     super(page);
     this.fileInput = page.locator('input[type="file"]');
     this.dropzone = page.locator('[role="button"][aria-label]').first();
+    this.pasteModeButton = page.getByTestId('import-mode-paste');
+    this.fileModeButton = page.getByTestId('import-mode-file');
+    this.pasteTextarea = page.getByTestId('import-paste-textarea');
+    this.pasteSubmitButton = page.getByTestId('import-paste-submit');
     // Match the accessible name in both locales so cross-locale
     // automation stays green regardless of the configured default lang.
     // Status badges are uppercase ASCII so they remain locale-stable.
@@ -58,6 +66,70 @@ export class ImportPage extends BasePage {
       mimeType: 'application/yaml',
       buffer: Buffer.from(yamlContent, 'utf-8'),
     });
+    return await this.waitForSessionId();
+  }
+
+  /** Switch the New Import page to the paste input surface. */
+  async switchToPasteMode(): Promise<void> {
+    await this.pasteModeButton.click();
+    await this.pasteTextarea.waitFor({ state: 'visible' });
+  }
+
+  /** Switch back to the file dropzone. */
+  async switchToFileMode(): Promise<void> {
+    await this.fileModeButton.click();
+    await this.dropzone.waitFor({ state: 'visible' });
+  }
+
+  /**
+   * Type YAML into the paste box and submit it. Returns the import
+   * session ID extracted from the URL after redirect.
+   */
+  async pasteYaml(yamlContent: string): Promise<string> {
+    await this.switchToPasteMode();
+    await this.pasteTextarea.fill(yamlContent);
+    await this.pasteSubmitButton.click();
+    return await this.waitForSessionId();
+  }
+
+  /** True when the paste box holds no content (submit stays disabled). */
+  async isPasteSubmitEnabled(): Promise<boolean> {
+    return await this.pasteSubmitButton.isEnabled();
+  }
+
+  /** Read the current content of the paste box. */
+  async readPasteBox(): Promise<string> {
+    return await this.pasteTextarea.inputValue();
+  }
+
+  /** Empty the paste box (submit must go back to disabled). */
+  async clearPasteBox(): Promise<void> {
+    await this.pasteTextarea.fill('');
+  }
+
+  /**
+   * Page-level paste: put the YAML on the real clipboard and press
+   * ⌘V / Ctrl+V with no input focused, the way a user does it. Driving
+   * the actual key press (rather than dispatching a synthetic event) is
+   * what verifies the document-level listener receives the paste and
+   * that the focus check lets it through.
+   */
+  async pasteOnPage(yamlContent: string): Promise<void> {
+    await this.page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await this.page.evaluate(
+      (text) => navigator.clipboard.writeText(text),
+      yamlContent,
+    );
+    // Nothing must hold focus, or the paste lands in that element instead.
+    await this.page.evaluate(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    });
+    await this.page.keyboard.press('ControlOrMeta+V');
+    await this.pasteTextarea.waitFor({ state: 'visible' });
+  }
+
+  private async waitForSessionId(): Promise<string> {
     // The detail URL is /imports/<uuid>. We must match only the
     // session-id form here — a bare /imports/[^/]+ regex also matches
     // the source /imports/new page, which is what Playwright sees

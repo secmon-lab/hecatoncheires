@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -14,12 +14,18 @@ import {
 
 type DropzoneState = 'idle' | 'dragOver' | 'uploading'
 
+/** Which input surface is shown: the file dropzone or the paste textarea. */
+type InputMode = 'file' | 'paste'
+
 export default function ImportNew() {
   const { currentWorkspace } = useWorkspace()
   const navigate = useNavigate()
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [state, setState] = useState<DropzoneState>('idle')
+  const [mode, setMode] = useState<InputMode>('file')
+  const [pastedText, setPastedText] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [createImport] = useMutation(CREATE_CASE_IMPORT)
   const [schemaCopied, setSchemaCopied] = useState(false)
@@ -41,44 +47,83 @@ export default function ImportNew() {
   const jsonSchema = useMemo(() => buildImportJsonSchema(fields), [fields])
   const yamlExample = useMemo(() => buildYamlExample(fields), [fields])
 
-  const uploadFile = useCallback(
-    async (file: File) => {
-      if (!currentWorkspace) return
-      setState('uploading')
-      setErrorMessage(null)
+  // Claimed for the whole submit, from the first byte read off the File
+  // to the navigate. A ref rather than `state` because reading a File is
+  // async: between the drop and the `uploading` re-render, a second drop
+  // or a page-level paste would otherwise start a competing
+  // createCaseImport and the page would land on whichever finished first.
+  const submittingRef = useRef(false)
+
+  const beginSubmit = useCallback(() => {
+    if (submittingRef.current || !currentWorkspace) return false
+    submittingRef.current = true
+    setState('uploading')
+    setErrorMessage(null)
+    return true
+  }, [currentWorkspace])
+
+  const failSubmit = useCallback((e: unknown) => {
+    submittingRef.current = false
+    setErrorMessage(e instanceof Error ? e.message : String(e))
+    setState('idle')
+  }, [])
+
+  // Both entry points (file and paste) funnel through here, with the
+  // submit already claimed by beginSubmit. The mutation input carries
+  // `originalFileName` only when the content really came from a file —
+  // for pasted YAML the field is omitted rather than sent as null (see
+  // .claude/rules/graphql-schema.md on optional inputs).
+  const submitContent = useCallback(
+    async (content: string, originalFileName?: string) => {
+      const workspaceId = currentWorkspace?.id
+      if (!workspaceId) return
       try {
-        const content = await file.text()
         const res = await createImport({
           variables: {
-            workspaceId: currentWorkspace.id,
-            input: {
-              content,
-              originalFileName: file.name,
-            },
+            workspaceId,
+            input: originalFileName ? { content, originalFileName } : { content },
           },
         })
         const id = res.data?.createCaseImport?.id as string | undefined
         if (!id) {
           throw new Error('createCaseImport returned no id')
         }
-        navigate(`/ws/${currentWorkspace.id}/imports/${id}`)
+        navigate(`/ws/${workspaceId}/imports/${id}`)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        setErrorMessage(msg)
-        setState('idle')
+        failSubmit(e)
       }
     },
-    [createImport, currentWorkspace, navigate],
+    [createImport, currentWorkspace, failSubmit, navigate],
   )
 
   const handleFiles = useCallback(
-    (files: FileList | null) => {
+    (files: FileList | File[] | null) => {
       if (!files || files.length === 0) return
+      if (!beginSubmit()) return
       const f = files[0]
-      void uploadFile(f)
+      void (async () => {
+        try {
+          const content = await f.text()
+          await submitContent(content, f.name)
+        } catch (e) {
+          // Reading the File itself can fail (permissions, removed
+          // media); surface it the same way a failed upload is surfaced.
+          failSubmit(e)
+        }
+      })()
     },
-    [uploadFile],
+    [beginSubmit, failSubmit, submitContent],
   )
+
+  // The pasted text is submitted verbatim: trimming would strip trailing
+  // newlines that a `|+` block scalar keeps as part of its value, so the
+  // same YAML would import differently depending on whether it arrived
+  // as a file or as a paste. Only the empty check ignores whitespace.
+  const submitPastedText = useCallback(() => {
+    if (pastedText.trim().length === 0) return
+    if (!beginSubmit()) return
+    void submitContent(pastedText)
+  }, [beginSubmit, pastedText, submitContent])
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -95,6 +140,45 @@ export default function ImportNew() {
     if (state === 'uploading') return
     setState('idle')
   }
+
+  // Paste anywhere on the page (⌘V / Ctrl+V) lands in the paste box.
+  // The listener sits on `document` because a page-level paste targets
+  // <body>, which is outside this component's React tree — an onPaste
+  // prop on the wrapper would never see it. Pastes that already have a
+  // home (the textarea, any input) are left alone, and nothing is
+  // submitted automatically: the user still confirms.
+  useEffect(() => {
+    const onDocumentPaste = (e: ClipboardEvent) => {
+      if (submittingRef.current) return
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, [contenteditable="true"]')
+      ) {
+        return
+      }
+      const files = e.clipboardData?.files
+      if (files && files.length > 0) {
+        e.preventDefault()
+        handleFiles(files)
+        return
+      }
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      if (!text.trim()) return
+      e.preventDefault()
+      setMode('paste')
+      setPastedText(text)
+      setErrorMessage(null)
+    }
+    document.addEventListener('paste', onDocumentPaste)
+    return () => document.removeEventListener('paste', onDocumentPaste)
+  }, [handleFiles])
+
+  // Focus the textarea once it is mounted, so a page-level paste (or a
+  // click on the Paste tab) leaves the caret where editing continues.
+  useEffect(() => {
+    if (mode === 'paste') textareaRef.current?.focus()
+  }, [mode])
 
   const copySchema = useCallback(async () => {
     try {
@@ -161,74 +245,145 @@ export default function ImportNew() {
         </p>
       </div>
 
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => state !== 'uploading' && fileInputRef.current?.click()}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        aria-label={t('importDropPrompt')}
-        style={{
-          border: `2px dashed ${border}`,
-          background,
-          borderRadius: 12,
-          padding: '48px 24px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 14,
-          textAlign: 'center',
-          transition: 'background .15s, border-color .15s',
-          cursor: state === 'uploading' ? 'default' : 'pointer',
-        }}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".yaml,.yml"
-          style={{ display: 'none' }}
-          onChange={(e) => handleFiles(e.target.files)}
-        />
-        {/* Upload icon (round) */}
-        <span
-          aria-hidden
+      <div className="seg" style={{ marginBottom: 12 }} role="group">
+        <button
+          type="button"
+          className={mode === 'file' ? 'on' : ''}
+          aria-pressed={mode === 'file'}
+          data-testid="import-mode-file"
+          disabled={state === 'uploading'}
+          onClick={() => setMode('file')}
+        >
+          {t('importModeFile')}
+        </button>
+        <button
+          type="button"
+          className={mode === 'paste' ? 'on' : ''}
+          aria-pressed={mode === 'paste'}
+          data-testid="import-mode-paste"
+          disabled={state === 'uploading'}
+          onClick={() => setMode('paste')}
+        >
+          {t('importModePaste')}
+        </button>
+      </div>
+
+      {mode === 'paste' ? (
+        <div className="col" style={{ gap: 10 }}>
+          <textarea
+            ref={textareaRef}
+            className="mono"
+            data-testid="import-paste-textarea"
+            value={pastedText}
+            onChange={(e) => setPastedText(e.target.value)}
+            placeholder={t('importPastePlaceholder')}
+            aria-label={t('importModePaste')}
+            spellCheck={false}
+            disabled={state === 'uploading'}
+            style={{
+              width: '100%',
+              minHeight: 260,
+              resize: 'vertical',
+              padding: 14,
+              borderRadius: 12,
+              border: '1px solid var(--line-strong, var(--border-default))',
+              background: 'var(--bg-paper)',
+              color: 'var(--fg, var(--text-body))',
+              fontSize: 12.5,
+              lineHeight: 1.6,
+              tabSize: 2,
+            }}
+          />
+          <div
+            className="row"
+            style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
+          >
+            <span
+              className="soft"
+              style={{ fontSize: 12.5, color: 'var(--text-muted, var(--text-body))' }}
+            >
+              {t('importPasteHint')}
+            </span>
+            <Button
+              variant="primary"
+              data-testid="import-paste-submit"
+              onClick={submitPastedText}
+              disabled={pastedText.trim().length === 0 || state === 'uploading'}
+            >
+              {state === 'uploading' ? t('importValidating') : t('importPasteSubmit')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => state !== 'uploading' && fileInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          aria-label={t('importDropPrompt')}
           style={{
-            width: 52,
-            height: 52,
-            borderRadius: 99,
-            background: 'var(--bg-elev, var(--bg-paper))',
-            border: '1px solid var(--line-strong, var(--border-default))',
-            display: 'inline-flex',
+            border: `2px dashed ${border}`,
+            background,
+            borderRadius: 12,
+            padding: '48px 24px',
+            display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            color:
-              state === 'uploading'
-                ? 'var(--color-primary, var(--accent))'
-                : 'var(--text-muted)',
-            fontSize: 24,
-            lineHeight: 1,
+            gap: 14,
+            textAlign: 'center',
+            transition: 'background .15s, border-color .15s',
+            cursor: state === 'uploading' ? 'default' : 'pointer',
           }}
         >
-          ⬆
-        </span>
-        <div style={{ fontSize: 15, fontWeight: 500 }}>
-          {state === 'uploading'
-            ? t('importValidating')
-            : state === 'dragOver'
-              ? t('importDropPromptHover')
-              : t('importDropPrompt')}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml"
+            style={{ display: 'none' }}
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+          {/* Upload icon (round) */}
+          <span
+            aria-hidden
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 99,
+              background: 'var(--bg-elev, var(--bg-paper))',
+              border: '1px solid var(--line-strong, var(--border-default))',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color:
+                state === 'uploading'
+                  ? 'var(--color-primary, var(--accent))'
+                  : 'var(--text-muted)',
+              fontSize: 24,
+              lineHeight: 1,
+            }}
+          >
+            ⬆
+          </span>
+          <div style={{ fontSize: 15, fontWeight: 500 }}>
+            {state === 'uploading'
+              ? t('importValidating')
+              : state === 'dragOver'
+                ? t('importDropPromptHover')
+                : t('importDropPrompt')}
+          </div>
+          <div
+            className="soft"
+            style={{ fontSize: 12.5, color: 'var(--text-muted, var(--text-body))' }}
+          >
+            {state === 'uploading' ? t('importDropAccepted') : t('importChooseLink')}
+            {' · '}
+            <span className="mono">.yaml</span> <span className="mono">.yml</span>
+          </div>
         </div>
-        <div
-          className="soft"
-          style={{ fontSize: 12.5, color: 'var(--text-muted, var(--text-body))' }}
-        >
-          {state === 'uploading' ? t('importDropAccepted') : t('importChooseLink')}
-          {' · '}
-          <span className="mono">.yaml</span> <span className="mono">.yml</span>
-        </div>
-      </div>
+      )}
 
       {errorMessage && (
         <div

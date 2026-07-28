@@ -15,6 +15,8 @@ import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 //   - Clicking Execute transitions the session to APPLIED.
 //   - The "Open cases list" button returns to the Case list, where the
 //     imported cases now appear under the Drafts tab.
+//   - Pasted YAML (the Paste tab, and a page-level ⌘V) reaches the same
+//     preview → execute → drafts journey as a dropped file.
 
 // NOTE: shape must match frontend/e2e/fixtures/config.test.toml — the
 // E2E workspace flags `category` as required (select), so every Case
@@ -52,6 +54,16 @@ cases:
     description: "no category → invalid"
     actions:
       - title: "should not run"
+`;
+
+// Pasted-path fixture. Titles differ from VALID_YAML so the two journeys
+// stay independent when the specs run against the same in-memory server.
+const PASTE_YAML = `version: 1
+cases:
+  - title: "__E2E_PASTE__ Clipboard incident"
+    description: "Pasted straight into the page."
+    fields:
+      category: bug
 `;
 
 test.describe('Case Import (YAML)', () => {
@@ -100,6 +112,45 @@ test.describe('Case Import (YAML)', () => {
     await caseListPage.clickStatusTab('Draft');
     expect(await caseListPage.caseExists('__E2E__ Suspicious login')).toBeTruthy();
     expect(await caseListPage.caseExists('__E2E__ Failed deployment')).toBeTruthy();
+  });
+
+  test('paste YAML → preview → execute → draft visible in Cases list', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const importPage = new ImportPage(page);
+
+    await importPage.navigateNew(TEST_WORKSPACE_ID);
+
+    // 1. A page-level paste (nothing focused) lands in the paste box and
+    //    submits nothing on its own — the user still confirms.
+    await importPage.pasteOnPage(PASTE_YAML);
+    expect(await importPage.readPasteBox()).toContain('__E2E_PASTE__ Clipboard incident');
+    await expect(page).toHaveURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/imports/new$`));
+
+    // 2. An empty paste box keeps the submit button disabled.
+    await importPage.clearPasteBox();
+    expect(await importPage.isPasteSubmitEnabled()).toBeFalsy();
+
+    // 3. Fill it again and submit → the same preview flow as a dropped file.
+    const sessionId = await importPage.pasteYaml(PASTE_YAML);
+    await expect(page).toHaveURL(
+      new RegExp(`/ws/${TEST_WORKSPACE_ID}/imports/${sessionId}$`),
+    );
+    expect(await importPage.readStatus()).toBe('PENDING');
+    // Pasted content carries no file name, so the session is titled as such.
+    await expect(
+      page.getByText(/\(no filename\)|\(ファイル名なし\)/).first(),
+    ).toBeVisible();
+    await expect(page.getByText('__E2E_PASTE__ Clipboard incident').first()).toBeVisible();
+
+    // 4. Execute → APPLIED, and the draft shows up in the Cases list.
+    expect(await importPage.isExecuteEnabled()).toBeTruthy();
+    await importPage.clickExecute();
+    await importPage.waitForStatus('APPLIED');
+
+    await page.goto(`/ws/${TEST_WORKSPACE_ID}/cases`);
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickStatusTab('Draft');
+    expect(await caseListPage.caseExists('__E2E_PASTE__ Clipboard incident')).toBeTruthy();
   });
 
   test('invalid YAML keeps Execute disabled and creates no drafts', async ({ page }) => {
