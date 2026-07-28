@@ -89,6 +89,7 @@ export const msgKeys = {
 
   // Pagination
   paginationPageOf: 'paginationPageOf',
+  paginationPageSize: 'paginationPageSize',
 
   // Columns selector
   titleColumnSelector: 'titleColumnSelector',

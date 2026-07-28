@@ -1,0 +1,65 @@
+/* Case list — row links and the page-size control.
+
+   Token choice: base tokens (--line-strong / --bg-elev / --fg / --fg-muted),
+   the --sp-* spacing scale and the --t-* type scale, matching
+   Home.module.css. The semantic aliases (--border-default / --text-muted /
+   ...) resolve to invalid outside body[data-aesthetic][data-theme] and would
+   silently drop the declaration.
+
+   The cell padding comes from the --h-table-cell-pad-* variables that
+   global.css also uses for `.h-table td`: a row link has to cover the cell's
+   padding too, otherwise clicking the gap between two cells does nothing even
+   though the row visually reads as one clickable unit. */
+
+/* Title cell: a real anchor wrapping the title text, so it carries the row's
+   accessible name and keeps the title selectable/copyable. */
+.titleLink {
+  display: block;
+  margin: calc(-1 * var(--h-table-cell-pad-y)) calc(-1 * var(--h-table-cell-pad-x));
+  padding: var(--h-table-cell-pad-y) var(--h-table-cell-pad-x);
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Remaining cells: an empty anchor stretched over the cell instead of one
+   wrapping the content, so a screen reader announces a single link per row
+   rather than one per column.
+
+   The stretch is anchored to this wrapper div rather than to the <tr> or the
+   <td>: `position: relative` on table rows is undefined per CSS 2.1 and is
+   not honoured by Safari, so a row-wide overlay would collapse to the table
+   box there. */
+.cellInner {
+  position: relative;
+}
+
+.cellOverlay {
+  position: absolute;
+  inset: calc(-1 * var(--h-table-cell-pad-y)) calc(-1 * var(--h-table-cell-pad-x));
+  z-index: 1;
+}
+
+.pageSizeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-muted);
+}
+
+.pageSizeSelect {
+  height: 1.5rem;
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: var(--t-sm);
+}
+
+/* Same focus ring as `.input:focus` in global.css. */
+.pageSizeSelect:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 0.1875rem color-mix(in oklch, var(--accent) 18%, transparent);
+}

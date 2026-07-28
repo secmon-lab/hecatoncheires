@@ -32,6 +32,7 @@ import { useActionStatuses } from '../hooks/useActionStatuses'
 import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { displayName } from '../utils/user'
+import { CASE_LIST_PAGE_PARAM, CASE_LIST_STATUS_PARAM } from './CaseList'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import {
@@ -162,18 +163,24 @@ export default function CaseDetail() {
   // Thread-mode workspaces attach the configurable status set to the Case.
   const caseStatuses = useCaseStatuses(currentWorkspace?.id)
 
-  // Honour the originating case-list tab when going back. CaseList sets
-  // location.state.fromStatus when the user clicks into a row; if the
-  // detail page was opened by direct URL (e.g. Slack deep link), the
-  // state is absent and we fall back to the default Open tab.
-  const fromStatusQuery = (location.state as { fromStatus?: string } | null)?.fromStatus
+  // Honour the originating case-list tab and page when going back. CaseList
+  // sets location.state.fromStatus / fromPage when the user clicks into a
+  // row; if the detail page was opened by direct URL (e.g. Slack deep link),
+  // the state is absent and we fall back to the default Open tab, page 1.
+  const fromState = location.state as { fromStatus?: string; fromPage?: number } | null
   const ALLOWED_FROM_STATUS = ['closed', 'draft', 'all'] as const
-  const safeFromStatus = ALLOWED_FROM_STATUS.find((s) => s === fromStatusQuery)
-  const caseListUrl = currentWorkspace
-    ? safeFromStatus
-      ? `/ws/${currentWorkspace.id}/cases?status=${safeFromStatus}`
-      : `/ws/${currentWorkspace.id}/cases`
-    : '/'
+  const safeFromStatus = ALLOWED_FROM_STATUS.find((s) => s === fromState?.fromStatus)
+  // Page 1 is the implicit default and is never emitted, matching CaseList.
+  const fromPage = Number(fromState?.fromPage)
+  const safeFromPage = Number.isInteger(fromPage) && fromPage > 1 ? fromPage : null
+  const caseListUrl = useMemo(() => {
+    if (!currentWorkspace) return '/'
+    const params = new URLSearchParams()
+    if (safeFromStatus) params.set(CASE_LIST_STATUS_PARAM, safeFromStatus)
+    if (safeFromPage) params.set(CASE_LIST_PAGE_PARAM, String(safeFromPage))
+    const query = params.toString()
+    return `/ws/${currentWorkspace.id}/cases${query ? `?${query}` : ''}`
+  }, [currentWorkspace, safeFromStatus, safeFromPage])
 
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
@@ -737,6 +744,11 @@ export default function CaseDetail() {
                         return (
                           <Link
                             key={a.id}
+                            // Opening the Action modal stays on this Case, so the
+                            // list's fromStatus / fromPage must ride along —
+                            // react-router drops location.state otherwise and the
+                            // Back button would return to the default tab, page 1.
+                            state={location.state}
                             to={`/ws/${currentWorkspace!.id}/cases/${c.id}/actions/${a.id}`}
                             className="h-action-row"
                             data-testid="case-related-action"
@@ -1012,7 +1024,9 @@ export default function CaseDetail() {
       {openActionId !== null && (
         <ActionModal
           actionId={openActionId}
-          onClose={() => navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)}
+          // Closing the modal navigates back to this same Case, so carry the
+          // list's fromStatus / fromPage forward the way the opening Link does.
+          onClose={() => navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`, { state: location.state })}
         />
       )}
 
