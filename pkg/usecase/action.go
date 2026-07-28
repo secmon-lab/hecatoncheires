@@ -881,7 +881,7 @@ func renderActor(ctx context.Context, actor ActorRef) string {
 	if actor.Kind == ActorKindSlackUser && actor.ID != "" {
 		return mentionUser(actor.ID)
 	}
-	return i18n.T(ctx, i18n.MsgActionChangeActorSystem)
+	return i18n.T(ctx, i18n.MsgChangeActorSystem)
 }
 
 func mentionUser(slackUserID string) string {

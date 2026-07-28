@@ -4481,3 +4481,402 @@ func TestCaseUseCase_CreateCase_ThreadModeMonitorUnconfigured(t *testing.T) {
 	gt.NoError(t, listErr).Required()
 	gt.Array(t, cases).Length(0)
 }
+
+// threadNotifyCall captures one PostThreadMessage invocation.
+type threadNotifyCall struct {
+	channelID string
+	threadTS  string
+	blocks    []goslack.Block
+	text      string
+	broadcast bool
+}
+
+// threadNotifySlackMock records every PostThreadMessage call so the Case change
+// notification tests can assert the destination, the block shape and the body
+// rather than merely that no error was returned.
+type threadNotifySlackMock struct {
+	mockSlackService
+	postThreadErr error
+	threadCalls   []threadNotifyCall
+}
+
+func (m *threadNotifySlackMock) PostThreadMessage(_ context.Context, channelID string, threadTS string, blocks []goslack.Block, text string, opts ...slack.PostThreadOption) (string, error) {
+	m.threadCalls = append(m.threadCalls, threadNotifyCall{
+		channelID: channelID,
+		threadTS:  threadTS,
+		blocks:    blocks,
+		text:      text,
+		broadcast: slack.ApplyPostThreadOptions(opts...).Broadcast,
+	})
+	if m.postThreadErr != nil {
+		return "", m.postThreadErr
+	}
+	return "1234567890.999999", nil
+}
+
+// failUpdateCaseRepo fails every Case Update while delegating reads, so a test
+// can exercise "the write failed, therefore nothing is announced".
+type failUpdateCaseRepo struct {
+	interfaces.CaseRepository
+	err error
+}
+
+func (r *failUpdateCaseRepo) Update(_ context.Context, _ string, _ *model.Case) (*model.Case, error) {
+	return nil, r.err
+}
+
+// racedCaseRepo simulates losing a race to a concurrent assignee change: a plain
+// Get still returns the snapshot from before that change, while Transact hands
+// the closure the committed state that already contains it. A notification
+// driven by the transaction's own view stays silent here; one driven by a Get
+// taken outside the transaction would wrongly announce the other request's
+// change as its own.
+type racedCaseRepo struct {
+	interfaces.CaseRepository
+	stale     *model.Case
+	committed *model.Case
+}
+
+func (r *racedCaseRepo) Get(_ context.Context, _ string, _ int64) (*model.Case, error) {
+	return r.stale, nil
+}
+
+func (r *racedCaseRepo) Transact(_ context.Context, _ string, _ int64, fn func(*model.Case) error) (*model.Case, error) {
+	if err := fn(r.committed); err != nil {
+		return nil, err
+	}
+	return r.committed, nil
+}
+
+// newThreadNotifyCase builds a thread-mode workspace and creates one Case
+// through the real CreateCase path, then clears the Slack calls made during
+// creation so each test only sees the notifications it triggers itself.
+func newThreadNotifyCase(t *testing.T, ctx context.Context) (*usecase.CaseUseCase, *threadNotifySlackMock, *model.Case, *memory.Repository) {
+	t.Helper()
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(threadModeWorkspace(t))
+	slackMock := &threadNotifySlackMock{}
+	uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "https://app.example.test")
+
+	created, err := uc.CreateCase(ctx, "support", "Suspicious email", "reported by a user", nil, nil, false, false, "", "")
+	gt.NoError(t, err).Required()
+	gt.Value(t, created.SlackChannelID).Equal("C-MONITOR")
+	gt.String(t, created.SlackThreadTS).NotEqual("")
+
+	slackMock.threadCalls = nil
+	return uc, slackMock, created, repo
+}
+
+// assertThreadContextLine asserts the recorded call is a single unobtrusive
+// context block carrying wantText, posted into the Case thread without
+// reply_broadcast.
+func assertThreadContextLine(t *testing.T, call threadNotifyCall, wantChannel, wantThreadTS, wantText string) {
+	t.Helper()
+	gt.Value(t, call.channelID).Equal(wantChannel)
+	gt.Value(t, call.threadTS).Equal(wantThreadTS)
+	gt.Bool(t, call.broadcast).False()
+	gt.Value(t, call.text).Equal(wantText)
+
+	gt.Array(t, call.blocks).Length(1).Required()
+	ctxBlock, ok := call.blocks[0].(*goslack.ContextBlock)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
+	textObj, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, textObj.Type).Equal(goslack.MarkdownType)
+	gt.Value(t, textObj.Text).Equal(wantText)
+}
+
+// TestCaseUseCase_ThreadChangeNotification covers the thread-mode Case change
+// notifications: title, assignees and board status are announced in the Case's
+// Slack thread, and nothing is announced when there is no real change, when the
+// Case is channel-mode, or when the write itself failed.
+func TestCaseUseCase_ThreadChangeNotification(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	const actor = "<@U-ALICE>"
+	tokenCtx := func() context.Context {
+		return auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-ALICE"})
+	}
+
+	t.Run("title change is announced in the case thread", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
+
+		title := "Phishing report"
+		updated, err := uc.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Title: &title})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal(title)
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+			i18n.T(ctx, i18n.MsgCaseChangeTitle, actor, "Suspicious email", title))
+	})
+
+	t.Run("re-submitting the same title announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
+
+		same := c.Title
+		_, err := uc.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Title: &same})
+		gt.NoError(t, err).Required()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("a description-only edit announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
+
+		desc := "rewritten description"
+		updated, err := uc.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Description: &desc})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Description).Equal(desc)
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("a channel-mode case announces nothing and still renames its channel", func(t *testing.T) {
+		ctx := tokenCtx()
+		repo := memory.New()
+		renamedTo := ""
+		slackMock := &threadNotifySlackMock{}
+		slackMock.renameChannelFn = func(_ context.Context, _ string, _ int64, caseName string, _ string) error {
+			renamedTo = caseName
+			return nil
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, slackMock, nil, "")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Channel case", "", nil, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.String(t, created.SlackThreadTS).Equal("")
+		slackMock.threadCalls = nil
+
+		title := "Renamed channel case"
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{Title: &title})
+		gt.NoError(t, err).Required()
+		gt.Value(t, renamedTo).Equal(title)
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("assigning users announces the added members only", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+			{ID: "U-BOB", Name: "bob", RealName: "Bob"},
+			{ID: "U-CAROL", Name: "carol", RealName: "Carol"},
+		})).Required()
+
+		updated, err := uc.AssignCase(ctx, "support", c.ID, []string{"U-BOB", "U-CAROL"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, updated.AssigneeIDs).Length(2)
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+			i18n.T(ctx, i18n.MsgCaseChangeAssigneeAssigned, actor, "<@U-BOB>, <@U-CAROL>"))
+
+		// Re-assigning an existing member is a no-op union: nothing new to announce.
+		slackMock.threadCalls = nil
+		_, err = uc.AssignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("assigning nobody announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
+
+		_, err := uc.AssignCase(ctx, "support", c.ID, nil)
+		gt.NoError(t, err).Required()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("unassigning announces the removed member only", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+			{ID: "U-BOB", Name: "bob", RealName: "Bob"},
+		})).Required()
+		_, err := uc.AssignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		slackMock.threadCalls = nil
+
+		updated, err := uc.UnassignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, updated.AssigneeIDs).Length(0)
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+			i18n.T(ctx, i18n.MsgCaseChangeAssigneeUnassigned, actor, "<@U-BOB>"))
+
+		// Removing someone who is not assigned changes nothing.
+		slackMock.threadCalls = nil
+		_, err = uc.UnassignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("board status change is announced with the configured display names", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
+
+		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.BoardStatus).Equal("done")
+		gt.Value(t, updated.Status).Equal(types.CaseStatusClosed)
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+			i18n.T(ctx, i18n.MsgCaseChangeStatus, actor, "Triage", "Done"))
+
+		// Setting the same status again is not a change.
+		slackMock.threadCalls = nil
+		_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("an empty board status renders as a dash and an unknown one as its raw id", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			from  string
+			label string
+		}{
+			{name: "empty board status", from: "", label: "—"},
+			{name: "board status dropped from the set", from: "retired_column", label: "retired_column"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := tokenCtx()
+				uc, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+
+				stored, err := repo.Case().Get(ctx, "support", c.ID)
+				gt.NoError(t, err).Required()
+				stored.BoardStatus = tc.from
+				_, err = repo.Case().Update(ctx, "support", stored)
+				gt.NoError(t, err).Required()
+
+				_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+				gt.NoError(t, err).Required()
+
+				gt.Array(t, slackMock.threadCalls).Length(1).Required()
+				assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+					i18n.T(ctx, i18n.MsgCaseChangeStatus, actor, tc.label, "Done"))
+			})
+		}
+	})
+
+	t.Run("a context without an auth token is attributed to the system", func(t *testing.T) {
+		setupCtx := tokenCtx()
+		uc, slackMock, c, _ := newThreadNotifyCase(t, setupCtx)
+
+		// The agent tool path dispatches with no auth token.
+		agentCtx := context.Background()
+		_, err := uc.UpdateCaseStatus(agentCtx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
+			i18n.T(agentCtx, i18n.MsgCaseChangeStatus,
+				i18n.T(agentCtx, i18n.MsgChangeActorSystem), "Triage", "Done"))
+	})
+
+	t.Run("a Slack failure does not roll back the update", func(t *testing.T) {
+		ctx := tokenCtx()
+		uc, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+		slackMock.postThreadErr = errors.New("slack outage")
+
+		title := "Persisted despite Slack"
+		updated, err := uc.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Title: &title})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal(title)
+		gt.Array(t, slackMock.threadCalls).Length(1)
+
+		stored, err := repo.Case().Get(ctx, "support", c.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal(title)
+	})
+
+	t.Run("a nil Slack service leaves the update intact", func(t *testing.T) {
+		ctx := tokenCtx()
+		_, _, c, repo := newThreadNotifyCase(t, ctx)
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		ucNoSlack := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		title := "Updated without Slack"
+		updated, err := ucNoSlack.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Title: &title})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal(title)
+	})
+
+	// The assignee diff is computed inside the repository transaction, against
+	// the same state the write lands on. These two cases pin that: a request
+	// that loses the race to an identical concurrent change must stay silent
+	// instead of announcing the winner's change a second time.
+	t.Run("losing a race to an identical concurrent assign announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		_, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+			{ID: "U-BOB", Name: "bob", RealName: "Bob"},
+		})).Required()
+
+		stale := *c
+		stale.AssigneeIDs = nil
+		committed := *c
+		committed.AssigneeIDs = []string{"U-BOB"} // a concurrent request already assigned U-BOB
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		uc := usecase.NewCaseUseCase(&failCreateRepo{
+			Repository: repo,
+			caseRepo:   &racedCaseRepo{CaseRepository: repo.Case(), stale: &stale, committed: &committed},
+		}, registry, slackMock, nil, "")
+		slackMock.threadCalls = nil
+
+		updated, err := uc.AssignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U-BOB"})
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("losing a race to an identical concurrent unassign announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		_, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+
+		stale := *c
+		stale.AssigneeIDs = []string{"U-BOB"}
+		committed := *c
+		committed.AssigneeIDs = nil // a concurrent request already removed U-BOB
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		uc := usecase.NewCaseUseCase(&failCreateRepo{
+			Repository: repo,
+			caseRepo:   &racedCaseRepo{CaseRepository: repo.Case(), stale: &stale, committed: &committed},
+		}, registry, slackMock, nil, "")
+		slackMock.threadCalls = nil
+
+		updated, err := uc.UnassignCase(ctx, "support", c.ID, []string{"U-BOB"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, updated.AssigneeIDs).Length(0)
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	t.Run("a failed write announces nothing", func(t *testing.T) {
+		ctx := tokenCtx()
+		_, slackMock, c, repo := newThreadNotifyCase(t, ctx)
+
+		writeErr := errors.New("firestore unavailable")
+		failing := &failCreateRepo{
+			Repository: repo,
+			caseRepo:   &failUpdateCaseRepo{CaseRepository: repo.Case(), err: writeErr},
+		}
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		ucFailing := usecase.NewCaseUseCase(failing, registry, slackMock, nil, "")
+
+		title := "Never persisted"
+		_, err := ucFailing.UpdateCase(ctx, "support", c.ID, usecase.CaseUpdate{Title: &title})
+		gt.Error(t, err).Is(writeErr)
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+}

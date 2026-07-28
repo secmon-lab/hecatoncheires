@@ -71,7 +71,7 @@ const (
 	MsgActionChangeAssigneeReplaced   // ":bust_in_silhouette: %s changed assignee: %s -> %s"
 	MsgActionChangeArchived           // ":file_cabinet: %s archived action %q"
 	MsgActionChangeUnarchived         // ":outbox_tray: %s unarchived action %q"
-	MsgActionChangeActorSystem        // "system"
+	MsgChangeActorSystem              // "system" (shared by action and case change notifications)
 	MsgActionStepAdded                // ":heavy_plus_sign: %s added step %q"
 	MsgActionStepRemoved              // ":heavy_minus_sign: %s removed step %q"
 	MsgActionStepDone                 // ":white_check_mark: %s completed step %q"
@@ -278,6 +278,12 @@ const (
 	// MsgWorkspaceAgentFallback is posted when the workspace-channel agent turn
 	// ends in a fallback (loop budget exhausted or internal error) with no reply.
 	MsgWorkspaceAgentFallback
+
+	// Case change notifications (thread-mode Slack thread)
+	MsgCaseChangeTitle              // ":pencil2: %s changed the case title: %q -> %q"
+	MsgCaseChangeStatus             // ":arrows_counterclockwise: %s changed the case status: %s -> %s"
+	MsgCaseChangeAssigneeAssigned   // ":bust_in_silhouette: %s assigned %s"
+	MsgCaseChangeAssigneeUnassigned // ":bust_in_silhouette: %s unassigned %s"
 
 	msgKeyCount // sentinel for validation
 )
