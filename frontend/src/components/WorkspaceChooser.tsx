@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { useTranslation } from '../i18n'
-import { workspaceVisual, type WorkspaceVisualInput } from '../utils/workspace'
+import { sortByFavorite, workspaceVisual, type WorkspaceVisualInput } from '../utils/workspace'
 import styles from './WorkspaceChooser.module.css'
 
 interface WorkspaceChooserProps {
@@ -8,17 +8,6 @@ interface WorkspaceChooserProps {
   isLoading: boolean
   favoriteWorkspaceIds: string[]
   onToggleFavorite: (workspaceId: string) => void
-}
-
-// Favorites first, otherwise the order the workspace list was given in.
-// Array.prototype.sort is stable per spec, so ties keep their relative order.
-function sortByFavorite<T extends { id: string }>(workspaces: T[], favoriteIds: string[]): T[] {
-  const favSet = new Set(favoriteIds)
-  return [...workspaces].sort((a, b) => {
-    const rankA = favSet.has(a.id) ? 0 : 1
-    const rankB = favSet.has(b.id) ? 0 : 1
-    return rankA - rankB
-  })
 }
 
 export default function WorkspaceChooser({

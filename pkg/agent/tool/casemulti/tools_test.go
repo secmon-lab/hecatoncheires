@@ -30,6 +30,11 @@ type updateCaseCall struct {
 	patch casemulti.CaseUpdate
 }
 
+type assignCaseCall struct {
+	id      int64
+	userIDs []string
+}
+
 type fakeCaseUC struct {
 	casesByID map[int64]*model.Case
 	getErr    error
@@ -45,6 +50,13 @@ type fakeCaseUC struct {
 	updateCalls []updateCaseCall
 	updateResp  *model.Case
 	updateErr   error
+
+	assignCalls   []assignCaseCall
+	assignResp    *model.Case
+	assignErr     error
+	unassignCalls []assignCaseCall
+	unassignResp  *model.Case
+	unassignErr   error
 
 	closeCalls []int64
 	closeResp  *model.Case
@@ -93,6 +105,22 @@ func (f *fakeCaseUC) UpdateCase(_ context.Context, _ string, id int64, patch cas
 		return nil, f.updateErr
 	}
 	return f.updateResp, nil
+}
+
+func (f *fakeCaseUC) AssignCase(_ context.Context, _ string, id int64, userIDs []string) (*model.Case, error) {
+	f.assignCalls = append(f.assignCalls, assignCaseCall{id: id, userIDs: userIDs})
+	if f.assignErr != nil {
+		return nil, f.assignErr
+	}
+	return f.assignResp, nil
+}
+
+func (f *fakeCaseUC) UnassignCase(_ context.Context, _ string, id int64, userIDs []string) (*model.Case, error) {
+	f.unassignCalls = append(f.unassignCalls, assignCaseCall{id: id, userIDs: userIDs})
+	if f.unassignErr != nil {
+		return nil, f.unassignErr
+	}
+	return f.unassignResp, nil
 }
 
 func (f *fakeCaseUC) CloseCase(_ context.Context, _ string, id int64) (*model.Case, error) {
@@ -256,8 +284,10 @@ func TestNew_NilCaseUC(t *testing.T) {
 
 func TestNew_CaseOnly(t *testing.T) {
 	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}})
-	// list_cases, get_case, create_case, update_case, close_case
-	gt.Array(t, tools).Length(5).Required()
+	// list_cases, get_case, create_case, update_case, assign, unassign, close_case
+	gt.Array(t, tools).Length(7).Required()
+	gt.Value(t, toolByName(t, tools, "case__assign")).NotNil()
+	gt.Value(t, toolByName(t, tools, "case__unassign")).NotNil()
 	gt.Value(t, toolByName(t, tools, "case__list_actions")).Nil()
 }
 
@@ -273,21 +303,27 @@ func TestNew_MarkDoneToolIsModeExclusive(t *testing.T) {
 
 	t.Run("StatusSetGivesUpdateCaseStatus", func(t *testing.T) {
 		tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}, StatusSet: testStatusSet(t)})
-		gt.Array(t, tools).Length(5).Required()
 		gt.Value(t, toolByName(t, tools, "case__update_case_status")).NotNil()
 		gt.Value(t, toolByName(t, tools, "case__close_case")).Nil()
 		// The other case-level tools are unaffected by the swap.
-		for _, name := range []string{"case__list_cases", "case__get_case", "case__create_case", "case__update_case"} {
+		for _, name := range []string{
+			"case__list_cases", "case__get_case", "case__create_case", "case__update_case",
+			"case__assign", "case__unassign",
+		} {
 			gt.Value(t, toolByName(t, tools, name)).NotNil()
 		}
+		// The swap replaces the "mark done" tool rather than adding one, so the
+		// set stays the same size as the no-status-set build.
+		gt.Array(t, tools).Length(len(casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}})))
 	})
 }
 
 func TestNew_CaseAndAction(t *testing.T) {
 	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: &fakeCaseUC{}, ActionUC: &fakeActionUC{}})
-	gt.Array(t, tools).Length(12).Required()
+	gt.Array(t, tools).Length(14).Required()
 	for _, name := range []string{
-		"case__list_cases", "case__get_case", "case__create_case", "case__update_case", "case__close_case",
+		"case__list_cases", "case__get_case", "case__create_case", "case__update_case",
+		"case__assign", "case__unassign", "case__close_case",
 		"case__list_actions", "case__get_action", "case__create_action", "case__update_action",
 		"case__update_action_status", "case__add_action_step", "case__set_action_step_done",
 	} {
@@ -488,6 +524,84 @@ func TestUpdateCaseTool_EmptyPatch(t *testing.T) {
 	_, err := uct.Run(context.Background(), map[string]any{"case_id": int64(1)})
 	gt.Error(t, err)
 	gt.Array(t, uc.updateCalls).Length(0)
+}
+
+// ---------------------------------------------------------------------------
+// case__assign / case__unassign
+// ---------------------------------------------------------------------------
+
+func TestAssignCaseTool(t *testing.T) {
+	uc := &fakeCaseUC{assignResp: &model.Case{ID: 5, Title: "t", Status: types.CaseStatusOpen, AssigneeIDs: []string{"U1", "U2"}}}
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc})
+	at := toolByName(t, tools, "case__assign")
+	gt.Value(t, at).NotNil().Required()
+
+	out, err := at.Run(context.Background(), map[string]any{
+		"case_id":  int64(5),
+		"user_ids": []any{"U2"},
+	})
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, uc.assignCalls).Length(1).Required()
+	gt.Number(t, uc.assignCalls[0].id).Equal(int64(5))
+	gt.Value(t, uc.assignCalls[0].userIDs).Equal([]string{"U2"})
+	gt.Value(t, out["assignee_ids"]).Equal([]string{"U1", "U2"})
+}
+
+func TestAssignCaseTool_RejectsEmptyUserIDs(t *testing.T) {
+	uc := &fakeCaseUC{}
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc})
+	at := toolByName(t, tools, "case__assign")
+	gt.Value(t, at).NotNil().Required()
+
+	_, err := at.Run(context.Background(), map[string]any{"case_id": int64(5), "user_ids": []any{}})
+	gt.Error(t, err)
+	gt.Array(t, uc.assignCalls).Length(0)
+
+	_, err = at.Run(context.Background(), map[string]any{"case_id": int64(5)})
+	gt.Error(t, err)
+	gt.Array(t, uc.assignCalls).Length(0)
+}
+
+func TestAssignCaseTool_RequiresCaseID(t *testing.T) {
+	uc := &fakeCaseUC{}
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc})
+	at := toolByName(t, tools, "case__assign")
+	gt.Value(t, at).NotNil().Required()
+
+	_, err := at.Run(context.Background(), map[string]any{"user_ids": []any{"U1"}})
+	gt.Error(t, err)
+	gt.Array(t, uc.assignCalls).Length(0)
+}
+
+func TestUnassignCaseTool(t *testing.T) {
+	uc := &fakeCaseUC{unassignResp: &model.Case{ID: 5, Title: "t", Status: types.CaseStatusOpen, AssigneeIDs: []string{"U1"}}}
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc})
+	ut := toolByName(t, tools, "case__unassign")
+	gt.Value(t, ut).NotNil().Required()
+
+	out, err := ut.Run(context.Background(), map[string]any{
+		"case_id":  int64(5),
+		"user_ids": []any{"U2"},
+	})
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, uc.unassignCalls).Length(1).Required()
+	gt.Number(t, uc.unassignCalls[0].id).Equal(int64(5))
+	gt.Value(t, uc.unassignCalls[0].userIDs).Equal([]string{"U2"})
+	gt.Value(t, out["assignee_ids"]).Equal([]string{"U1"})
+}
+
+func TestUnassignCaseTool_PropagatesUseCaseError(t *testing.T) {
+	uc := &fakeCaseUC{unassignErr: goerr.New("boom")}
+	tools := casemulti.New(casemulti.Deps{WorkspaceID: "ws", CaseUC: uc})
+	ut := toolByName(t, tools, "case__unassign")
+	gt.Value(t, ut).NotNil().Required()
+
+	out, err := ut.Run(context.Background(), map[string]any{"case_id": int64(5), "user_ids": []any{"U2"}})
+	gt.Error(t, err)
+	gt.Value(t, out).Nil()
+	gt.Array(t, uc.unassignCalls).Length(1)
 }
 
 // ---------------------------------------------------------------------------

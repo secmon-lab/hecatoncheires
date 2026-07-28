@@ -11,6 +11,12 @@
 
   --radius-sm: 4px; --radius: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
 
+  /* Padding of a .h-table body cell. Exposed as variables because a row-wide
+     link has to stretch over the cell padding, so CaseList.module.css needs
+     the same values; hardcoding them twice would let the two drift apart. */
+  --h-table-cell-pad-y: 10px;
+  --h-table-cell-pad-x: var(--sp-3);
+
   /* type scale */
   --t-xs: 11px; --t-sm: 12px; --t-base: 13px; --t-md: 14px;
   --t-lg: 16px; --t-xl: 20px; --t-2xl: 24px; --t-3xl: 32px;
@@ -585,7 +591,7 @@
   white-space: nowrap;
 }
 .h-table td {
-  padding: 10px 12px;
+  padding: var(--h-table-cell-pad-y) var(--h-table-cell-pad-x);
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }

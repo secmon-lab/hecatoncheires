@@ -63,6 +63,14 @@ func (a *caseMultiCaseAdapter) UpdateCase(ctx context.Context, workspaceID strin
 	})
 }
 
+func (a *caseMultiCaseAdapter) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	return a.uc.AssignCase(ctx, workspaceID, id, userIDs)
+}
+
+func (a *caseMultiCaseAdapter) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	return a.uc.UnassignCase(ctx, workspaceID, id, userIDs)
+}
+
 func (a *caseMultiCaseAdapter) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
 	return a.uc.CloseCase(ctx, workspaceID, id)
 }

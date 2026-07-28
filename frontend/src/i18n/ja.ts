@@ -91,6 +91,7 @@ export const ja: Messages = {
 
   // Pagination
   paginationPageOf: '{current} / {total} ページ',
+  paginationPageSize: '表示件数',
 
   // Columns selector
   titleColumnSelector: 'カラム',
@@ -113,6 +114,8 @@ export const ja: Messages = {
   workspaceSelectorSubtitle: 'ワークスペースを選択してください',
   workspaceSelectorEmpty: 'ワークスペースが設定されていません',
   workspaceSelectorEmptyHint: '設定ファイルで少なくとも 1 つのワークスペースを設定してください。',
+  workspaceSwitcherShowMore: '他 {count} 件を表示',
+  workspaceSwitcherShowLess: '表示を減らす',
   sectionActivity: 'アクティビティ',
   emptyActivity: 'アクティビティはまだありません。',
   sectionMessages: 'メッセージ',
@@ -563,7 +566,7 @@ export const ja: Messages = {
   btnImport: '取り込み',
   titleImportNew: 'YAML から取り込み',
   subtitleImportNew:
-    'YAML ファイルからケースを一括取り込みします。取り込まれたケースは DRAFT で作成され、Slack 通知は走りません。',
+    'YAML からケースを一括取り込みします。ファイルをドロップするか、YAML を直接貼り付けてください。取り込まれたケースは DRAFT で作成され、Slack 通知は走りません。',
   importDropPrompt: 'YAML ファイルをドラッグ＆ドロップ',
   importDropPromptHover: 'ドロップしてアップロード',
   importDropAccepted: '.yaml / .yml (UTF-8)',
@@ -574,6 +577,12 @@ export const ja: Messages = {
   importShowSchemaCopied: 'コピーしました',
   importSubmitError: '取り込みのアップロードに失敗しました: ',
   importSchemaExampleLabel: 'YAML 例',
+  importModeFile: 'ファイル',
+  importModePaste: '貼り付け',
+  importPastePlaceholder: 'ここに YAML を貼り付け…',
+  importPasteHint: 'このページ上でそのまま貼り付けても、この欄に入ります。',
+  importPasteSubmit: 'YAML を検証',
+  importNoFileName: '(ファイル名なし)',
   importStatusPending: '保留中',
   importStatusApplied: '適用済み',
   importStatusFailed: '失敗',

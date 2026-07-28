@@ -83,6 +83,22 @@ function colorGradient(hex: string): string {
   return `linear-gradient(135deg, ${hex}, ${darkenHex(hex, 0.7)})`
 }
 
+// sortByFavorite puts favorited workspaces first and otherwise keeps the order
+// the list was given in. Array.prototype.sort is stable per spec, so ties keep
+// their relative order. Shared by the workspace chooser page and the breadcrumb
+// switcher so both order the same workspace set identically.
+export function sortByFavorite<T extends { id: string }>(
+  workspaces: T[],
+  favoriteIds: string[],
+): T[] {
+  const favSet = new Set(favoriteIds)
+  return [...workspaces].sort((a, b) => {
+    const rankA = favSet.has(a.id) ? 0 : 1
+    const rankB = favSet.has(b.id) ? 0 : 1
+    return rankA - rankB
+  })
+}
+
 // workspaceVisual resolves how a workspace badge should be rendered.
 export function workspaceVisual(ws: WorkspaceVisualInput): WorkspaceVisual {
   const emoji = (ws.emoji || '').trim()

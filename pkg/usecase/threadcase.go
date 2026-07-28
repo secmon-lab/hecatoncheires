@@ -560,18 +560,22 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 
 	traceMsg := uc.newTraceMessage(channelID, threadTS)
 	res, runErr := uc.threadcase.RunTurn(ctx, threadcase.TurnRequest{
-		Session:        session,
-		Workspace:      entry,
-		Case:           foundCase,
-		ChannelID:      channelID,
-		ThreadTS:       threadTS,
-		MentionTS:      msg.ID(),
-		MentionText:    msg.Text(),
-		SystemMessages: toThreadcaseMessages(systemMessages),
-		DeltaMessages:  toThreadcaseMessages(deltaMessages),
-		TriggerTS:      msg.ID(),
-		Mode:           threadcase.ModeMention,
-		Handler:        uc.newThreadcaseHandler(channelID, threadTS, traceMsg),
+		Session:     session,
+		Workspace:   entry,
+		Case:        foundCase,
+		ChannelID:   channelID,
+		ThreadTS:    threadTS,
+		MentionTS:   msg.ID(),
+		MentionText: msg.Text(),
+		// The mention's author, so the agent can act on a self-referential
+		// request ("assign me") without guessing a Slack user ID.
+		MentionUserID:   msg.UserID(),
+		MentionUserName: msg.UserName(),
+		SystemMessages:  toThreadcaseMessages(systemMessages),
+		DeltaMessages:   toThreadcaseMessages(deltaMessages),
+		TriggerTS:       msg.ID(),
+		Mode:            threadcase.ModeMention,
+		Handler:         uc.newThreadcaseHandler(channelID, threadTS, traceMsg),
 	})
 	if runErr != nil {
 		// replyUserError already reports to log/Sentry; return nil so the async

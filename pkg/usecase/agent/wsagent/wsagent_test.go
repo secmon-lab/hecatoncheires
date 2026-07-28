@@ -200,6 +200,10 @@ func TestBuildToolResolver_ModeDependentCaseTools(t *testing.T) {
 		gt.Array(t, names).Has("case__update_case")
 		gt.Array(t, names).Has("case__update_case_status")
 		gt.Array(t, names).NotHas("case__close_case")
+		// Assignees exist in both modes, so the write palette is not narrowed
+		// beyond what thread mode genuinely lacks.
+		gt.Array(t, names).Has("case__assign")
+		gt.Array(t, names).Has("case__unassign")
 		gt.Array(t, names).NotHas("case__list_actions")
 		gt.Array(t, names).NotHas("case__create_action")
 		gt.Array(t, names).NotHas("case__update_action_status")
@@ -399,6 +403,14 @@ func (f *fakeCaseMultiUC) CreateCase(_ context.Context, _ string, _, _ string, _
 
 func (f *fakeCaseMultiUC) UpdateCase(_ context.Context, _ string, _ int64, _ casemulti.CaseUpdate) (*model.Case, error) {
 	return nil, errors.New("not implemented: UpdateCase should not be called by this test")
+}
+
+func (f *fakeCaseMultiUC) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return nil, errors.New("not implemented: AssignCase should not be called by this test")
+}
+
+func (f *fakeCaseMultiUC) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return nil, errors.New("not implemented: UnassignCase should not be called by this test")
 }
 
 func (f *fakeCaseMultiUC) CloseCase(_ context.Context, _ string, _ int64) (*model.Case, error) {

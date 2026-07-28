@@ -64,6 +64,10 @@ type Deps struct {
 // get case__update_case_status (closing by moving to a closed board status),
 // while channel-mode cases (no board status) get case__close_case. Offering
 // only one keeps the LLM from facing two redundant ways to close a case.
+//
+// There is deliberately no status-only / assign-only subset: every host that
+// grants case writes at all grants the whole set, so a user asking a mention
+// agent for any case edit is never met with "I lack that tool".
 func New(deps Deps) []gollem.Tool {
 	tools := []gollem.Tool{
 		&updateCaseTool{deps: deps},
@@ -74,20 +78,8 @@ func New(deps Deps) []gollem.Tool {
 	return tools
 }
 
-// NewStatusTool builds ONLY the status-change tool — case__update_case_status
-// when a board status set is configured (thread-mode), otherwise case__close_case
-// (channel-mode). It deliberately excludes case__update_case (title / description
-// / field edits are "materialize", owned by the host, not the sub-agent) and
-// case__assign / case__unassign. This is the subset wired into a planexec
-// sub-agent so it can close / transition the case it is investigating while the
-// host keeps ownership of content materialization.
-func NewStatusTool(deps Deps) []gollem.Tool {
-	return statusTools(deps)
-}
-
-// statusTools returns the single mode-appropriate "mark done" tool. Shared by
-// New (full writer set) and NewStatusTool (status-only subset) so both stay in
-// sync on the thread-mode vs channel-mode selection.
+// statusTools returns the single mode-appropriate "mark done" tool, keeping the
+// thread-mode vs channel-mode selection in one place.
 func statusTools(deps Deps) []gollem.Tool {
 	if deps.StatusSet != nil {
 		return []gollem.Tool{&updateCaseStatusTool{deps: deps}}

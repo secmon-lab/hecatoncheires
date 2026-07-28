@@ -44,11 +44,56 @@ export class CaseListPage extends BasePage {
   }
 
   /**
+   * The row's title anchor. Rows navigate through a real <a>, so this is the
+   * element that carries the detail-page href.
+   */
+  getCaseLinkByTitle(title: string): Locator {
+    return this.getCaseRowByTitle(title).locator('a[data-testid^="case-row-link-"]').first();
+  }
+
+  /**
    * Click on a case row to view details
    */
   async clickCaseByTitle(title: string): Promise<void> {
-    await this.getCaseRowByTitle(title).click();
+    await this.getCaseLinkByTitle(title).click();
     await this.waitForNavigation();
+  }
+
+  /**
+   * Click a row in a column other than the title. The whole row is a link, so
+   * this must navigate to the same place the title does.
+   */
+  async clickCaseRowCellByHeader(title: string, header: string): Promise<void> {
+    const headers = await this.casesTable.locator('thead th').allTextContents();
+    const index = headers.findIndex((h) => h.trim().toLowerCase() === header.toLowerCase());
+    if (index < 0) {
+      throw new Error(`column header not found: ${header} (have: ${headers.join(', ')})`);
+    }
+    await this.getCaseRowByTitle(title).locator('td').nth(index).click();
+    await this.waitForNavigation();
+  }
+
+  /**
+   * The href the row link points at (relative path, e.g. /ws/test/cases/12).
+   */
+  async getCaseHrefByTitle(title: string): Promise<string> {
+    const href = await this.getCaseLinkByTitle(title).getAttribute('href');
+    return href ?? '';
+  }
+
+  /**
+   * Modifier-click a case row the way a user opens it in a background tab, and
+   * return the page the browser opened.
+   */
+  async openCaseInNewTabByTitle(title: string): Promise<Page> {
+    const [newPage] = await Promise.all([
+      this.page.context().waitForEvent('page'),
+      this.getCaseLinkByTitle(title).click({ modifiers: ['ControlOrMeta'] }),
+    ]);
+    // A background tab starts at about:blank and only then navigates, so wait
+    // for the detail URL rather than for a load state.
+    await newPage.waitForURL(/\/cases\/\d+$/, { timeout: 10000 });
+    return newPage;
   }
 
   /**
@@ -197,6 +242,22 @@ export class CaseListPage extends BasePage {
   }
 
   /**
+   * Choose how many rows a page shows (20 / 50 / 100 / 200).
+   */
+  async setPageSize(size: number): Promise<void> {
+    await this.page.getByTestId('page-size-select').selectOption(String(size));
+    // Wait for React to re-render the table with the new slice
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  }
+
+  /**
+   * The page size currently selected in the footer control.
+   */
+  async getPageSize(): Promise<number> {
+    return Number(await this.page.getByTestId('page-size-select').inputValue());
+  }
+
+  /**
    * Get the number of rows currently displayed
    */
   async getRowCount(): Promise<number> {
@@ -234,11 +295,13 @@ export class CaseListPage extends BasePage {
    * Click a status tab. "Draft" surfaces the workspace-wide drafts list
    * that lives under the same Case list page (no separate /drafts route).
    */
-  async clickStatusTab(status: 'Open' | 'Closed' | 'Draft'): Promise<void> {
+  async clickStatusTab(status: 'Open' | 'Closed' | 'Draft' | 'All'): Promise<void> {
     if (status === 'Open') {
       await this.page.getByTestId('status-tab-open').click();
     } else if (status === 'Closed') {
       await this.page.getByTestId('status-tab-closed').click();
+    } else if (status === 'All') {
+      await this.page.getByTestId('status-tab-all').click();
     } else {
       await this.page.getByTestId('status-tab-draft').click();
     }

@@ -368,7 +368,7 @@ func TestThreadCase_MentionClose(t *testing.T) {
 				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
 					switch atomic.AddInt32(&round, 1) {
 					case 1: // planner round 1: dispatch a close task using the status tool
-						return &gollem.Response{Texts: []string{`{"message":"close it","tasks":[{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"status is DONE","tools":["case_status_write"]}]}`}}, nil
+						return &gollem.Response{Texts: []string{`{"message":"close it","tasks":[{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"status is DONE","tools":["case_write"]}]}`}}, nil
 					case 2: // sub-agent: call case__update_case_status
 						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
 							ID:        "call-1",

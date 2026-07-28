@@ -13,6 +13,16 @@ After signing in to the Web UI you land on the **home** screen (`/`), which pull
 
 Private Cases you are not a channel member of never appear here, even if you happen to be listed as an assignee.
 
+## Case list (Web UI)
+
+Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the **Open / Closed / Drafts / All** tabs, a title search box, and a column picker.
+
+- **Rows per page** — the footer control switches between **20 / 50 / 100 / 200** rows. The choice is remembered in your browser (per browser, not per workspace) and applies the next time you open any Case list.
+- **Rows are links** — a row is a real link to the Case, so Cmd/Ctrl-click and middle-click open it in a new tab, the target URL shows in the status bar, and "Open in new tab" works from the context menu. A private Case you are not a channel member of renders as an inert `Private` row with no link. Cells that carry their own link (the Slack channel, a URL field with a value) keep that link instead. Outside the title column the link surface covers the cell contents, so select and copy text from the title cell.
+- **Coming back keeps your place** — the selected tab and the current page live in the URL (`?status=closed&page=3`), so browser Back, the Case detail page's **Back** button, and a shared or bookmarked link all return to the same tab and page. Page 1 and the Open tab are the defaults and are left out of the URL.
+
+The column picker's selection is also stored in your browser, per workspace, because the available custom-field columns differ between workspaces.
+
 ## Creating a Case in Slack (Slash → modal)
 
 Slack slash commands let users create and edit cases directly from Slack without opening the web UI. The slash command behaves differently depending on the channel context:
@@ -912,7 +922,8 @@ Channel-side notifications then fall back to the legacy
 ## Bulk import from YAML
 
 Hecatoncheires lets a workspace member bulk-create Cases (and the Actions
-underneath them) from a YAML file.  Imported Cases are saved in **DRAFT**
+underneath them) from YAML — either a file or YAML pasted straight into
+the page.  Imported Cases are saved in **DRAFT**
 state — no Slack channel is created, no notifications fire — so a large
 import never trips Slack rate limits or fills up channel lists.  Each
 DRAFT can later be promoted to OPEN through the normal SubmitDraft path
@@ -921,9 +932,18 @@ DRAFT can later be promoted to OPEN through the normal SubmitDraft path
 ### Workflow
 
 1. **CaseList → [Import]** opens `/ws/:workspaceId/imports/new`.
-2. Drop a `.yaml` / `.yml` file (or click to pick one).  The file is
-   parsed and validated server-side; an `ImportSession` is persisted in
-   Firestore and the page redirects to `/ws/:workspaceId/imports/:id`.
+2. Hand the page the YAML in whichever way is at hand — the **File** /
+   **Paste** switch at the top of the page selects the input surface:
+   - **File** — drop a `.yaml` / `.yml` file, or click to pick one.
+   - **Paste** — paste the YAML into the text box and press
+     **Validate YAML**.  Pasting anywhere on the page (⌘V / Ctrl+V)
+     also switches to this mode and fills the box; nothing is submitted
+     until you press the button.  A pasted import carries no file name,
+     so the session page titles it `(no filename)`.
+
+   Either way the content is parsed and validated server-side; an
+   `ImportSession` is persisted in Firestore and the page redirects to
+   `/ws/:workspaceId/imports/:id`.
 3. Review the **Cases to create** preview.  Issues (missing titles,
    invalid field values, unknown users …) are shown inline with the
    exact YAML path that triggered them.

@@ -81,7 +81,7 @@ export default function ImportDetail() {
             }}
             className="mono"
           >
-            {session.source.originalFileName || '(no filename)'}
+            {session.source.originalFileName || t('importNoFileName')}
           </h1>
           <div className="soft" style={{ fontSize: 11.5 }}>
             {(session.source.sizeBytes / 1024).toFixed(1)} KB

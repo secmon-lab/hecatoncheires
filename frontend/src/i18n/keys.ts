@@ -89,6 +89,7 @@ export const msgKeys = {
 
   // Pagination
   paginationPageOf: 'paginationPageOf',
+  paginationPageSize: 'paginationPageSize',
 
   // Columns selector
   titleColumnSelector: 'titleColumnSelector',
@@ -111,6 +112,8 @@ export const msgKeys = {
   workspaceSelectorSubtitle: 'workspaceSelectorSubtitle',
   workspaceSelectorEmpty: 'workspaceSelectorEmpty',
   workspaceSelectorEmptyHint: 'workspaceSelectorEmptyHint',
+  workspaceSwitcherShowMore: 'workspaceSwitcherShowMore',
+  workspaceSwitcherShowLess: 'workspaceSwitcherShowLess',
   sectionActivity: 'sectionActivity',
   emptyActivity: 'emptyActivity',
   sectionMessages: 'sectionMessages',
@@ -572,6 +575,12 @@ export const msgKeys = {
   importShowSchemaCopied: 'importShowSchemaCopied',
   importSubmitError: 'importSubmitError',
   importSchemaExampleLabel: 'importSchemaExampleLabel',
+  importModeFile: 'importModeFile',
+  importModePaste: 'importModePaste',
+  importPastePlaceholder: 'importPastePlaceholder',
+  importPasteHint: 'importPasteHint',
+  importPasteSubmit: 'importPasteSubmit',
+  importNoFileName: 'importNoFileName',
   importStatusPending: 'importStatusPending',
   importStatusApplied: 'importStatusApplied',
   importStatusFailed: 'importStatusFailed',
