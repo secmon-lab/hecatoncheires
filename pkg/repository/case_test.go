@@ -1369,7 +1369,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Number(t, len(cleared.AgentSourceIDs)).Equal(0)
 	})
 
-	t.Run("AddAssignees unions ids and bumps UpdatedAt", func(t *testing.T) {
+	t.Run("Transact persists what the closure mutated", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
@@ -1384,7 +1384,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		stamp := time.Now().UTC().Truncate(time.Millisecond)
-		added, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U2", "U3"}, stamp)
+		added, err := repo.Case().Transact(ctx, wsID, created.ID, func(c *model.Case) error {
+			c.AssignUsers([]string{"U2", "U3"})
+			c.UpdatedAt = stamp
+			return nil
+		})
 		gt.NoError(t, err).Required()
 		gt.Value(t, added.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
 		gt.Bool(t, added.UpdatedAt.Equal(stamp)).True()
@@ -1396,7 +1400,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Bool(t, got.UpdatedAt.Equal(stamp)).True()
 	})
 
-	t.Run("AddAssignees ignores duplicates without bumping UpdatedAt", func(t *testing.T) {
+	t.Run("Transact observes the stored state so a no-op closure changes nothing", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
@@ -1411,18 +1415,28 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		res, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U1", "U2"}, time.Now().UTC())
+		// The closure sees the already-assigned ids, so AssignUsers reports no
+		// change and the caller leaves UpdatedAt alone.
+		var changed bool
+		res, err := repo.Case().Transact(ctx, wsID, created.ID, func(c *model.Case) error {
+			changed = c.AssignUsers([]string{"U1", "U2"})
+			if changed {
+				c.UpdatedAt = time.Now().UTC()
+			}
+			return nil
+		})
 		gt.NoError(t, err).Required()
+		gt.Bool(t, changed).False()
 		gt.Value(t, res.AssigneeIDs).Equal([]string{"U1", "U2"})
-		// No change -> the stored UpdatedAt must be left untouched.
 		gt.Bool(t, res.UpdatedAt.Equal(original)).True()
 
 		got, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
+		gt.Value(t, got.AssigneeIDs).Equal([]string{"U1", "U2"})
 		gt.Bool(t, got.UpdatedAt.Equal(original)).True()
 	})
 
-	t.Run("RemoveAssignees drops ids and preserves order", func(t *testing.T) {
+	t.Run("Transact removal drops ids and preserves order", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
@@ -1436,8 +1450,12 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		stamp := time.Now().UTC()
-		removed, err := repo.Case().RemoveAssignees(ctx, wsID, created.ID, []string{"U2"}, stamp)
+		stamp := time.Now().UTC().Truncate(time.Millisecond)
+		removed, err := repo.Case().Transact(ctx, wsID, created.ID, func(c *model.Case) error {
+			c.UnassignUsers([]string{"U2"})
+			c.UpdatedAt = stamp
+			return nil
+		})
 		gt.NoError(t, err).Required()
 		gt.Value(t, removed.AssigneeIDs).Equal([]string{"U1", "U3"})
 		gt.Bool(t, removed.UpdatedAt.Equal(stamp)).True()
@@ -1447,18 +1465,50 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, got.AssigneeIDs).Equal([]string{"U1", "U3"})
 	})
 
-	t.Run("assignee mutations on missing case error out", func(t *testing.T) {
+	t.Run("Transact writes nothing when the closure fails", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			Title:       "Abort target",
+			AssigneeIDs: []string{"U1"},
+		})
+		gt.NoError(t, err).Required()
+
+		abort := errors.New("closure rejected the write")
+		_, err = repo.Case().Transact(ctx, wsID, created.ID, func(c *model.Case) error {
+			c.AssignUsers([]string{"U-SHOULD-NOT-PERSIST"})
+			c.Title = "Should not persist"
+			return abort
+		})
+		// The closure's error reaches the caller with its chain intact so the
+		// usecase layer can discriminate it (e.g. ErrAccessDenied).
+		gt.Error(t, err).Is(abort)
+
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.AssigneeIDs).Equal([]string{"U1"})
+		gt.Value(t, got.Title).Equal("Abort target")
+	})
+
+	t.Run("Transact on a missing case errors out", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		called := false
 		// memory and firestore expose distinct ErrNotFound sentinels, so the
 		// shared helper asserts only that the operation fails on a missing case.
-		_, err := repo.Case().AddAssignees(ctx, wsID, 99999, []string{"U1"}, time.Now().UTC())
+		_, err := repo.Case().Transact(ctx, wsID, 99999, func(c *model.Case) error {
+			called = true
+			return nil
+		})
 		gt.Error(t, err)
-
-		_, err = repo.Case().RemoveAssignees(ctx, wsID, 99999, []string{"U1"}, time.Now().UTC())
-		gt.Error(t, err)
+		gt.Bool(t, called).False()
 	})
 }
 

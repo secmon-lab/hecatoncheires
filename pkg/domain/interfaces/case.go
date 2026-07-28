@@ -2,7 +2,6 @@ package interfaces
 
 import (
 	"context"
-	"time"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -40,20 +39,30 @@ type CaseRepository interface {
 	// Update updates an existing case
 	Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error)
 
-	// AddAssignees atomically unions the given Slack user IDs into the case's
-	// assignee set and returns the updated case. IDs already present are
-	// ignored. Unlike Update (which replaces the whole assignee list and so
-	// races with concurrent edits), this reads and writes the case inside a
-	// single transaction, so simultaneous "assign me" actions cannot clobber
-	// one another. updatedAt is supplied by the caller — the repository never
-	// reads the clock. The full case document is rewritten, so model
-	// invariants are re-validated.
-	AddAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error)
-
-	// RemoveAssignees atomically removes the given Slack user IDs from the
-	// case's assignee set and returns the updated case. IDs not present are
-	// ignored. Concurrency and updatedAt semantics match AddAssignees.
-	RemoveAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error)
+	// Transact reads the case, hands it to fn for mutation, and writes it back
+	// inside a single transaction, returning the written case. Unlike a plain
+	// Get followed by Update — which races with a concurrent edit in the window
+	// between them — the read fn observes IS the state the write is applied to,
+	// so simultaneous "assign me" actions cannot clobber one another and a
+	// caller may compute a before/after diff that is guaranteed to describe
+	// exactly what was persisted. A missing case fails with ErrNotFound. The
+	// full case document is rewritten, so model invariants are re-validated.
+	//
+	// fn owns every field it changes, including UpdatedAt — the repository
+	// never reads the clock. An fn that changes nothing simply leaves the
+	// document byte-identical (the write still happens; do not rely on it being
+	// skipped). An error returned by fn aborts the transaction without writing
+	// and is propagated to the caller with its chain intact, so errors.Is /
+	// errors.As on the result still work.
+	//
+	// fn MUST be idempotent and free of external side effects. The Firestore
+	// backend retries the closure on contention, so a Slack post or a counter
+	// increment inside fn can run more than once; a captured result variable
+	// must be reset at the top of fn so a retry cannot accumulate onto the
+	// previous attempt's value. Act on the outcome after Transact returns, not
+	// inside it. fn must also not call back into the repository — the in-memory
+	// backend holds its write lock for the duration of the call.
+	Transact(ctx context.Context, workspaceID string, id int64, fn func(*model.Case) error) (*model.Case, error)
 
 	// Delete deletes a case by ID
 	Delete(ctx context.Context, workspaceID string, id int64) error

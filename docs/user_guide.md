@@ -648,6 +648,40 @@ All mutations go through GraphQL (WebUI) or agent tools (LLM).
 Domain models, repository backends, use cases, and Firestore layout for
 Action Steps are documented in [develop/architecture.md](develop/architecture.md).
 
+## Case change notifications (thread mode)
+
+In a **thread-mode** workspace a Case lives in a Slack thread, so changes to the
+Case itself are announced there as a single context-block reply — the same quiet
+style as the Action change notifications above:
+
+| Change                       | Slack notification text (EN)                                        |
+|------------------------------|---------------------------------------------------------------------|
+| Title edited                 | `:pencil2: {actor} changed the case title: "{old}" -> "{new}"`      |
+| Board status moved           | `:arrows_counterclockwise: {actor} changed the case status: {old} -> {new}` |
+| Assignees added              | `:bust_in_silhouette: {actor} assigned {users}`                     |
+| Assignees removed            | `:bust_in_silhouette: {actor} unassigned {users}`                   |
+
+Details:
+
+- The status is shown with the display **name** of the workspace's Case status
+  set (the Kanban column), not the raw status id.
+- `{actor}` is the signed-in Web UI user as a Slack mention. Changes made by an
+  agent tool carry no user identity and render as "system".
+- Only real changes are announced: re-submitting the same title, re-assigning
+  someone already on the Case, or setting the status it already has posts
+  nothing.
+- The reply is **not** broadcast to the parent channel. Unlike a channel-mode
+  Case — which owns a dedicated channel — every thread-mode Case shares the one
+  monitored channel, so broadcasting would be noise for everyone else.
+- **Channel-mode Cases are unaffected**: they have no Case thread, and a title
+  change there renames the Case channel as before.
+- Description and custom-field edits are not announced, and neither is the
+  title/description the agent writes when it materializes a Case on mention (the
+  agent already replies in the thread when that turn finishes).
+- The post is best-effort: if Slack rejects it the Case change is still saved,
+  and the failure is reported through `errutil.Handle` (Sentry / structured
+  log).
+
 ## Knowledge
 
 The **Knowledge** section (sidebar → Knowledge) is a workspace-wide, shared

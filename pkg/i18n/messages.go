@@ -54,7 +54,7 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s changed assignee: %s -> %s",
 	MsgActionChangeArchived:           ":file_cabinet: %s archived action %q",
 	MsgActionChangeUnarchived:         ":outbox_tray: %s unarchived action %q",
-	MsgActionChangeActorSystem:        "system",
+	MsgChangeActorSystem:              "system",
 	MsgActionStepAdded:                ":heavy_plus_sign: %s added step %q",
 	MsgActionStepRemoved:              ":heavy_minus_sign: %s removed step %q",
 	MsgActionStepDone:                 ":white_check_mark: %s completed step %q",
@@ -230,6 +230,12 @@ var messagesEN = [msgKeyCount]string{
 	MsgUIErrUnexpectedDetail:        "Internal error",
 	MsgUIErrUnexpectedFix:           "Please retry. If it keeps happening, report it to an admin with the ref below",
 	MsgWorkspaceAgentFallback:       "I couldn't complete that just now. Please try again, adding a bit more detail if it helps.",
+
+	// Case change notifications (thread-mode Slack thread)
+	MsgCaseChangeTitle:              ":pencil2: %s changed the case title: %q -> %q",
+	MsgCaseChangeStatus:             ":arrows_counterclockwise: %s changed the case status: %s -> %s",
+	MsgCaseChangeAssigneeAssigned:   ":bust_in_silhouette: %s assigned %s",
+	MsgCaseChangeAssigneeUnassigned: ":bust_in_silhouette: %s unassigned %s",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -269,7 +275,7 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s が担当者を変更しました: %s → %s",
 	MsgActionChangeArchived:           ":file_cabinet: %s がアクション %q をアーカイブしました",
 	MsgActionChangeUnarchived:         ":outbox_tray: %s がアクション %q のアーカイブを解除しました",
-	MsgActionChangeActorSystem:        "システム",
+	MsgChangeActorSystem:              "システム",
 	MsgActionStepAdded:                ":heavy_plus_sign: %s がステップ %q を追加しました",
 	MsgActionStepRemoved:              ":heavy_minus_sign: %s がステップ %q を削除しました",
 	MsgActionStepDone:                 ":white_check_mark: %s がステップ %q を完了しました",
@@ -445,4 +451,10 @@ var messagesJA = [msgKeyCount]string{
 	MsgUIErrUnexpectedDetail:        "内部エラー",
 	MsgUIErrUnexpectedFix:           "再試行してください。続く場合は下の ref を添えて管理者へご報告ください",
 	MsgWorkspaceAgentFallback:       "うまく処理しきれませんでした。もう少し情報を添えて、もう一度試してください。",
+
+	// Case change notifications (thread-mode Slack thread)
+	MsgCaseChangeTitle:              ":pencil2: %s がケースのタイトルを変更しました: %q → %q",
+	MsgCaseChangeStatus:             ":arrows_counterclockwise: %s がケースのステータスを変更しました: %s → %s",
+	MsgCaseChangeAssigneeAssigned:   ":bust_in_silhouette: %s が %s をアサインしました",
+	MsgCaseChangeAssigneeUnassigned: ":bust_in_silhouette: %s が %s のアサインを解除しました",
 }

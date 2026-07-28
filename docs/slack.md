@@ -435,6 +435,16 @@ when `[slack] accept_bot = true`.
 Thread-mode Cases do **not** create Actions or Drafts. Jobs run identically to
 channel mode and post their output into the Case thread.
 
+**Case changes are announced in the thread.** When a Case's title, assignees, or
+board status changes — from the Web UI or from an agent tool — a single
+context-block reply is posted in that Case's thread (`:pencil2: @alice changed
+the case title: …`). It is deliberately quiet: one context line, and **no**
+`reply_broadcast`, because every thread-mode Case shares the same monitored
+channel and broadcasting would reach people watching unrelated threads. Only
+real changes are posted, and a Slack failure never rolls back the change. See
+[docs/user_guide.md](./user_guide.md#case-change-notifications-thread-mode) for
+the full list and the exact wording.
+
 **Setup requirements for thread mode:**
 
 1. Subscribe to `message.channels` (and `message.groups` if the monitored channel

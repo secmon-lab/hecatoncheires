@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -229,23 +228,12 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 	return copyCase(updated), nil
 }
 
-func (r *caseRepository) AddAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
-	return r.mutateAssignees(workspaceID, id, updatedAt, func(c *model.Case) bool {
-		return c.AssignUsers(userIDs)
-	})
-}
-
-func (r *caseRepository) RemoveAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
-	return r.mutateAssignees(workspaceID, id, updatedAt, func(c *model.Case) bool {
-		return c.UnassignUsers(userIDs)
-	})
-}
-
-// mutateAssignees applies mutate to a fresh copy of the stored case under the
-// write lock so the read-modify-write is atomic against concurrent callers,
-// mirroring the Firestore transaction. updatedAt is stamped only when the set
-// actually changed so a no-op assign does not bump the timestamp.
-func (r *caseRepository) mutateAssignees(workspaceID string, id int64, updatedAt time.Time, mutate func(*model.Case) bool) (*model.Case, error) {
+// Transact holds the write lock for the whole read-modify-write so fn observes
+// exactly the state the write is applied to, mirroring the Firestore
+// transaction. fn must not call back into the repository — that would deadlock
+// on this lock. Unlike Firestore this never retries fn, but the contract still
+// requires fn to be retry-safe so both backends behave identically.
+func (r *caseRepository) Transact(ctx context.Context, workspaceID string, id int64, fn func(*model.Case) error) (*model.Case, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -258,14 +246,16 @@ func (r *caseRepository) mutateAssignees(workspaceID string, id int64, updatedAt
 		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
 	}
 
+	// fn mutates a copy: if it fails, the stored case must be untouched.
 	updated := copyCase(stored)
-	if mutate(updated) {
-		updated.UpdatedAt = updatedAt
-		if err := updated.Validate(); err != nil {
-			return nil, goerr.Wrap(err, "case validation failed before assignee update", goerr.V("id", id))
-		}
-		r.cases[workspaceID][id] = updated
+	if err := fn(updated); err != nil {
+		return nil, err
 	}
+	if err := updated.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "case validation failed before transactional write", goerr.V("id", id))
+	}
+	r.cases[workspaceID][id] = updated
+
 	return copyCase(updated), nil
 }
 

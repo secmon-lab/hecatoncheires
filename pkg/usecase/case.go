@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	goslack "github.com/slack-go/slack"
 )
 
 // CaseEventPublisher is the narrow surface of pkg/usecase/job.UseCase that
@@ -1043,6 +1045,10 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		existingCase.FieldValues = mergeFieldValues(existingCase.FieldValues, validated)
 	}
 
+	// Everything above this line still sees the stored title; capture it here so
+	// the change notification below can report the before/after pair.
+	beforeTitle := existingCase.Title
+
 	// Rename the Slack channel only after EVERY validation has passed. Renaming
 	// is an external side effect that cannot be rolled back, so a later field
 	// validation failure must not leave the channel renamed while the DB still
@@ -1075,6 +1081,17 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		return nil, goerr.Wrap(err, "failed to update case", goerr.V(CaseIDKey, id))
 	}
 
+	// Tell the thread that the title moved. Only a real change is announced, so
+	// a re-submit of the same title stays silent.
+	if patch.Title != nil && beforeTitle != updated.Title {
+		actor := i18n.T(ctx, i18n.MsgChangeActorSystem)
+		if tok, terr := auth.TokenFromContext(ctx); terr == nil && tok.Sub != "" {
+			actor = mentionUser(tok.Sub)
+		}
+		uc.postThreadContextLine(ctx, updated,
+			i18n.T(ctx, i18n.MsgCaseChangeTitle, actor, beforeTitle, updated.Title))
+	}
+
 	return updated, nil
 }
 
@@ -1086,25 +1103,67 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 // assignees must resolve to known Slack users. An empty userIDs slice is a
 // no-op that returns the case unchanged.
 func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	// Fail fast through the shared read gate: it is what turns a missing case
+	// into ErrCaseNotFound and a private case into ErrAccessDenied, which
+	// callers (GraphQL error mapping, agent tools) discriminate on. The
+	// transaction below re-checks access on the state it actually writes, so
+	// this read is never the basis for any decision that gets persisted or
+	// announced.
 	existingCase, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
 		return nil, err
 	}
 
 	// An empty input is a guaranteed no-op; short-circuit before the user
-	// existence check and the assignee transaction.
+	// existence check and the transaction.
 	if len(userIDs) == 0 {
 		return existingCase, nil
 	}
 
+	// Verify the users BEFORE opening the transaction: it reads a different
+	// collection (SlackUser), and Firestore re-runs the transaction body on
+	// contention — a cross-collection read inside it would repeat on every
+	// attempt for no gain.
 	if err := uc.verifyUsersExist(ctx, userIDs, nil); err != nil {
 		return nil, goerr.Wrap(err, "assignee verification failed", goerr.V(CaseIDKey, id))
 	}
 
-	updated, err := uc.repo.Case().AddAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to add assignees", goerr.V(CaseIDKey, id))
+	actorID, checkAccess := tokenActor(ctx)
+	var added []string
+	updated, txErr := uc.repo.Case().Transact(ctx, workspaceID, id, func(c *model.Case) error {
+		// Reset: Firestore may re-run this closure, and a leftover value from a
+		// previous attempt would announce assignees this attempt did not make.
+		added = nil
+		if err := assertCaseWriteAccess(c, actorID, checkAccess); err != nil {
+			return err
+		}
+		before := slices.Clone(c.AssigneeIDs)
+		if c.AssignUsers(userIDs) {
+			c.UpdatedAt = time.Now().UTC()
+		}
+		added, _ = diffAssignees(before, c.AssigneeIDs)
+		return nil
+	})
+	if txErr != nil {
+		return nil, goerr.Wrap(txErr, "failed to add assignees", goerr.V(CaseIDKey, id))
 	}
+
+	// added was computed inside the transaction against the very state that was
+	// written, so a concurrent assign of the same user cannot make this announce
+	// a change it did not make.
+	if len(added) > 0 {
+		actor := i18n.T(ctx, i18n.MsgChangeActorSystem)
+		if tok, terr := auth.TokenFromContext(ctx); terr == nil && tok.Sub != "" {
+			actor = mentionUser(tok.Sub)
+		}
+		mentions := make([]string, 0, len(added))
+		for _, uid := range added {
+			mentions = append(mentions, mentionUser(uid))
+		}
+		uc.postThreadContextLine(ctx, updated,
+			i18n.T(ctx, i18n.MsgCaseChangeAssigneeAssigned, actor, strings.Join(mentions, ", ")))
+	}
+
 	return updated, nil
 }
 
@@ -1113,21 +1172,50 @@ func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id in
 // existence check (a since-deleted user must still be removable). An empty
 // userIDs slice is a no-op that returns the case unchanged.
 func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	// Same fail-fast read as AssignCase: it owns the ErrCaseNotFound /
+	// ErrAccessDenied contract, never the diff.
 	existingCase, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// An empty input is a guaranteed no-op; short-circuit before the
-	// assignee transaction.
 	if len(userIDs) == 0 {
 		return existingCase, nil
 	}
 
-	updated, err := uc.repo.Case().RemoveAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to remove assignees", goerr.V(CaseIDKey, id))
+	actorID, checkAccess := tokenActor(ctx)
+	var removed []string
+	updated, txErr := uc.repo.Case().Transact(ctx, workspaceID, id, func(c *model.Case) error {
+		removed = nil
+		if err := assertCaseWriteAccess(c, actorID, checkAccess); err != nil {
+			return err
+		}
+		before := slices.Clone(c.AssigneeIDs)
+		if c.UnassignUsers(userIDs) {
+			c.UpdatedAt = time.Now().UTC()
+		}
+		_, removed = diffAssignees(before, c.AssigneeIDs)
+		return nil
+	})
+	if txErr != nil {
+		return nil, goerr.Wrap(txErr, "failed to remove assignees", goerr.V(CaseIDKey, id))
 	}
+
+	// Mirror of AssignCase: the diff comes from inside the transaction, so
+	// unassigning someone another request already removed stays silent.
+	if len(removed) > 0 {
+		actor := i18n.T(ctx, i18n.MsgChangeActorSystem)
+		if tok, terr := auth.TokenFromContext(ctx); terr == nil && tok.Sub != "" {
+			actor = mentionUser(tok.Sub)
+		}
+		mentions := make([]string, 0, len(removed))
+		for _, uid := range removed {
+			mentions = append(mentions, mentionUser(uid))
+		}
+		uc.postThreadContextLine(ctx, updated,
+			i18n.T(ctx, i18n.MsgCaseChangeAssigneeUnassigned, actor, strings.Join(mentions, ", ")))
+	}
+
 	return updated, nil
 }
 
@@ -1785,6 +1873,7 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 	}
 
 	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed
+	beforeStatus := existing.BoardStatus
 	existing.BoardStatus = boardStatus
 	existing.SyncLifecycleFromBoardStatus(set)
 	existing.UpdatedAt = time.Now().UTC()
@@ -1797,6 +1886,25 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 	if !wasClosed && updated.Status.Normalize() == types.CaseStatusClosed {
 		uc.publishLifecycle(ctx, workspaceID, updated, model.CaseLifecycleClosed)
 	}
+
+	if beforeStatus != updated.BoardStatus {
+		actor := i18n.T(ctx, i18n.MsgChangeActorSystem)
+		if tok, terr := auth.TokenFromContext(ctx); terr == nil && tok.Sub != "" {
+			actor = mentionUser(tok.Sub)
+		}
+		// Report the configured display name, not the raw board status id. An id
+		// the set no longer defines (left over from a config change) falls back to
+		// the id itself, and an unset board status to an em dash.
+		label := func(statusID string) string {
+			if def, ok := set.Get(statusID); ok {
+				return def.Name
+			}
+			return orDash(statusID)
+		}
+		uc.postThreadContextLine(ctx, updated,
+			i18n.T(ctx, i18n.MsgCaseChangeStatus, actor, label(beforeStatus), label(updated.BoardStatus)))
+	}
+
 	return updated, nil
 }
 
@@ -2272,4 +2380,29 @@ func (uc *CaseUseCase) GetActionStatusSet(workspaceID string) *model.ActionStatu
 // columns) for a thread-mode workspace, or nil for channel-mode workspaces.
 func (uc *CaseUseCase) GetCaseStatusSet(workspaceID string) *model.ActionStatusSet {
 	return uc.caseStatusSetForWorkspace(workspaceID)
+}
+
+// postThreadContextLine posts body as a single context-block reply in the
+// Case's Slack thread. Thread-mode only: a channel-mode Case owns a dedicated
+// channel and has no thread to reply into, and its title change already renames
+// that channel. No PostThreadOption is passed, so the reply stays inside the
+// thread — reply_broadcast would push it into the monitored channel that every
+// other thread-mode Case shares.
+//
+// Best-effort: a Slack failure is reported through errutil.Handle and never
+// rolls back the write that produced the change.
+func (uc *CaseUseCase) postThreadContextLine(ctx context.Context, c *model.Case, body string) {
+	if uc.slackService == nil || c == nil || body == "" {
+		return
+	}
+	if !c.IsThreadBound() || c.SlackChannelID == "" {
+		return
+	}
+
+	blocks := []goslack.Block{
+		goslack.NewContextBlock("", goslack.NewTextBlockObject(goslack.MarkdownType, body, false, false)),
+	}
+	if _, err := uc.slackService.PostThreadMessage(ctx, c.SlackChannelID, c.SlackThreadTS, blocks, body); err != nil {
+		errutil.Handle(ctx, err, "failed to post case change notification")
+	}
 }
