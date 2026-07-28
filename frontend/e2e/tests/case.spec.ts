@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { CaseListPage } from '../pages/CaseListPage';
 import { CaseFormPage } from '../pages/CaseFormPage';
 import { CaseDetailPage } from '../pages/CaseDetailPage';
+import { ActionFormPage } from '../pages/ActionFormPage';
+import { ActionDetailPage } from '../pages/ActionDetailPage';
 import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 
 test.describe('Case Management', () => {
@@ -394,9 +396,80 @@ test.describe('Case Management', () => {
     expect(isVisible).toBeTruthy();
   });
 
-  test('should paginate cases', async ({ page }) => {
+  test('should treat a case row as a link: modifier-click opens a new tab, any cell navigates', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
+    const title = `RowLink-${Date.now()}`;
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({ title, customFields: { category: 'task' } });
+    await caseListPage.fillSearchFilter(title);
+
+    // The row navigates through a real anchor, so the browser's own
+    // Cmd/Ctrl-click behaviour applies and opens the detail page in a new tab.
+    const href = await caseListPage.getCaseHrefByTitle(title);
+    expect(href).toMatch(new RegExp(`^/ws/${TEST_WORKSPACE_ID}/cases/\\d+$`));
+
+    const newTab = await caseListPage.openCaseInNewTabByTitle(title);
+    expect(new URL(newTab.url()).pathname).toBe(href);
+    // The original tab stays on the list.
+    expect(new URL(page.url()).pathname).toBe(`/ws/${TEST_WORKSPACE_ID}/cases`);
+    await newTab.close();
+
+    // Clicking outside the title cell reaches the same link.
+    await caseListPage.clickCaseRowCellByHeader(title, 'Created');
+    expect(new URL(page.url()).pathname).toBe(href);
+
+    // A case created in the Web UI has no Slack channel, so its Slack cell only
+    // shows a dash — it must still belong to the row link.
+    await page.goBack();
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseRowCellByHeader(title, 'Slack');
+    expect(new URL(page.url()).pathname).toBe(href);
+  });
+
+  test('should keep the originating tab after opening and closing a related action', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+    const actionFormPage = new ActionFormPage(page);
+    const actionDetailPage = new ActionDetailPage(page);
+    const title = `ReturnTo-${Date.now()}`;
+    const actionTitle = `${title} Action`;
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({ title, customFields: { category: 'task' } });
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+
+    await page.getByTestId('add-action-button').click();
+    await actionFormPage.createAction({ title: actionTitle, caseTitle: title });
+
+    // Re-enter from the All tab so the return target is not the default one.
+    await caseListPage.navigate(TEST_WORKSPACE_ID);
+    await caseListPage.clickStatusTab('All');
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+
+    // The Action modal is a route change on the same Case. Opening and closing
+    // it must not lose which list tab (or page) the Case was opened from.
+    await page.locator('a').filter({ hasText: actionTitle }).first().click();
+    await expect(page).toHaveURL(/\/actions\/\d+$/);
+    await actionDetailPage.closeModal();
+    await expect(page).toHaveURL(/\/cases\/\d+$/);
+
+    await caseDetailPage.clickBack();
+    await caseListPage.waitForTableLoad();
+    expect(page.url()).toContain('status=all');
+  });
+
+  test('should paginate cases, adjust the page size, and return to the same page', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
 
     // Unique prefix so the exact-count assertions below survive a retry or a
     // parallel worker: a generic "Paginated Case" filter would match a
@@ -435,6 +508,40 @@ test.describe('Case Management', () => {
     await caseListPage.goToPage('prev');
     const backInfo = await caseListPage.getPaginationInfo();
     expect(backInfo).toContain('1 / 2');
+
+    // Raising the page size collapses the same 21 rows onto one page.
+    await caseListPage.setPageSize(50);
+    expect(await caseListPage.getRowCount()).toBe(21);
+    expect(await caseListPage.getPaginationInfo()).toContain('1 / 1');
+
+    // The choice is persisted, so a reload comes back at 50 rows. The search
+    // filter is not persisted, so re-apply it before counting again.
+    await page.reload();
+    await caseListPage.waitForTableLoad();
+    expect(await caseListPage.getPageSize()).toBe(50);
+    await caseListPage.setPageSize(20);
+    await caseListPage.fillSearchFilter(prefix);
+    expect(await caseListPage.getPaginationInfo()).toContain('1 / 2');
+
+    // Opening a case from page 2 and coming back must land on page 2 again.
+    // The search filter is component state and is gone after the round trip,
+    // so the total page count differs — only the page index is asserted.
+    await caseListPage.goToPage('next');
+    expect(page.url()).toContain('page=2');
+    const page2Titles = await caseListPage.getCaseTitles();
+    await caseListPage.clickCaseByTitle(page2Titles[0]);
+
+    await caseDetailPage.clickBack();
+    await caseListPage.waitForTableLoad();
+    expect(page.url()).toContain('page=2');
+    expect(await caseListPage.getPaginationInfo()).toMatch(/^\s*2 \//);
+
+    // Browser Back gets the same treatment, because the page lives in the URL.
+    const backTitles = await caseListPage.getCaseTitles();
+    await caseListPage.clickCaseByTitle(backTitles[0]);
+    await page.goBack();
+    await caseListPage.waitForTableLoad();
+    expect(page.url()).toContain('page=2');
   });
 
   test('should reflect closed case in list after closing', async ({ page }) => {

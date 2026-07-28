@@ -165,7 +165,10 @@ export class ActionDetailPage extends BasePage {
    * Close the modal by clicking the close button
    */
   async closeModal(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Close' }).click();
+    // Target the modal's own close control by test id: on a Case detail page
+    // there are other buttons named "Close" (closing the Case itself), and a
+    // role+name lookup hits all of them.
+    await this.page.getByTestId('modal-close-button').click();
     await this.page.locator('[class*="backdrop"]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 }

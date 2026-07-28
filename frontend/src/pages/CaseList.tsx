@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
-import { useNavigate, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { GET_CASES } from '../graphql/case'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -27,8 +27,15 @@ import {
   type BulkActionKind,
   type BulkActionResult,
 } from '../hooks/useBulkDraftAction'
+import styles from './CaseList.module.css'
 
-const PAGE_SIZE = 20
+// Rows rendered per page. 20 stays the default so the list opens as compactly
+// as before; the larger options let a user scan a whole workspace at once.
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const
+const DEFAULT_PAGE_SIZE = 20
+// Not workspace-scoped: how many rows fit on screen is a property of the
+// user's display, not of the workspace being viewed.
+const PAGE_SIZE_STORAGE_KEY = 'caseListPageSize'
 
 type StatusFilter = 'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'
 
@@ -36,6 +43,21 @@ type StatusFilter = 'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'
 // readable; OPEN is the implicit default and is never emitted.
 type StatusQuery = 'closed' | 'draft' | 'all'
 export const CASE_LIST_STATUS_PARAM = 'status'
+export const CASE_LIST_PAGE_PARAM = 'page'
+
+function parsePageSize(raw: string | null): number {
+  const n = Number(raw)
+  return PAGE_SIZE_OPTIONS.some((o) => o === n) ? n : DEFAULT_PAGE_SIZE
+}
+
+// `page` is 1-based in the URL so a shared or bookmarked link reads naturally;
+// internally the list works with a 0-based index.
+function parsePageIndex(raw: string | null): number {
+  if (raw === null) return 0
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1) return 0
+  return n - 1
+}
 
 function parseStatusFilter(raw: string | null): StatusFilter {
   switch ((raw ?? '').toLowerCase()) {
@@ -108,8 +130,15 @@ function formatDate(iso: string) {
   return `${yyyy}/${mm}/${dd}`
 }
 
+// A blank value renders as a dash for every field type, which also means the
+// cell holds no <a> even for a URL field. Shared with the row-link logic so
+// the two cannot disagree about what "blank" means.
+function isBlankFieldValue(value: any): boolean {
+  return value == null || value === ''
+}
+
 function renderFieldValue(value: any, def: FieldDef): React.ReactNode {
-  if (value == null || value === '') return <span className="soft">—</span>
+  if (isBlankFieldValue(value)) return <span className="soft">—</span>
   switch (def.type) {
     case 'SELECT': {
       const opt = def.options?.find((o) => o.id === value || o.name === value)
@@ -159,13 +188,14 @@ export default function CaseList() {
   const wsKey = currentWorkspace?.id || 'default'
   const storageKey = `caseListColumns:${wsKey}`
 
-  // The selected tab lives in the URL (`?status=closed|draft|all`) so
-  // that navigating away and back — via the case detail page, browser
-  // back, or a shared link — restores whichever tab the user was on.
-  // `OPEN` is the implicit default and is represented by the query
-  // being absent.
+  // The selected tab and the current page live in the URL
+  // (`?status=closed|draft|all&page=3`) so that navigating away and back —
+  // via the case detail page, browser back, or a shared link — restores
+  // both. `OPEN` and page 1 are the implicit defaults and are represented
+  // by the query being absent.
   const [searchParams, setSearchParams] = useSearchParams()
   const statusFilter: StatusFilter = parseStatusFilter(searchParams.get(CASE_LIST_STATUS_PARAM))
+  const requestedPage = parsePageIndex(searchParams.get(CASE_LIST_PAGE_PARAM))
 
   const setStatusFilter = useCallback(
     (next: StatusFilter) => {
@@ -175,6 +205,28 @@ export default function CaseList() {
           const q = statusToQuery(next)
           if (q) params.set(CASE_LIST_STATUS_PARAM, q)
           else params.delete(CASE_LIST_STATUS_PARAM)
+          // Row offsets are per-tab, so carrying the page across a tab
+          // switch would drop the user at an unrelated offset.
+          params.delete(CASE_LIST_PAGE_PARAM)
+          return params
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  // Paging replaces the history entry rather than pushing one: browser Back
+  // should leave the list, not walk back through the pages the user flipped
+  // through. The rewritten entry still carries `?page=N`, which is what
+  // makes Back from a case detail land on the page it was opened from.
+  const setPageIndex = useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (next > 0) params.set(CASE_LIST_PAGE_PARAM, String(next + 1))
+          else params.delete(CASE_LIST_PAGE_PARAM)
           return params
         },
         { replace: true },
@@ -184,17 +236,28 @@ export default function CaseList() {
   )
 
   const [searchText, setSearchText] = useState('')
-  const [page, setPage] = useState(0)
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsBtnRef = useRef<HTMLDivElement>(null)
 
-  // Reset pagination whenever the tab changes — browser back/forward
-  // updates statusFilter without going through the click handlers, so
-  // without this the user can land on a now-out-of-range page index.
-  useEffect(() => {
-    setPage(0)
-  }, [statusFilter])
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      return parsePageSize(localStorage.getItem(PAGE_SIZE_STORAGE_KEY))
+    } catch {
+      return DEFAULT_PAGE_SIZE
+    }
+  })
+
+  const handlePageSizeChange = useCallback(
+    (next: number) => {
+      setPageSize(next)
+      try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next)) } catch {}
+      // The page index means a different row range at the new size, so the
+      // only offset that stays meaningful is the first one.
+      setPageIndex(0)
+    },
+    [setPageIndex],
+  )
 
   const [visibleCols, setVisibleCols] = useState<string[]>(() => {
     try {
@@ -270,8 +333,13 @@ export default function CaseList() {
     return cases.filter((c) => !c.accessDenied && c.title.toLowerCase().includes(q))
   }, [cases, searchText])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  // The URL can name a page that does not exist right now — the page size was
+  // lowered, rows were filtered out, or the link was hand-edited. Clamp for
+  // display instead of rewriting the query, so a list that has not finished
+  // loading (0 rows, 1 page) does not overwrite a still-valid `?page=3`.
+  const page = Math.min(requestedPage, totalPages - 1)
+  const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize)
 
   const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
@@ -372,6 +440,27 @@ export default function CaseList() {
   }
 
   const visibleColumns = allColumns.filter((c) => isVisible(c.key))
+
+  // Whether this cell already renders its own <a> (the Slack deep link, a URL
+  // field value). Such a cell must not get a row link on top: nesting anchors
+  // is invalid HTML and an overlay would swallow the inner link's clicks.
+  //
+  // Decided per row, not per column: both cells fall back to a dash when the
+  // value is missing, and a dash is no link. Judging by column type alone left
+  // every Slack-less Case with a dead cell in the always-visible Slack column.
+  const hasOwnLink = (col: typeof allColumns[number], c: CaseRow) => {
+    if (!col.custom) return col.key === 'slack' && Boolean(c.slackChannelID)
+    const def = col.def!
+    if (def.type !== 'URL') return false
+    return !isBlankFieldValue(c.fields.find((cf) => cf.fieldId === def.id)?.value)
+  }
+
+  // Carried to the case detail page so its Back / delete / discard handlers
+  // return to the tab AND page the row was opened from.
+  const rowLinkState = {
+    fromStatus: statusToQuery(statusFilter),
+    fromPage: page > 0 ? page + 1 : undefined,
+  }
 
   const isDraftsTab = statusFilter === 'DRAFT'
 
@@ -538,7 +627,7 @@ export default function CaseList() {
         <div className="seg">
           <button
             className={statusFilter === 'OPEN' ? 'on' : ''}
-            onClick={() => { setStatusFilter('OPEN'); setPage(0) }}
+            onClick={() => setStatusFilter('OPEN')}
             data-testid="status-tab-open"
           >
             {t('tabOpen')}
@@ -546,7 +635,7 @@ export default function CaseList() {
           </button>
           <button
             className={statusFilter === 'CLOSED' ? 'on' : ''}
-            onClick={() => { setStatusFilter('CLOSED'); setPage(0) }}
+            onClick={() => setStatusFilter('CLOSED')}
             data-testid="status-tab-closed"
           >
             {t('tabClosed')}
@@ -554,7 +643,7 @@ export default function CaseList() {
           </button>
           <button
             className={statusFilter === 'DRAFT' ? 'on' : ''}
-            onClick={() => { setStatusFilter('DRAFT'); setPage(0) }}
+            onClick={() => setStatusFilter('DRAFT')}
             data-testid="status-tab-draft"
           >
             {t('tabDrafts')}
@@ -562,7 +651,8 @@ export default function CaseList() {
           </button>
           <button
             className={statusFilter === 'ALL' ? 'on' : ''}
-            onClick={() => { setStatusFilter('ALL'); setPage(0) }}
+            onClick={() => setStatusFilter('ALL')}
+            data-testid="status-tab-all"
           >
             {t('tabAll')}
           </button>
@@ -586,7 +676,7 @@ export default function CaseList() {
           <IconSearch size={13} />
           <input
             value={searchText}
-            onChange={(e) => { setSearchText(e.target.value); setPage(0) }}
+            onChange={(e) => { setSearchText(e.target.value); setPageIndex(0) }}
             placeholder={t('placeholderSearchByTitle')}
             data-testid="search-filter"
             style={{
@@ -635,27 +725,58 @@ export default function CaseList() {
             )}
             {pageRows.map((c) => {
               const rowSelected = isDraftsTab && selectedIds.has(c.id)
+              // Drafts share the regular case detail page — Submit / Discard
+              // surface there based on status.
+              const caseHref = `/ws/${currentWorkspace!.id}/cases/${c.id}`
+              // accessDenied rows expose no detail page, so they stay inert.
+              const linkable = !c.accessDenied
+              // Real anchors instead of a row onClick handler: only an <a> gives
+              // the browser's own behaviour — Cmd/Ctrl-click and middle-click
+              // open a new tab, "Open in new tab" appears in the context menu,
+              // and the target URL shows in the status bar.
+              const cellOverlay = linkable ? (
+                <Link
+                  className={styles.cellOverlay}
+                  to={caseHref}
+                  state={rowLinkState}
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+              ) : null
+              const withRowLink = (content: React.ReactNode) => (
+                <div className={styles.cellInner}>
+                  {cellOverlay}
+                  {content}
+                </div>
+              )
+              const titleContent = (
+                <div className="row" style={{ gap: 8 }}>
+                  {c.isPrivate && (
+                    <span title={t('badgePrivate')} data-testid="private-lock-icon" style={{ color: 'var(--warn)', display: 'inline-flex' }}>
+                      <IconLock size={12} sw={2} />
+                    </span>
+                  )}
+                  {c.accessDenied ? (
+                    <span data-testid="access-denied-label" className="muted" style={{ fontStyle: 'italic' }}>
+                      {t('badgePrivate')}
+                    </span>
+                  ) : (
+                    <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
+                  )}
+                  {!c.accessDenied && c.isTest && (
+                    <span data-testid="test-badge"><TestBadge label={t('badgeTest')} /></span>
+                  )}
+                </div>
+              )
               return (
                 <tr
                   key={c.id}
-                  onClick={() => {
-                    if (c.accessDenied) return
-                    // Drafts share the regular case detail page — Submit /
-                    // Discard surface there based on status.
-                    // Pass the active tab through location.state so that
-                    // the detail page's back/delete/discard handlers can
-                    // return to the same tab.
-                    navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`, {
-                      state: { fromStatus: statusToQuery(statusFilter) },
-                    })
-                  }}
                   style={{
-                    cursor: c.accessDenied ? 'default' : 'pointer',
                     background: rowSelected ? 'var(--bg-highlight)' : undefined,
                   }}
                 >
                   {isDraftsTab && (
-                    <td style={{ width: 36 }} onClick={(e) => e.stopPropagation()}>
+                    <td style={{ width: 36 }}>
                       <input
                         type="checkbox"
                         data-testid={`bulk-row-checkbox-${c.id}`}
@@ -666,35 +787,29 @@ export default function CaseList() {
                       />
                     </td>
                   )}
-                  <td className="id mono">#{c.id}</td>
+                  <td className="id mono">{withRowLink(<>#{c.id}</>)}</td>
                   <td>
-                    <div className="row" style={{ gap: 8 }}>
-                      {c.isPrivate && (
-                        <span title={t('badgePrivate')} data-testid="private-lock-icon" style={{ color: 'var(--warn)', display: 'inline-flex' }}>
-                          <IconLock size={12} sw={2} />
-                        </span>
-                      )}
-                      {c.accessDenied ? (
-                        <span data-testid="access-denied-label" className="muted" style={{ fontStyle: 'italic' }}>
-                          {t('badgePrivate')}
-                        </span>
-                      ) : (
-                        <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
-                      )}
-                      {!c.accessDenied && c.isTest && (
-                        <span data-testid="test-badge"><TestBadge label={t('badgeTest')} /></span>
-                      )}
-                    </div>
+                    {linkable ? (
+                      // The title cell holds the row's one focusable link: it
+                      // wraps the title text, so it needs no aria-label and the
+                      // title stays selectable.
+                      <Link
+                        className={styles.titleLink}
+                        to={caseHref}
+                        state={rowLinkState}
+                        data-testid={`case-row-link-${c.id}`}
+                      >
+                        {titleContent}
+                      </Link>
+                    ) : titleContent}
                   </td>
                   {visibleColumns.map((col) => (
-                    <td key={col.key}>{renderCell(col, c)}</td>
+                    <td key={col.key}>
+                      {hasOwnLink(col, c) ? renderCell(col, c) : withRowLink(renderCell(col, c))}
+                    </td>
                   ))}
                   <td>
-                    <button
-                      className="h-icon-btn"
-                      style={{ width: 24, height: 24 }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <button className="h-icon-btn" style={{ width: 24, height: 24 }}>
                       <IconDots size={14} />
                     </button>
                   </td>
@@ -710,17 +825,32 @@ export default function CaseList() {
             fontSize: 12, color: 'var(--fg-muted)', borderTop: '1px solid var(--line)',
           }}
         >
-          <span>
-            {filtered.length === 0
-              ? '0–0 / 0'
-              : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, filtered.length)} / ${filtered.length}`}
-          </span>
+          <div className="row" style={{ gap: 16 }}>
+            <span>
+              {filtered.length === 0
+                ? '0–0 / 0'
+                : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, filtered.length)} / ${filtered.length}`}
+            </span>
+            <label className={styles.pageSizeLabel}>
+              {t('paginationPageSize')}
+              <select
+                className={styles.pageSizeSelect}
+                data-testid="page-size-select"
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="row" style={{ gap: 6 }}>
             <Button
               size="sm"
               icon={<IconChevLeft size={12} />}
               disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => setPageIndex(Math.max(0, page - 1))}
               data-testid="pagination-prev"
             >
               {t('btnPrevious')}
@@ -730,7 +860,7 @@ export default function CaseList() {
               size="sm"
               icon={<IconChevRight size={12} />}
               disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              onClick={() => setPageIndex(Math.min(totalPages - 1, page + 1))}
               data-testid="pagination-next"
             >
               {t('btnNext')}

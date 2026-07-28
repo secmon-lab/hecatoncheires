@@ -91,6 +91,7 @@ export const ja: Messages = {
 
   // Pagination
   paginationPageOf: '{current} / {total} ページ',
+  paginationPageSize: '表示件数',
 
   // Columns selector
   titleColumnSelector: 'カラム',

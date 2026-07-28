@@ -13,6 +13,16 @@ After signing in to the Web UI you land on the **home** screen (`/`), which pull
 
 Private Cases you are not a channel member of never appear here, even if you happen to be listed as an assignee.
 
+## Case list (Web UI)
+
+Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the **Open / Closed / Drafts / All** tabs, a title search box, and a column picker.
+
+- **Rows per page** — the footer control switches between **20 / 50 / 100 / 200** rows. The choice is remembered in your browser (per browser, not per workspace) and applies the next time you open any Case list.
+- **Rows are links** — a row is a real link to the Case, so Cmd/Ctrl-click and middle-click open it in a new tab, the target URL shows in the status bar, and "Open in new tab" works from the context menu. A private Case you are not a channel member of renders as an inert `Private` row with no link. Cells that carry their own link (the Slack channel, a URL field with a value) keep that link instead. Outside the title column the link surface covers the cell contents, so select and copy text from the title cell.
+- **Coming back keeps your place** — the selected tab and the current page live in the URL (`?status=closed&page=3`), so browser Back, the Case detail page's **Back** button, and a shared or bookmarked link all return to the same tab and page. Page 1 and the Open tab are the defaults and are left out of the URL.
+
+The column picker's selection is also stored in your browser, per workspace, because the available custom-field columns differ between workspaces.
+
 ## Creating a Case in Slack (Slash → modal)
 
 Slack slash commands let users create and edit cases directly from Slack without opening the web UI. The slash command behaves differently depending on the channel context:

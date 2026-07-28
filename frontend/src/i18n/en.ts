@@ -91,6 +91,7 @@ export const en: Messages = {
 
   // Pagination
   paginationPageOf: 'Page {current} of {total}',
+  paginationPageSize: 'Rows',
 
   // Columns selector
   titleColumnSelector: 'Columns',

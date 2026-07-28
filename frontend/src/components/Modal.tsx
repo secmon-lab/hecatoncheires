@@ -60,6 +60,7 @@ export default function Modal({ open, isOpen, onClose, title, width = 540, foote
               type="button"
               className="h-icon-btn"
               onClick={onClose}
+              data-testid="modal-close-button"
               aria-label={t('btnClose') || 'Close'}
               title={t('btnClose') || 'Close'}
             >
