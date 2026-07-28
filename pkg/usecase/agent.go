@@ -246,7 +246,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	}
 
 	// Look up (or create) the Session that ties this thread to the Case.
-	session, err := uc.loadOrCreateSession(ctx, entry.Workspace.ID, foundCase.ID, msg.ChannelID(), threadTS)
+	session, err := uc.loadOrCreateSession(ctx, entry.Workspace.ID, foundCase.ID, msg.ChannelID(), threadTS, model.SessionKindCase)
 	if err != nil {
 		return goerr.Wrap(err, "failed to load or create agent session")
 	}
@@ -356,11 +356,39 @@ func toCaseboundMessages(in []slack.ConversationMessage) []casebound.Conversatio
 	return out
 }
 
+// claimSession is loadOrCreateSession plus immediate, atomic persistence: it
+// returns the stored Session for the thread, creating it in the same operation
+// when none exists yet (see interfaces.SessionRepository.Claim).
+//
+// A host uses this instead of loadOrCreateSession when the Session's Kind is
+// load-bearing for routing OTHER events — the Slack dispatcher reads it to
+// decide whether an in-thread mention starts a Case. Deferring the write to
+// AcquireTurnLock would leave the thread unowned for the length of the host's
+// setup work, and a concurrent mention arriving in that gap would route it the
+// other way. The returned Session may therefore carry a different Kind than
+// requested: that means another host claimed the thread first, and the caller
+// must respect that decision rather than proceed.
+func (uc *AgentUseCase) claimSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string, kind model.SessionKind) (*model.Session, error) {
+	claimed, err := uc.deps.Repo.Session().Claim(ctx, channelID, threadTS, func() *model.Session {
+		return uc.newSession(ctx, workspaceID, caseID, channelID, threadTS, kind)
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to claim session",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	return claimed, nil
+}
+
 // loadOrCreateSession returns the Session for the given thread, creating
 // (but not yet persisting) a fresh one when none exists. Persistence happens
 // at the end of HandleAgentMention so we only commit a session that
 // successfully started a turn.
-func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string) (*model.Session, error) {
+//
+// kind is applied ONLY to a freshly created Session. An existing one is
+// returned untouched: a thread's owner is decided by whoever started it, and
+// letting a later caller rewrite it would make the dispatcher's routing
+// (case creation vs. workspace agent) depend on event ordering.
+func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string, kind model.SessionKind) (*model.Session, error) {
 	existing, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get session")
@@ -368,12 +396,16 @@ func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID str
 	if existing != nil {
 		return existing, nil
 	}
+	return uc.newSession(ctx, workspaceID, caseID, channelID, threadTS, kind), nil
+}
 
-	// New session: detect Action linkage by matching the thread parent TS
-	// against any registered action notification message. Most threads
-	// have no associated action — tag ErrNotFound as benign so the lookup
-	// is visible at Info level without paging Sentry, while real backend
-	// failures still alert as ERROR.
+// newSession builds a fresh, unpersisted Session for the thread. Shared by
+// loadOrCreateSession and claimSession so both produce identical records.
+func (uc *AgentUseCase) newSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string, kind model.SessionKind) *model.Session {
+	// Detect Action linkage by matching the thread parent TS against any
+	// registered action notification message. Most threads have no associated
+	// action — tag ErrNotFound as benign so the lookup is visible at Info level
+	// without paging Sentry, while real backend failures still alert as ERROR.
 	var actionID int64
 	if action, err := uc.deps.Repo.Action().GetBySlackMessageTS(ctx, workspaceID, threadTS); err == nil && action != nil {
 		actionID = action.ID
@@ -389,12 +421,13 @@ func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID str
 		ID:          uuid.Must(uuid.NewV7()).String(),
 		WorkspaceID: workspaceID,
 		CaseID:      caseID,
+		Kind:        kind,
 		ThreadTS:    threadTS,
 		ChannelID:   channelID,
 		ActionID:    actionID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	}, nil
+	}
 }
 
 // partitionConversation splits the messages around this mention into the two

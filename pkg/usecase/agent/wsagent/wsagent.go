@@ -50,6 +50,14 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		req.Handler = HandlerFuncs{}
 	}
 
+	// Build the prompt before taking the turn lock so a template failure costs
+	// nothing: no lock to release, no trace line already posted to the thread.
+	systemPrompt, err := buildSystemPrompt(req.Workspace)
+	if err != nil {
+		return nil, goerr.Wrap(err, "build workspace-agent system prompt",
+			goerr.V("workspace_id", req.Workspace.Workspace.ID))
+	}
+
 	handle, err := uc.deps.StartTurn(ctx, req.Session, req.TriggerTS)
 	if err != nil {
 		return nil, goerr.Wrap(err, "start workspace-agent turn")
@@ -97,7 +105,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			},
 		},
 		UserInput:    req.MentionText,
-		SystemPrompt: buildSystemPrompt(req.Workspace),
+		SystemPrompt: systemPrompt,
 		ToolResolver: resolver,
 		KnownToolIDs: agent.KnownToolSetIDsWorkspaceChannel,
 		// Case mutations happen as sub-agent tool calls inside the loop, gated by
@@ -135,15 +143,26 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 	d := uc.deps
 	wsID := req.Workspace.Workspace.ID
+
+	caseMulti := casemulti.Deps{
+		WorkspaceID: wsID,
+		ActorID:     req.ActorID,
+		CaseUC:      d.CaseMultiUC,
+		Schema:      req.Workspace.FieldSchema,
+	}
+	if req.Workspace.IsThreadMode() {
+		// A thread-mode workspace manages no Actions, so the cross-case action
+		// tools must not exist. Finishing a case there means moving to a status
+		// configured as closed, so hand over the board status set — that also
+		// swaps case__close_case out, which would reject a thread-bound case.
+		caseMulti.StatusSet = req.Workspace.CaseStatusSet
+	} else {
+		caseMulti.ActionUC = d.CaseMultiActionUC
+	}
+
 	return agent.NewToolSetResolver(agent.ToolSetDeps{
-		OmitCore: true,
-		CaseMulti: casemulti.Deps{
-			WorkspaceID: wsID,
-			ActorID:     req.ActorID,
-			CaseUC:      d.CaseMultiUC,
-			ActionUC:    d.CaseMultiActionUC,
-			Schema:      req.Workspace.FieldSchema,
-		},
+		OmitCore:  true,
+		CaseMulti: caseMulti,
 		Slack: slacktool.Deps{
 			Bot:       d.SlackBot,
 			Search:    d.SlackSearch,

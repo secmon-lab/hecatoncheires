@@ -135,9 +135,10 @@ type SlackSection struct {
 	// cross-case workspace agent runs (and future notifications flow). It
 	// parallels Channel but is channel-mode only; empty disables the feature.
 	WorkspaceChannel string `toml:"workspace_channel"`
-	// WorkspaceAgent configures the cross-case agent that runs in
-	// WorkspaceChannel ([slack.workspace_agent]). nil when the subsection is
-	// omitted. Only meaningful in channel mode with WorkspaceChannel set.
+	// WorkspaceAgent configures the cross-case agent ([slack.workspace_agent]).
+	// nil when the subsection is omitted. Valid in both modes: in channel mode
+	// the agent runs in WorkspaceChannel (which must then be set), in thread
+	// mode it runs on a channel-root mention in the monitored Channel.
 	WorkspaceAgent *WorkspaceAgentSection `toml:"workspace_agent"`
 }
 
@@ -490,21 +491,30 @@ func (a *AppConfig) Validate() error {
 }
 
 // validateWorkspaceChannel validates [slack] workspace_channel and the
-// [slack.workspace_agent] subsection. Both are channel-mode only; the agent
-// section is meaningless without a workspace_channel. prompt/prompt_file
-// exclusivity is checked structurally here (no file read); the actual read is
-// deferred to loadSingleWorkspaceConfig where the config directory is known.
+// [slack.workspace_agent] subsection.
+//
+// workspace_channel is channel-mode only: it names a separate channel to host
+// the workspace agent, and a thread-mode workspace already has one (the
+// monitored channel, where a channel-root mention runs the agent).
+// [slack.workspace_agent] is accepted in BOTH modes — in channel mode it needs
+// a workspace_channel to run in, in thread mode it stands alone.
+//
+// prompt/prompt_file exclusivity is checked structurally here (no file read);
+// the actual read is deferred to loadSingleWorkspaceConfig where the config
+// directory is known.
 func (a *AppConfig) validateWorkspaceChannel() error {
 	ch := a.Slack.WorkspaceChannel
 	agent := a.Slack.WorkspaceAgent
 	if ch == "" && agent == nil {
 		return nil // feature dormant
 	}
-	if model.CaseMode(a.Slack.Mode).IsThread() {
+	isThread := model.CaseMode(a.Slack.Mode).IsThread()
+
+	if ch != "" && isThread {
 		return goerr.Wrap(ErrWorkspaceChannelRequiresChannelMode,
-			"[slack] workspace_channel / [slack.workspace_agent] require channel mode")
+			"[slack] workspace_channel requires channel mode")
 	}
-	if agent != nil && ch == "" {
+	if agent != nil && !isThread && ch == "" {
 		return goerr.Wrap(ErrMissingWorkspaceChannel,
 			"[slack.workspace_agent] requires [slack] workspace_channel to be set")
 	}

@@ -54,6 +54,20 @@ type SessionRepository interface {
 	// AcquireTurnLock / Heartbeat / ReleaseTurnLock instead.
 	Put(ctx context.Context, s *model.Session) error
 
+	// Claim atomically creates the Session from newSessionFn() when none
+	// exists for (channelID, threadTS), and returns the stored Session
+	// either way. An existing Session is returned untouched — Claim never
+	// overwrites, so the first caller to reach a thread decides what owns
+	// it (see model.SessionKind) and every later caller observes that
+	// decision.
+	//
+	// It exists because "read, then create later" is not the same thing:
+	// AcquireTurnLock also creates-if-missing, but a host only reaches it
+	// after its own setup work, leaving a window in which a concurrent
+	// event sees no Session and routes the thread somewhere else. Claim is
+	// the durable marker a host takes BEFORE that work.
+	Claim(ctx context.Context, channelID, threadTS string, newSessionFn func() *model.Session) (*model.Session, error)
+
 	// AcquireTurnLock atomically transitions the Session from idle (or
 	// stale-running) into running owned by ownerID and returns the result.
 	//

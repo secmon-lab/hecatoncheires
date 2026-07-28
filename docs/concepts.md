@@ -142,20 +142,23 @@ See [Configuration → Case Section](configuration.md#case-section-thread-mode) 
 A **channel-mode**, workspace-level Slack channel that is *not* bound to any
 single Case (in contrast to the per-Case dedicated channels). Optional, one per
 Workspace, configured via `[slack] workspace_channel`. It is where the
-[Workspace agent](#workspace-agent) runs, and the intended home for future
-workspace-wide notifications. See
-[Configuration → Workspace channel & agent](configuration.md#workspace-channel--agent-channel-mode).
+[Workspace agent](#workspace-agent) runs in channel mode, and the intended home
+for future workspace-wide notifications. Thread mode has no workspace channel —
+the monitored channel plays that role. See
+[Configuration → Workspace agent](configuration.md#workspace-agent).
 
 ### Workspace agent
-The cross-case agent that runs in the [Workspace channel](#workspace-channel).
-When @mentioned, its thread becomes one session and it can read across, and act
-on, **every Case the mentioning user can access** — answering questions, creating
-Cases, or adding Actions to the right existing Case. It acts with the mentioning
+The cross-case agent: when @mentioned, its thread becomes one session and it can
+read across, and act on, **every Case the mentioning user can access** —
+answering questions, creating Cases, updating or moving existing ones. In channel
+mode it runs in the [Workspace channel](#workspace-channel); in thread mode
+(`trigger = "mention"`) it runs on a channel-root @mention in the monitored
+channel, and that thread never becomes a Case. It acts with the mentioning
 user's permissions (private Cases stay invisible to non-members) and is held to a
 strict write guardrail: it changes nothing unless the request explicitly asks
 for that change. Configured via `[slack.workspace_agent]` (`prompt` /
 `prompt_file`). See
-[Configuration → Workspace channel & agent](configuration.md#workspace-channel--agent-channel-mode).
+[Configuration → Workspace agent](configuration.md#workspace-agent).
 
 ### Private case
 A Case whose bound Slack channel is private. Access is restricted to channel

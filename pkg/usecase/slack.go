@@ -136,7 +136,7 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 				return nil
 			}
 			ctx = uc.contextWithUserLang(ctx, appMention.User)
-			if err := uc.agent.HandleWorkspaceChannelMention(ctx, msg, wsEntry); err != nil {
+			if err := uc.agent.HandleWorkspaceAgentMention(ctx, msg, wsEntry); err != nil {
 				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle workspace channel mention",
 					goerr.V("channel_id", appMention.Channel),
 					goerr.V("user_id", appMention.User),
@@ -280,7 +280,9 @@ func (uc *SlackUseCases) threadModeEntry(channelID string) (*model.WorkspaceEntr
 //	    whole thread). A bot-authored mention triggers only when accept_bot is set.
 //
 //	mention:
-//	  - channel-root mention → case creation.
+//	  - channel-root mention → the workspace agent (NOT case creation). The reply
+//	    lands in that mention's thread, and every follow-up mention inside it
+//	    continues the same conversation instead of starting a Case.
 //	  - mention in a case-less thread → case creation (thread context seeds it).
 //	  - a plain post (no mention) → ignored.
 //	  A bot-authored mention triggers only when accept_bot is set.
@@ -316,26 +318,66 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 				}
 				return
 			}
+
+			// A case-less thread opened by a channel-root mention belongs to the
+			// workspace agent, not to case creation. The Session's Kind is the only
+			// durable marker that distinguishes it from a thread whose Case is still
+			// being formed (that one also carries a CaseID == 0 Session), so it has
+			// to be read here before falling through to the creation path.
+			ssn, err := uc.repo.Session().GetByThread(ctx, appMention.Channel, threadTS)
+			if err != nil {
+				// Without the Session we cannot tell the two apart. Stop rather than
+				// guess: creating a stray Case in a workspace-agent thread is worse
+				// than not answering this mention.
+				errutil.Handle(ctx, goerr.Wrap(err, "thread mode: look up session for mention",
+					goerr.V("channel_id", appMention.Channel),
+					goerr.V("thread_ts", threadTS),
+				), "thread mode: look up session for mention")
+				return
+			}
+			if ssn != nil && ssn.Kind == model.SessionKindWorkspaceAgent {
+				// A bot-authored mention is dropped here rather than falling
+				// through: this thread is the agent's, so turning it into a Case
+				// would contradict the routing the Session records.
+				if isHumanMention(appMention) && uc.isAllowedMentionActor(ctx, appMention, entry) {
+					uc.startWorkspaceAgentMention(ctx, appMention, msg, entry)
+				}
+				return
+			}
+
 			// Mention in a case-less thread is a creation trigger in BOTH modes.
 			// In mention mode it is the primary trigger; in instant mode it is a
 			// recovery path for a thread whose root never became a case (a
 			// subtype/bot root that instant creation skipped, or a thread that
 			// predates the bot). The whole thread seeds the create agent. The
 			// bot-authored / accept_bot and self-mention gate still applies via
-			// isMentionCreationTrigger. (The channel-root mention branch below
-			// stays mention-only: in instant mode the accompanying message event
-			// drives root creation, so triggering here too would double-create.)
-			if uc.isMentionCreationTrigger(ctx, appMention, entry) {
+			// isAllowedMentionActor.
+			if uc.isAllowedMentionActor(ctx, appMention, entry) {
 				uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
 			}
 			return
 		}
 
-		// Top-level mention: a creation trigger only in mention mode. In instant
-		// mode the accompanying message event drives creation, so ignore here.
-		if mentionTrigger && uc.isMentionCreationTrigger(ctx, appMention, entry) {
-			uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
+		// Channel-root mention. In instant mode the accompanying message event
+		// drives case creation, so acting here too would double-handle it; ignore.
+		if !mentionTrigger || !uc.isAllowedMentionActor(ctx, appMention, entry) {
+			return
 		}
+		// In mention mode a root mention used to start a case — a human one now
+		// opens a workspace-agent conversation in the mention's thread instead.
+		// Cases in mention mode are started by an in-thread mention (the branch
+		// above).
+		if isHumanMention(appMention) {
+			uc.startWorkspaceAgentMention(ctx, appMention, msg, entry)
+			return
+		}
+		// A bot-authored root mention (an intake app filing a request, allowed
+		// only under accept_bot) keeps its documented behaviour of starting a
+		// Case. It cannot run the workspace agent: that agent acts with the
+		// mentioning user's permissions, and an app has no Slack user identity to
+		// scope private-case access to — running it unattributed would hand out
+		// full cross-workspace access.
+		uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
 		return
 	}
 
@@ -372,12 +414,41 @@ func (uc *SlackUseCases) startThreadCaseMentionCreation(ctx context.Context, app
 	}
 }
 
-// isMentionCreationTrigger reports whether an app_mention in a case-less
-// location should start a case in mention-trigger mode. A human mention always
-// qualifies. A bot-authored mention (an integration app @-mentioning the bot)
-// qualifies ONLY when the workspace opts in via [slack] accept_bot — mirroring
-// the instant-mode bot-post gate. The bot never triggers on its own mention.
-func (uc *SlackUseCases) isMentionCreationTrigger(ctx context.Context, ev *slackevents.AppMentionEvent, entry *model.WorkspaceEntry) bool {
+// isHumanMention reports whether an app_mention was authored by a Slack user
+// rather than an app. Only a human mention may run the workspace agent: that
+// agent establishes the mentioning user as the access actor for the whole turn
+// (auth.ContextWithToken in wsagent.RunTurn), and an app has no user identity
+// to scope private-case access to. accept_bot deliberately does not extend
+// here — it opts an integration into filing Cases, not into reading and writing
+// across the workspace as an unattributable actor.
+func isHumanMention(ev *slackevents.AppMentionEvent) bool {
+	return ev.User != "" && ev.BotID == ""
+}
+
+// startWorkspaceAgentMention runs the workspace agent for a monitored-channel
+// mention with the mentioner's language context, funnelling errors through
+// errutil. The thread it replies in never becomes a Case: the Session created
+// by HandleWorkspaceAgentMention carries SessionKindWorkspaceAgent, which the
+// in-thread branch above reads to keep follow-up mentions on this path.
+func (uc *SlackUseCases) startWorkspaceAgentMention(ctx context.Context, appMention *slackevents.AppMentionEvent, msg *slack.Message, entry *model.WorkspaceEntry) {
+	ctx = uc.contextWithUserLang(ctx, appMention.User)
+	if err := uc.agent.HandleWorkspaceAgentMention(ctx, msg, entry); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread-mode workspace agent mention",
+			goerr.V("channel_id", appMention.Channel),
+			goerr.V("thread_ts", appMention.ThreadTimeStamp),
+			goerr.V("message_ts", appMention.TimeStamp),
+		), "failed to handle thread-mode workspace agent mention")
+	}
+}
+
+// isAllowedMentionActor reports whether an app_mention in a thread-mode
+// monitored channel comes from an actor this workspace acts on at all. It gates
+// both of the thread-mode mention destinations — case creation and the
+// workspace agent. A human mention always qualifies. A bot-authored mention (an
+// integration app @-mentioning the bot) qualifies ONLY when the workspace opts
+// in via [slack] accept_bot — mirroring the instant-mode bot-post gate. The bot
+// never triggers on its own mention.
+func (uc *SlackUseCases) isAllowedMentionActor(ctx context.Context, ev *slackevents.AppMentionEvent, entry *model.WorkspaceEntry) bool {
 	// Never react to our own bot's mention — that would be a self-trigger loop.
 	if uc.slackService != nil {
 		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && ev.User == botUserID {

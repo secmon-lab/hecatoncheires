@@ -62,8 +62,9 @@ case edit is never answered with "I lack that tool".
 
 ### Workspace agent cross-case tools (`casemulti`)
 
-Wired **only** into the [workspace agent](configuration.md#workspace-channel--agent-channel-mode)
-(a channel-mode workspace's `workspace_channel`). Unlike every other tool above —
+Wired **only** into the [workspace agent](configuration.md#workspace-agent)
+(a channel-mode workspace's `workspace_channel`, or a channel-root mention in a
+thread-mode workspace's monitored channel). Unlike every other tool above —
 which is pinned to a single Case at construction — these take **`case_id` as a
 call-time argument**, so one turn can read and act across many Cases. Every call
 is access-checked against the **mentioning user's** permissions (private Cases the
@@ -71,22 +72,26 @@ user cannot access are filtered from lists and rejected on direct access), and
 writes are subject to the workspace agent's [write guardrail](#guardrails)
 (nothing is changed unless the user explicitly asks).
 
-| Tool | R/W | Purpose | Notes |
-|------|-----|---------|-------|
-| `case__list_cases` | R | List cases in the workspace (optional `status` filter). | Cases the user cannot access are omitted. |
-| `case__get_case` | R | Fetch one case by `case_id`. | Denied for a private case the user is not a member of. |
-| `case__list_actions` | R | List a case's actions (`case_id`). | |
-| `case__get_action` | R | Fetch one action (`case_id`, `action_id`). | Verifies the action belongs to the case. |
-| `case__create_case` | W | Create a new case (full channel-mode flow: dedicated channel + invites + welcome). | Reporter is the mentioning user. |
-| `case__update_case` | W | Update a case's title / description / fields (`case_id`). | Cannot change assignees — use `case__assign` / `case__unassign`. |
-| `case__assign` | W | Add assignee(s) to a case by delta (`case_id`, set union). | Rejects user ids absent from the SlackUser store. |
-| `case__unassign` | W | Remove assignee(s) from a case by delta (`case_id`, set difference). | Unknown ids are not rejected (a since-deleted user must stay removable). |
-| `case__close_case` | W | Close a case (`case_id`). | |
-| `case__create_action` | W | Add an action to a case (`case_id`). | |
-| `case__update_action` | W | Update an action (`case_id`, `action_id`). | Change attributed to the mentioning user. |
-| `case__update_action_status` | W | Move an action to another status. | |
-| `case__add_action_step` | W | Add a step to an action. | |
-| `case__set_action_step_done` | W | Mark a step done / undone. | |
+The set differs by case mode, because a thread-mode workspace has no Actions and
+closes a Case by moving it to a closed board status:
+
+| Tool | R/W | Mode | Purpose | Notes |
+|------|-----|------|---------|-------|
+| `case__list_cases` | R | both | List cases in the workspace (optional `status` filter). | Cases the user cannot access are omitted. |
+| `case__get_case` | R | both | Fetch one case by `case_id`. | Denied for a private case the user is not a member of. |
+| `case__create_case` | W | both | Create a new case (channel mode: dedicated channel + invites + welcome; thread mode: a new thread in the monitored channel). | Reporter is the mentioning user. |
+| `case__update_case` | W | both | Update a case's title / description / fields (`case_id`). | Cannot change assignees — use `case__assign` / `case__unassign`. |
+| `case__assign` | W | both | Add assignee(s) to a case by delta (`case_id`, set union). | Rejects user ids absent from the SlackUser store. |
+| `case__unassign` | W | both | Remove assignee(s) from a case by delta (`case_id`, set difference). | Unknown ids are not rejected (a since-deleted user must stay removable). |
+| `case__close_case` | W | channel | Close a case (`case_id`). | Channel mode only — built when the workspace has **no** `CaseStatusSet`. |
+| `case__update_case_status` | W | thread | Move a case to another board status (`case_id`, `status`); a closed status closes it. | Thread mode only — the counterpart of `case__close_case`. The `status` parameter enumerates the configured status ids. Exactly one "mark done" tool is offered per mode. |
+| `case__list_actions` | R | channel | List a case's actions (`case_id`). | Thread-mode workspaces manage no Actions, so none of the action tools are wired there. |
+| `case__get_action` | R | channel | Fetch one action (`case_id`, `action_id`). | Verifies the action belongs to the case. |
+| `case__create_action` | W | channel | Add an action to a case (`case_id`). | |
+| `case__update_action` | W | channel | Update an action (`case_id`, `action_id`). | Change attributed to the mentioning user. |
+| `case__update_action_status` | W | channel | Move an action to another status. | |
+| `case__add_action_step` | W | channel | Add a step to an action. | |
+| `case__set_action_step_done` | W | channel | Mark a step done / undone. | |
 
 ### Slack tools (`slack`, `slackpost`)
 

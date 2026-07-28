@@ -49,14 +49,17 @@ var (
 
 	// --- Workspace channel / agent ([slack] workspace_channel + [slack.workspace_agent]) ---
 
-	// ErrWorkspaceChannelRequiresChannelMode is returned when workspace_channel or
-	// [slack.workspace_agent] is set on a workspace that is not in channel mode.
-	// The workspace channel hosts a cross-case agent over per-case channels, which
-	// only exist in channel mode.
-	ErrWorkspaceChannelRequiresChannelMode = goerr.New("[slack] workspace_channel / [slack.workspace_agent] require channel mode")
+	// ErrWorkspaceChannelRequiresChannelMode is returned when workspace_channel is
+	// set on a workspace that is not in channel mode. It names a separate channel
+	// to host the cross-case agent; a thread-mode workspace already has one — the
+	// monitored channel, where a channel-root mention runs that agent — so a
+	// second one would only make channel-to-workspace routing ambiguous.
+	// [slack.workspace_agent] itself is accepted in both modes.
+	ErrWorkspaceChannelRequiresChannelMode = goerr.New("[slack] workspace_channel requires channel mode")
 	// ErrMissingWorkspaceChannel is returned when [slack.workspace_agent] is set
-	// but [slack] workspace_channel is empty: the agent runs in the workspace
-	// channel and is meaningless without it.
+	// on a CHANNEL-mode workspace but [slack] workspace_channel is empty: there
+	// the agent runs in the workspace channel and is meaningless without it. In
+	// thread mode the section stands alone (the monitored channel hosts it).
 	ErrMissingWorkspaceChannel = goerr.New("[slack.workspace_agent] requires [slack] workspace_channel")
 	// ErrInvalidWorkspaceChannel is returned when [slack] workspace_channel is not
 	// a Slack channel ID (e.g. a channel name).

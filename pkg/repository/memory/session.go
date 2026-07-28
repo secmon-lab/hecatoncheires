@@ -58,6 +58,44 @@ func (r *sessionRepository) Put(_ context.Context, s *model.Session) error {
 	return nil
 }
 
+func (r *sessionRepository) Claim(_ context.Context, channelID, threadTS string, newSessionFn func() *model.Session) (*model.Session, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, goerr.New("channelID and threadTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	if newSessionFn == nil {
+		return nil, goerr.New("newSessionFn is required")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	if existing, ok := r.sessions[key]; ok {
+		copied := existing
+		return &copied, nil
+	}
+
+	fresh := newSessionFn()
+	if fresh == nil {
+		return nil, goerr.New("newSessionFn returned nil")
+	}
+	fresh.ChannelID = channelID
+	fresh.ThreadTS = threadTS
+	now := r.now()
+	if fresh.CreatedAt.IsZero() {
+		fresh.CreatedAt = now
+	}
+	fresh.UpdatedAt = now
+	if err := fresh.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "session validation failed before claim")
+	}
+	r.sessions[key] = *fresh
+	return fresh, nil
+}
+
 func (r *sessionRepository) AcquireTurnLock(
 	_ context.Context,
 	channelID, threadTS, triggerTS, ownerID string,

@@ -171,6 +171,15 @@ func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg
 		return goerr.Wrap(err, "look up session for mention creation",
 			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
 	}
+	// The thread belongs to the workspace agent, so it never becomes a Case. The
+	// dispatcher already routes such mentions away, but a concurrent claim can
+	// land between its lookup and this one — re-check here so the two flows can
+	// never braid their conversations into one Session.
+	if session != nil && session.Kind == model.SessionKindWorkspaceAgent {
+		logging.From(ctx).Debug("thread is owned by the workspace agent; skipping case creation",
+			"channel_id", channelID, "thread_ts", threadTS)
+		return nil
+	}
 	if session != nil {
 		// Keep the reporter the first turn already attributed (the thread's
 		// originator for an in-thread mention), so a follow-up mention by a
@@ -317,7 +326,7 @@ func threadCreateReq(entry *model.WorkspaceEntry, channelID, threadTS, reporter 
 func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreateReq) (threadcase.Status, error) {
 	wsID := req.entry.Workspace.ID
 
-	session, err := uc.loadOrCreateSession(ctx, wsID, 0, req.caseChannel, req.caseTS)
+	session, err := uc.loadOrCreateSession(ctx, wsID, 0, req.caseChannel, req.caseTS, model.SessionKindCase)
 	if err != nil {
 		// Tell the user what went wrong instead of failing silently — this runs
 		// before the progress trace exists, so post directly to the UI thread.
@@ -539,7 +548,7 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 		}
 	}
 
-	session, err := uc.loadOrCreateSession(ctx, wsID, foundCase.ID, channelID, threadTS)
+	session, err := uc.loadOrCreateSession(ctx, wsID, foundCase.ID, channelID, threadTS, model.SessionKindCase)
 	if err != nil {
 		return goerr.Wrap(err, "thread case: load session for mention")
 	}

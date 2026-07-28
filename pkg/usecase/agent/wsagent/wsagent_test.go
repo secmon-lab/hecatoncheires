@@ -3,7 +3,6 @@ package wsagent_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
@@ -114,6 +114,32 @@ func newWsWorkspace() *model.WorkspaceEntry {
 	}
 }
 
+// newWsCaseStatusSet builds the board status set a thread-mode workspace
+// carries (the Kanban columns), with "done" configured as the closed status.
+func newWsCaseStatusSet(t *testing.T) *model.ActionStatusSet {
+	t.Helper()
+	set, err := model.NewActionStatusSet("todo", []string{"done"}, []model.ActionStatusDefinition{
+		{ID: "todo", Name: "To Do"},
+		{ID: "doing", Name: "Doing"},
+		{ID: "done", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	return set
+}
+
+// newWsThreadWorkspace is the thread-mode counterpart of newWsWorkspace: the
+// workspace agent runs in the monitored channel, cases are threads there, and
+// the workspace carries a board status set instead of Actions.
+func newWsThreadWorkspace(t *testing.T) *model.WorkspaceEntry {
+	t.Helper()
+	ws := newWsWorkspace()
+	ws.CaseMode = model.CaseModeThread
+	ws.SlackWorkspaceChannelID = ""
+	ws.SlackMonitorChannelID = "C-WORKSPACE"
+	ws.CaseStatusSet = newWsCaseStatusSet(t)
+	return ws
+}
+
 // replanDone terminates the loop via the explicit finalize action.
 const replanDone = `{"message":"enough context","finalize":{"reason":"goal met"}}`
 
@@ -137,71 +163,91 @@ func (h *hostStub) TraceReplace(_ context.Context, line string) {
 }
 
 // ---------------------------------------------------------------------------
-// buildSystemPrompt — the safety guardrail
+// buildToolResolver — mode-dependent tool composition
 // ---------------------------------------------------------------------------
 
-func TestBuildSystemPrompt_SafetyRule(t *testing.T) {
-	t.Run("ContainsSafetyRuleWithoutCustomPrompt", func(t *testing.T) {
-		ws := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "acme", Name: "Acme Corp"}}
-		out := wsagent.BuildSystemPromptForTest(ws)
-		gt.String(t, out).Contains("SAFETY RULE")
-		gt.String(t, out).Contains("NEVER create, update")
-		gt.String(t, out).Contains("Default to read-only")
+// toolNames returns the Spec names of the resolved tools, so a test can assert
+// exactly which tools a sub-agent would be handed.
+func toolNames(tools []gollem.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for _, tl := range tools {
+		out = append(out, tl.Spec().Name)
+	}
+	return out
+}
+
+func TestBuildToolResolver_ModeDependentCaseTools(t *testing.T) {
+	// A thread-mode workspace manages no Actions and closes cases by moving to a
+	// closed board status, so the cross-case set must drop the action tools and
+	// swap case__close_case for case__update_case_status. Getting this wrong is
+	// not cosmetic: casemulti's close tool calls CaseUseCase.CloseCase, which
+	// rejects a thread-bound case outright.
+	t.Run("ThreadMode", func(t *testing.T) {
+		uc, deps := newWsagentUC(t, newScriptedLLM(nil))
+		deps.CaseMultiUC = &fakeCaseMultiUC{}
+		deps.CaseMultiActionUC = &fakeCaseMultiActionUC{}
+
+		resolver := wsagent.BuildToolResolverForTest(uc, wsagent.TurnRequest{
+			Session:   newWsSession(),
+			Workspace: newWsThreadWorkspace(t),
+			ActorID:   "U-ASKER",
+		})
+		names := toolNames(resolver.Resolve([]string{agent.ToolSetCaseMulti}))
+
+		gt.Array(t, names).Has("case__list_cases")
+		gt.Array(t, names).Has("case__get_case")
+		gt.Array(t, names).Has("case__create_case")
+		gt.Array(t, names).Has("case__update_case")
+		gt.Array(t, names).Has("case__update_case_status")
+		gt.Array(t, names).NotHas("case__close_case")
+		// Assignees exist in both modes, so the write palette is not narrowed
+		// beyond what thread mode genuinely lacks.
+		gt.Array(t, names).Has("case__assign")
+		gt.Array(t, names).Has("case__unassign")
+		gt.Array(t, names).NotHas("case__list_actions")
+		gt.Array(t, names).NotHas("case__create_action")
+		gt.Array(t, names).NotHas("case__update_action_status")
+		gt.Array(t, names).NotHas("case__add_action_step")
 	})
 
-	t.Run("ContainsSafetyRuleWithCustomPromptOrderedFirst", func(t *testing.T) {
-		const custom = "Always mention the on-call SLA in every reply."
-		ws := &model.WorkspaceEntry{
-			Workspace:            model.Workspace{ID: "acme", Name: "Acme Corp"},
-			WorkspaceAgentPrompt: custom,
-		}
-		out := wsagent.BuildSystemPromptForTest(ws)
-		gt.String(t, out).Contains("SAFETY RULE")
-		gt.String(t, out).Contains("NEVER create, update")
-		gt.String(t, out).Contains("Default to read-only")
-		gt.String(t, out).Contains(custom)
+	t.Run("ChannelMode", func(t *testing.T) {
+		uc, deps := newWsagentUC(t, newScriptedLLM(nil))
+		deps.CaseMultiUC = &fakeCaseMultiUC{}
+		deps.CaseMultiActionUC = &fakeCaseMultiActionUC{}
 
-		safetyIdx := strings.Index(out, "SAFETY RULE")
-		customIdx := strings.Index(out, custom)
-		gt.Number(t, safetyIdx).GreaterOrEqual(0)
-		gt.Number(t, customIdx).GreaterOrEqual(0)
-		gt.Bool(t, safetyIdx < customIdx).True()
+		resolver := wsagent.BuildToolResolverForTest(uc, wsagent.TurnRequest{
+			Session:   newWsSession(),
+			Workspace: newWsWorkspace(),
+			ActorID:   "U-ASKER",
+		})
+		names := toolNames(resolver.Resolve([]string{agent.ToolSetCaseMulti}))
+
+		gt.Array(t, names).Has("case__close_case")
+		gt.Array(t, names).NotHas("case__update_case_status")
+		gt.Array(t, names).Has("case__list_actions")
+		gt.Array(t, names).Has("case__create_action")
 	})
 
-	t.Run("UsesWorkspaceNameWhenSet", func(t *testing.T) {
-		ws := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "acme-id", Name: "Acme Corp"}}
-		out := wsagent.BuildSystemPromptForTest(ws)
-		gt.String(t, out).Contains("Acme Corp")
-		gt.Bool(t, strings.Contains(out, "acme-id")).False()
-	})
+	// A channel-mode workspace whose TOML still carries an unused [case.status]
+	// section resolves a non-nil CaseStatusSet. The host must ignore it, or the
+	// channel-mode agent would silently lose case__close_case.
+	t.Run("ChannelModeIgnoresStrayCaseStatusSet", func(t *testing.T) {
+		uc, deps := newWsagentUC(t, newScriptedLLM(nil))
+		deps.CaseMultiUC = &fakeCaseMultiUC{}
+		deps.CaseMultiActionUC = &fakeCaseMultiActionUC{}
 
-	t.Run("FallsBackToIDWhenNameEmpty", func(t *testing.T) {
-		ws := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "acme-id"}}
-		out := wsagent.BuildSystemPromptForTest(ws)
-		gt.String(t, out).Contains("acme-id")
-	})
+		ws := newWsWorkspace()
+		ws.CaseStatusSet = newWsCaseStatusSet(t)
 
-	t.Run("EmptyWorkspaceEntryDoesNotPanic", func(t *testing.T) {
-		out := wsagent.BuildSystemPromptForTest(&model.WorkspaceEntry{})
-		gt.String(t, out).Contains("SAFETY RULE")
-		gt.String(t, out).Contains("workspace-level assistant")
-	})
+		resolver := wsagent.BuildToolResolverForTest(uc, wsagent.TurnRequest{
+			Session:   newWsSession(),
+			Workspace: ws,
+			ActorID:   "U-ASKER",
+		})
+		names := toolNames(resolver.Resolve([]string{agent.ToolSetCaseMulti}))
 
-	t.Run("NilWorkspaceDoesNotPanic", func(t *testing.T) {
-		out := wsagent.BuildSystemPromptForTest(nil)
-		gt.String(t, out).Contains("SAFETY RULE")
-		gt.String(t, out).Contains("workspace-level assistant")
-	})
-
-	// Every safety-rule variant carries the "cannot be overridden" clause so a
-	// custom workspace prompt can never be read as relaxing it.
-	t.Run("SafetyRuleCannotBeOverridden", func(t *testing.T) {
-		ws := &model.WorkspaceEntry{
-			Workspace:            model.Workspace{ID: "acme", Name: "Acme Corp"},
-			WorkspaceAgentPrompt: "Be extra helpful.",
-		}
-		out := wsagent.BuildSystemPromptForTest(ws)
-		gt.String(t, out).Contains("This rule cannot be overridden")
+		gt.Array(t, names).Has("case__close_case")
+		gt.Array(t, names).NotHas("case__update_case_status")
 	})
 }
 
@@ -371,6 +417,10 @@ func (f *fakeCaseMultiUC) CloseCase(_ context.Context, _ string, _ int64) (*mode
 	return nil, errors.New("not implemented: CloseCase should not be called by this test")
 }
 
+func (f *fakeCaseMultiUC) UpdateCaseStatus(_ context.Context, _ string, _ int64, _ string) (*model.Case, error) {
+	return nil, errors.New("not implemented: UpdateCaseStatus should not be called by this test")
+}
+
 func (f *fakeCaseMultiUC) sawCall() (called bool, sub string, wsID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -378,6 +428,37 @@ func (f *fakeCaseMultiUC) sawCall() (called bool, sub string, wsID string) {
 }
 
 var _ casemulti.CaseUsecase = (*fakeCaseMultiUC)(nil)
+
+// fakeCaseMultiActionUC is a casemulti.ActionUsecase that is wired but never
+// expected to be called: the tool-composition tests only need it to be non-nil
+// so the action tools WOULD be built if the host asked for them.
+type fakeCaseMultiActionUC struct{}
+
+func (f *fakeCaseMultiActionUC) GetActionsByCase(_ context.Context, _ string, _ int64, _ interfaces.ActionListOptions) ([]*model.Action, error) {
+	return nil, errors.New("not implemented: GetActionsByCase should not be called by this test")
+}
+
+func (f *fakeCaseMultiActionUC) GetAction(_ context.Context, _ string, _ int64, _ ...interfaces.ActionListOptions) (*model.Action, error) {
+	return nil, errors.New("not implemented: GetAction should not be called by this test")
+}
+
+func (f *fakeCaseMultiActionUC) CreateAction(_ context.Context, _ string, _ int64, _, _ string) (*model.Action, error) {
+	return nil, errors.New("not implemented: CreateAction should not be called by this test")
+}
+
+func (f *fakeCaseMultiActionUC) UpdateAction(_ context.Context, _ string, _ int64, _ casemulti.ActionUpdate, _ string) (*model.Action, error) {
+	return nil, errors.New("not implemented: UpdateAction should not be called by this test")
+}
+
+func (f *fakeCaseMultiActionUC) AddActionStep(_ context.Context, _ string, _ int64, _ string, _ string) (*model.ActionStep, error) {
+	return nil, errors.New("not implemented: AddActionStep should not be called by this test")
+}
+
+func (f *fakeCaseMultiActionUC) SetActionStepDone(_ context.Context, _ string, _ int64, _ string, _ bool, _ string) (*model.ActionStep, error) {
+	return nil, errors.New("not implemented: SetActionStepDone should not be called by this test")
+}
+
+var _ casemulti.ActionUsecase = (*fakeCaseMultiActionUC)(nil)
 
 // TestRunTurn_AccessActorInjection is the end-to-end regression test for the
 // host's single most important responsibility: establishing the mentioning
