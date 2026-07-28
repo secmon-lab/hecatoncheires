@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  sortByFavorite,
   workspaceMark,
   workspaceVisual,
   WORKSPACE_GRADIENTS,
@@ -105,5 +106,27 @@ describe('workspaceVisual', () => {
         fromReversed && fromReversed.kind === 'mark' && fromReversed.background,
       )
     }
+  })
+})
+
+describe('sortByFavorite', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+
+  it('moves favorites to the front, preserving their given order', () => {
+    expect(sortByFavorite(list, ['c', 'b']).map((w) => w.id)).toEqual(['b', 'c', 'a', 'd'])
+  })
+
+  it('keeps the original order when nothing is favorited', () => {
+    expect(sortByFavorite(list, []).map((w) => w.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('ignores favorite ids that are not in the list', () => {
+    expect(sortByFavorite(list, ['zzz', 'd']).map((w) => w.id)).toEqual(['d', 'a', 'b', 'c'])
+  })
+
+  it('does not mutate the input array', () => {
+    const input = [...list]
+    sortByFavorite(input, ['d'])
+    expect(input.map((w) => w.id)).toEqual(['a', 'b', 'c', 'd'])
   })
 })

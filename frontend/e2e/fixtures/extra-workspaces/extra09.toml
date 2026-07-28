@@ -1,0 +1,7 @@
+# Filler workspace for the workspace-switcher E2E (see workspace.spec.ts).
+# The switcher collapses entries past its 10-row limit, so the E2E backend
+# needs more than ten workspaces to exercise that path.
+
+[workspace]
+id   = "extra09"
+name = "E2E Extra 09"

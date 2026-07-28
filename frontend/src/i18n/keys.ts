@@ -112,6 +112,8 @@ export const msgKeys = {
   workspaceSelectorSubtitle: 'workspaceSelectorSubtitle',
   workspaceSelectorEmpty: 'workspaceSelectorEmpty',
   workspaceSelectorEmptyHint: 'workspaceSelectorEmptyHint',
+  workspaceSwitcherShowMore: 'workspaceSwitcherShowMore',
+  workspaceSwitcherShowLess: 'workspaceSwitcherShowLess',
   sectionActivity: 'sectionActivity',
   emptyActivity: 'emptyActivity',
   sectionMessages: 'sectionMessages',

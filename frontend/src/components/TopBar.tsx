@@ -36,7 +36,7 @@ function useBreadcrumbs(): Crumb[] {
 export default function TopBar() {
   const navigate = useNavigate()
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const { currentWorkspace, workspaces } = useWorkspace()
+  const { currentWorkspace, workspaces, favoriteWorkspaceIds } = useWorkspace()
   const { t } = useTranslation()
   const crumbs = useBreadcrumbs()
 
@@ -72,7 +72,11 @@ export default function TopBar() {
   return (
     <header className="h-top">
       {workspaceId && (
-        <WorkspaceSwitcher current={currentWorkspace} workspaces={workspaces} />
+        <WorkspaceSwitcher
+          current={currentWorkspace}
+          workspaces={workspaces}
+          favoriteWorkspaceIds={favoriteWorkspaceIds}
+        />
       )}
       {renderedCrumbs.length > 0 && (
         <div className="h-bread">

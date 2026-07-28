@@ -114,6 +114,8 @@ export const ja: Messages = {
   workspaceSelectorSubtitle: 'ワークスペースを選択してください',
   workspaceSelectorEmpty: 'ワークスペースが設定されていません',
   workspaceSelectorEmptyHint: '設定ファイルで少なくとも 1 つのワークスペースを設定してください。',
+  workspaceSwitcherShowMore: '他 {count} 件を表示',
+  workspaceSwitcherShowLess: '表示を減らす',
   sectionActivity: 'アクティビティ',
   emptyActivity: 'アクティビティはまだありません。',
   sectionMessages: 'メッセージ',
