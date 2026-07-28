@@ -113,6 +113,8 @@ export const en: Messages = {
   workspaceSelectorSubtitle: 'Select a workspace to continue',
   workspaceSelectorEmpty: 'No workspaces configured',
   workspaceSelectorEmptyHint: 'Configure at least one workspace in your config files.',
+  workspaceSwitcherShowMore: 'Show {count} more',
+  workspaceSwitcherShowLess: 'Show less',
   sectionActivity: 'Activity',
   emptyActivity: 'No activity yet.',
   sectionMessages: 'Messages',
