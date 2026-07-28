@@ -6,6 +6,7 @@ import (
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
@@ -41,6 +42,79 @@ func TestCaseMultiCaseAdapter_CreateCase(t *testing.T) {
 	gt.Value(t, stored.Description).Equal("Cross-case description")
 	gt.Bool(t, stored.IsPrivate).True()
 	gt.Value(t, stored.ReporterID).Equal("U-CREATOR")
+}
+
+// TestCaseMultiCaseAdapter_AssignCase drives the adapter's delta assignee
+// operations through a real CaseUseCase backed by memory.New() and reads the
+// persisted Case back, so a regression in the adapter wiring (e.g. swapping
+// AssignCase and UnassignCase, or dropping the user ids) is caught.
+func TestCaseMultiCaseAdapter_AssignCase(t *testing.T) {
+	repo := memory.New()
+	caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	adapter := usecase.NewCaseMultiCaseAdapter(caseUC)
+	gt.Value(t, adapter).NotNil().Required()
+
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CREATOR"})
+	seedSlackUsers(t, repo, "U-CREATOR", "U-ONE", "U-TWO")
+
+	created, err := caseUC.CreateCase(ctx, testWorkspaceID, "Assignable", "", []string{"U-ONE"}, nil, false, false, "", "")
+	gt.NoError(t, err).Required()
+
+	// Adding is a delta union: the pre-existing assignee survives.
+	assigned, err := adapter.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U-TWO"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, assigned.AssigneeIDs).Equal([]string{"U-ONE", "U-TWO"})
+
+	stored, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored.AssigneeIDs).Equal([]string{"U-ONE", "U-TWO"})
+
+	// Removing is a delta difference: only the named id goes.
+	unassigned, err := adapter.UnassignCase(ctx, testWorkspaceID, created.ID, []string{"U-ONE"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, unassigned.AssigneeIDs).Equal([]string{"U-TWO"})
+
+	stored, err = repo.Case().Get(ctx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored.AssigneeIDs).Equal([]string{"U-TWO"})
+}
+
+// The workspace agent runs every casemulti call under the mentioning user's
+// auth token, so the adapter must inherit CaseUseCase's private-case gate
+// rather than acting as a privileged bypass.
+func TestCaseMultiCaseAdapter_AssignCase_PrivateCaseAccess(t *testing.T) {
+	repo := memory.New()
+	caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	adapter := usecase.NewCaseMultiCaseAdapter(caseUC)
+	gt.Value(t, adapter).NotNil().Required()
+
+	seedSlackUsers(t, repo, "U-MEMBER", "U-STRANGER", "U-TARGET")
+
+	memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-MEMBER"})
+	created, err := repo.Case().Create(memberCtx, testWorkspaceID, &model.Case{
+		ReporterID:     "U-MEMBER",
+		Title:          "Private",
+		Status:         types.CaseStatusOpen,
+		IsPrivate:      true,
+		ChannelUserIDs: []string{"U-MEMBER"},
+	})
+	gt.NoError(t, err).Required()
+
+	// A channel member may assign.
+	assigned, err := adapter.AssignCase(memberCtx, testWorkspaceID, created.ID, []string{"U-TARGET"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, assigned.AssigneeIDs).Equal([]string{"U-TARGET"})
+
+	// A non-member is denied on both operations, and the case is unchanged.
+	strangerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-STRANGER"})
+	_, err = adapter.AssignCase(strangerCtx, testWorkspaceID, created.ID, []string{"U-STRANGER"})
+	gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+	_, err = adapter.UnassignCase(strangerCtx, testWorkspaceID, created.ID, []string{"U-TARGET"})
+	gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+
+	stored, err := repo.Case().Get(memberCtx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored.AssigneeIDs).Equal([]string{"U-TARGET"})
 }
 
 func TestNewCaseMultiActionAdapter_NilUseCase(t *testing.T) {

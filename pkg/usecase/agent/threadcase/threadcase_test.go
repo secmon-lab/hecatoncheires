@@ -176,13 +176,15 @@ const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1
 // tasks list no longer signals completion; the planner must emit `finalize`.
 const replanDone = `{"message":"enough context","finalize":{"reason":"goal met"}}`
 
-// recordingCaseMutator is a casewriter.CaseMutator that records status changes
-// so the close test can prove the sub-agent's case__update_case_status tool call
+// recordingCaseMutator is a casewriter.CaseMutator that records the mutations a
+// sub-agent's tool calls perform, so the mention tests can prove the call
 // actually reached the case usecase (the whole point of the responsibility
-// split: close is a sub-agent tool side effect, not a host-applied decision).
+// split: a case change is a sub-agent tool side effect, not a host-applied
+// decision).
 type recordingCaseMutator struct {
 	mu          sync.Mutex
 	statusCalls []string
+	assignCalls [][]string
 }
 
 func (m *recordingCaseMutator) UpdateCase(_ context.Context, _ string, _ int64, _ casewriter.CaseUpdate) (*model.Case, error) {
@@ -200,8 +202,11 @@ func (m *recordingCaseMutator) CloseCase(_ context.Context, _ string, _ int64) (
 	return &model.Case{}, nil
 }
 
-func (m *recordingCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
-	return &model.Case{}, nil
+func (m *recordingCaseMutator) AssignCase(_ context.Context, _ string, _ int64, userIDs []string) (*model.Case, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.assignCalls = append(m.assignCalls, userIDs)
+	return &model.Case{ID: 42, AssigneeIDs: userIDs}, nil
 }
 
 func (m *recordingCaseMutator) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
@@ -213,6 +218,14 @@ func (m *recordingCaseMutator) recordedStatuses() []string {
 	defer m.mu.Unlock()
 	out := make([]string, len(m.statusCalls))
 	copy(out, m.statusCalls)
+	return out
+}
+
+func (m *recordingCaseMutator) recordedAssignments() [][]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([][]string, len(m.assignCalls))
+	copy(out, m.assignCalls)
 	return out
 }
 
@@ -482,6 +495,46 @@ func TestRunTurn_Materialize(t *testing.T) {
 	gt.Value(t, res.Decision.Fields[0].Value).Equal("high")
 }
 
+// buildToolResolver builds the case writer tools whenever a case exists, but a
+// ModeMaterialize turn advertises only KnownToolSetIDsNoCore. This pins the
+// safety of that gap: a planner that requests case_write anyway is rejected at
+// plan validation and re-planned, so no write ever reaches the case usecase.
+func TestRunTurn_MaterializeCannotRequestCaseWrite(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		`{"message":"edit the case","tasks":[
+			{"id":"t-1","title":"Assign","description":"Assign an owner","acceptance_criteria":"assigned","tools":["case_write"]}
+		]}`, // rejected: case_write is not advertised on a materialize turn
+		investigatePlan,
+		"The message reports a login failure on production.",
+		replanDone,
+		`{"kind":"materialize","title":"Login failure","description":"User reports a login failure on production.","fields":[{"field_id":"severity","value":"high"}]}`,
+	})
+	uc, deps := newThreadcaseUC(t, llm)
+	mutator := &recordingCaseMutator{}
+	deps.CaseUC = mutator // wired, so only the advertised-ID gate can stop the write
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:   newThreadSession(),
+		Workspace: newThreadWorkspace(),
+		Case:      newThreadCase(),
+		ChannelID: "C-MONITOR",
+		ThreadTS:  "1700000000.000100",
+		TriggerTS: "1700000000.000100",
+		Mode:      threadcase.ModeMaterialize,
+		Handler:   host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Decision).NotNil().Required()
+	gt.Value(t, res.Decision.Kind).Equal(threadcase.DecisionMaterialize)
+	// The rejected plan never ran, so the case usecase saw no mutation at all.
+	gt.Array(t, mutator.recordedAssignments()).Length(0)
+	gt.Array(t, mutator.recordedStatuses()).Length(0)
+}
+
 // TestRunTurn_MentionClose is the regression test for the original bug: a
 // mention that asks to close the case must actually close it. Under the fixed
 // design, closing is NOT a terminal decision — the sub-agent performs it via the
@@ -498,7 +551,7 @@ func TestRunTurn_MentionClose(t *testing.T) {
 					switch round.Add(1) {
 					case 1: // planner round 1: dispatch a close task using the status tool
 						return &gollem.Response{Texts: []string{`{"message":"close the case","tasks":[
-							{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"case status is DONE","tools":["case_status_write"]}
+							{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"case status is DONE","tools":["case_write"]}
 						]}`}}, nil
 					case 2: // sub-agent: call case__update_case_status
 						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
@@ -543,6 +596,68 @@ func TestRunTurn_MentionClose(t *testing.T) {
 	// The close actually happened: the sub-agent's tool call reached the case
 	// usecase with the DONE board status.
 	gt.Array(t, mutator.recordedStatuses()).Equal([]string{"DONE"})
+}
+
+// TestRunTurn_MentionAssign is the regression test for a mention that asks the
+// agent to fill the empty "assignees" field. The mention host must hand its
+// sub-agents the assignee tools, not only the status tool: previously the whole
+// turn ended with the agent telling the user it had no such capability.
+func TestRunTurn_MentionAssign(t *testing.T) {
+	ctx := context.Background()
+	round := atomic.Int32{}
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					switch round.Add(1) {
+					case 1: // planner round 1: dispatch an assignment task
+						return &gollem.Response{Texts: []string{`{"message":"assign the owners","tasks":[
+							{"id":"t-1","title":"Assign","description":"Assign the two named owners","acceptance_criteria":"both users are assignees","tools":["case_write"]}
+						]}`}}, nil
+					case 2: // sub-agent: call case__assign
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
+							ID:        "call-1",
+							Name:      "case__assign",
+							Arguments: map[string]any{"user_ids": []any{"U-NOV", "U-SHOTA"}},
+						}}}, nil
+					case 3: // sub-agent: report after the tool result comes back
+						return &gollem.Response{Texts: []string{"Assigned both owners."}}, nil
+					case 4: // replan: finalize
+						return &gollem.Response{Texts: []string{replanDone}}, nil
+					default: // final respond decision
+						return &gollem.Response{Texts: []string{`{"kind":"respond","message":"Assigned the two owners."}`}}, nil
+					}
+				},
+			}, nil
+		},
+	}
+
+	uc, deps := newThreadcaseUC(t, llm)
+	mutator := &recordingCaseMutator{}
+	deps.CaseUC = mutator // wire the case mutator so the writer tools are built
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:     newThreadSession(),
+		Workspace:   newThreadWorkspace(),
+		Case:        newThreadCase(),
+		ChannelID:   "C-MONITOR",
+		ThreadTS:    "1700000000.000100",
+		MentionTS:   "1700000003.000001",
+		MentionText: "<@bot> the assignees field is empty, please set it",
+		TriggerTS:   "1700000003.000001",
+		Mode:        threadcase.ModeMention,
+		Handler:     host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Decision).NotNil().Required()
+	gt.Value(t, res.Decision.Kind).Equal(threadcase.DecisionRespond)
+	// The assignment actually happened: the sub-agent's tool call reached the
+	// case usecase with both user ids.
+	gt.Array(t, mutator.recordedAssignments()).Length(1).Required()
+	gt.Array(t, mutator.recordedAssignments()[0]).Equal([]string{"U-NOV", "U-SHOTA"})
 }
 
 func TestRunTurn_Question(t *testing.T) {
@@ -643,6 +758,38 @@ func TestBuildSystemPrompt_ThreadContext(t *testing.T) {
 	gt.String(t, prompt).Contains("CANNOT create or manage Actions")
 }
 
+// A mention turn advertises the full case writer set, so the prompt must name
+// every tool the sub-agents actually get — a prompt that omits one drives the
+// model to tell the user it lacks the capability (the reported failure was a
+// request to set assignees).
+func TestBuildSystemPrompt_MentionModeAdvertisesEveryWriteTool(t *testing.T) {
+	prompt := threadcase.BuildSystemPromptForTest(newThreadCase(), newThreadWorkspace(), threadcase.ModeMention, "")
+	gt.String(t, prompt).Contains("case__update_case_status")
+	gt.String(t, prompt).Contains("case__assign")
+	gt.String(t, prompt).Contains("case__unassign")
+	gt.String(t, prompt).Contains("case__update_case")
+	// materialize replaces title/description wholesale, so the two content paths
+	// must not be mixed within one turn.
+	gt.String(t, prompt).Contains("pick one content path per turn")
+}
+
+// The agent has no tool to read the case back, so the current assignees must be
+// in the snapshot — including when the list is empty, which is exactly the state
+// a "set the assignees" request starts from.
+func TestBuildSystemPrompt_RendersAssignees(t *testing.T) {
+	ws := newThreadWorkspace()
+
+	assigned := newThreadCase()
+	assigned.AssigneeIDs = []string{"U-ONE", "U-TWO"}
+	gt.String(t, threadcase.BuildSystemPromptForTest(assigned, ws, threadcase.ModeMention, "")).
+		Contains("- Assignees (Slack user IDs): U-ONE, U-TWO")
+
+	empty := newThreadCase()
+	empty.AssigneeIDs = nil
+	gt.String(t, threadcase.BuildSystemPromptForTest(empty, ws, threadcase.ModeMention, "")).
+		Contains("- Assignees (Slack user IDs): (empty)")
+}
+
 func TestBuildToolResolver_OmitsActionTools(t *testing.T) {
 	uc, _ := newThreadcaseUC(t, newScriptedLLM(nil))
 	ws := newThreadWorkspace()
@@ -655,6 +802,30 @@ func TestBuildToolResolver_OmitsActionTools(t *testing.T) {
 	for _, id := range agent.KnownToolSetIDsNoCore {
 		gt.Bool(t, id == agent.ToolSetCoreRO).False()
 	}
+}
+
+// A mention turn's sub-agents get the whole casewriter set for the case under
+// investigation; a create turn (no case) gets none of it.
+func TestBuildToolResolver_CaseWriteSet(t *testing.T) {
+	uc, deps := newThreadcaseUC(t, newScriptedLLM(nil))
+	deps.CaseUC = &recordingCaseMutator{}
+	ws := newThreadWorkspace()
+
+	resolver := uc.BuildToolResolverForTest(threadcase.TurnRequest{Workspace: ws, Case: newThreadCase()})
+	names := make([]string, 0, 4)
+	for _, tl := range resolver.Resolve([]string{agent.ToolSetCaseWrite}) {
+		names = append(names, tl.Spec().Name)
+	}
+	gt.Array(t, names).Equal([]string{
+		"case__update_case",
+		"case__assign",
+		"case__unassign",
+		"case__update_case_status",
+	})
+
+	// No case pinned (create turn): the writer tools must not exist.
+	createResolver := uc.BuildToolResolverForTest(threadcase.TurnRequest{Workspace: ws})
+	gt.Array(t, createResolver.Resolve([]string{agent.ToolSetCaseWrite})).Length(0)
 }
 
 func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {
@@ -734,8 +905,66 @@ func TestDecision_Validate(t *testing.T) {
 }
 
 func TestBuildUserInput_FallsBackWhenEmpty(t *testing.T) {
-	got := threadcase.BuildUserInputForTest(nil, nil, "", "")
+	got := threadcase.BuildUserInputForTest(nil, nil, threadcase.ConversationMessage{})
 	gt.String(t, got).NotEqual("")
+}
+
+// The mention-mode system prompt tells the agent to resolve a named person to a
+// Slack user ID before calling case__assign, and no tool can look one up. Every
+// conversation line must therefore carry the author's ID alongside the display
+// name, or that instruction is unsatisfiable.
+func TestBuildUserInput_RendersSpeakerIDs(t *testing.T) {
+	msgs := []threadcase.ConversationMessage{
+		{Timestamp: "1700000000.000100", UserID: "U-ALICE", UserName: "Alice", Text: "the DB is down"},
+		{Timestamp: "1700000000.000200", UserID: "U-BOB", Text: "looking into it"},
+		{Timestamp: "1700000000.000300", UserName: "Webhook", Text: "alert fired"},
+	}
+
+	got := threadcase.BuildUserInputForTest(msgs, nil, threadcase.ConversationMessage{})
+	gt.String(t, got).Contains("[1700000000.000100] Alice (U-ALICE): the DB is down")
+	// Name unknown: the ID alone still reaches the model.
+	gt.String(t, got).Contains("[1700000000.000200] U-BOB: looking into it")
+	// ID unknown (e.g. a bot post): degrade to the name rather than printing "()".
+	gt.String(t, got).Contains("[1700000000.000300] Webhook: alert fired")
+}
+
+// "assign me" is only actionable when the mention's own author is identified,
+// so the current mention block names its speaker.
+func TestBuildUserInput_RendersMentionAuthor(t *testing.T) {
+	mention := threadcase.ConversationMessage{
+		Timestamp: "1700000009.000001",
+		UserID:    "U-CALLER",
+		UserName:  "Caller",
+		Text:      "<@bot> assign me",
+	}
+
+	got := threadcase.BuildUserInputForTest(nil, nil, mention)
+	gt.String(t, got).Contains("# Current mention")
+	gt.String(t, got).Contains("From: Caller (U-CALLER)")
+	gt.String(t, got).Contains("<@bot> assign me")
+
+	// An unattributed mention still renders its text, with no dangling "From:".
+	anon := threadcase.BuildUserInputForTest(nil, nil, threadcase.ConversationMessage{Text: "<@bot> hello"})
+	gt.String(t, anon).Contains("<@bot> hello")
+	gt.Bool(t, strings.Contains(anon, "From:")).False()
+}
+
+// The mention itself is already rendered under "# Current mention", so it must
+// not also appear in the thread transcript above it.
+func TestBuildUserInput_SkipsTheMentionInTheTranscript(t *testing.T) {
+	mention := threadcase.ConversationMessage{
+		Timestamp: "1700000009.000001",
+		UserID:    "U-CALLER",
+		Text:      "<@bot> assign me",
+	}
+	msgs := []threadcase.ConversationMessage{
+		{Timestamp: "1700000000.000100", UserID: "U-ALICE", Text: "earlier note"},
+		mention,
+	}
+
+	got := threadcase.BuildUserInputForTest(msgs, nil, mention)
+	gt.String(t, got).Contains("earlier note")
+	gt.Number(t, strings.Count(got, "<@bot> assign me")).Equal(1)
 }
 
 // createWorkspaceEntry is the workspace used by the ModeCreate tests: it has a

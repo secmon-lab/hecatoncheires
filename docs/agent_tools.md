@@ -46,8 +46,11 @@ archive lifecycle replaces deletion.
 
 ### Case writer tools (`casewriter`)
 
-Edit the case the agent is bound to. Wired for the case-bound mention agent and
-for Jobs (both channel- and thread-mode).
+Edit the case the agent is bound to. Wired for the case-bound mention agent, for
+the thread-case mention agent's sub-agents (the `case_write` toolset), and for
+Jobs (both channel- and thread-mode). The set is **all-or-nothing**: there is no
+status-only or assignee-only subset, so a user who asks a mention agent for any
+case edit is never answered with "I lack that tool".
 
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
@@ -75,7 +78,9 @@ writes are subject to the workspace agent's [write guardrail](#guardrails)
 | `case__list_actions` | R | List a case's actions (`case_id`). | |
 | `case__get_action` | R | Fetch one action (`case_id`, `action_id`). | Verifies the action belongs to the case. |
 | `case__create_case` | W | Create a new case (full channel-mode flow: dedicated channel + invites + welcome). | Reporter is the mentioning user. |
-| `case__update_case` | W | Update a case's title / description / fields (`case_id`). | |
+| `case__update_case` | W | Update a case's title / description / fields (`case_id`). | Cannot change assignees — use `case__assign` / `case__unassign`. |
+| `case__assign` | W | Add assignee(s) to a case by delta (`case_id`, set union). | Rejects user ids absent from the SlackUser store. |
+| `case__unassign` | W | Remove assignee(s) from a case by delta (`case_id`, set difference). | Unknown ids are not rejected (a since-deleted user must stay removable). |
 | `case__close_case` | W | Close a case (`case_id`). | |
 | `case__create_action` | W | Add an action to a case (`case_id`). | |
 | `case__update_action` | W | Update an action (`case_id`, `action_id`). | Change attributed to the mentioning user. |
@@ -186,7 +191,7 @@ the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 | Tool group | Mention agent (channel-mode case) | Job — channel-mode | Job — thread-mode | Thread-case investigation | Proposal sub-agent (case draft) |
 |------------|:---:|:---:|:---:|:---:|:---:|
 | `core` read + Actions (`actionwriter`) | ✓ (full, incl. archive / delete-step) | ✓ (Job subset, no archive / delete-step) | — (thread mode has no Actions) | — | read-only `core__list_actions` / `core__get_action` |
-| `case__*` (casewriter) | ✓ | ✓ | ✓ | — (decisions applied by the host) | — |
+| `case__*` (casewriter) | ✓ | ✓ | ✓ | ✓ (mention turns only; no case exists on a create turn) | — (no case exists yet) |
 | `slack__search_messages`, `slack__get_messages` (read) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `slack__post_to_case_channel` | — | ✓ | ✓ | — | — |
 | `notion__*` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -218,14 +223,19 @@ Notes:
   truth for Job wiring: `buildJobTools` in `pkg/cli/job_runtime.go`.)
 - **Thread-mode** workspaces have no Actions, so the whole `core` / Action
   surface is absent there.
-- **Thread-case investigation** and the **proposal sub-agents** are read-only
-  investigators; their conclusions are applied by the host, not by a write tool.
-  **Job (`planexec`) sub-agents, by contrast, may use write tools** (e.g. the
-  Slack poster) to carry out the Job's deliverable action once the planner has
-  gathered enough context — the planner assigns the write tool to a dedicated
-  task. This is gated by `RunRequest.AllowSubAgentWrites` (true for Jobs, false
-  for thread-case); the resolver still bounds which tools each sub-agent can
-  physically call, so the flag and the tool set always agree.
+- **Proposal sub-agents** are read-only investigators: no case exists yet, so the
+  draft is materialised by the host. **Thread-case mention sub-agents and Job
+  (`planexec`) sub-agents may use write tools** to carry out the requested change
+  once the planner has gathered enough context — the planner assigns the write
+  toolset (`case_write` for thread-case) to a dedicated task. This is gated by
+  `RunRequest.AllowSubAgentWrites` (true for Jobs and for thread-case mention
+  turns, false for thread-case *create* turns); the resolver still bounds which
+  tools each sub-agent can physically call, so the flag and the tool set always
+  agree.
+- A thread-case mention turn can change case content two ways — `case__update_case`
+  inside the loop, or the terminal `materialize` decision. Since `materialize`
+  replaces title and description wholesale, the system prompt instructs the
+  planner to pick one path per turn. That is a **prompt-only** guardrail.
 
 ## Guardrails
 
