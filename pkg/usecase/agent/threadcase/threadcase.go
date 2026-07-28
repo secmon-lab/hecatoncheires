@@ -48,10 +48,16 @@ type TurnRequest struct {
 	Workspace *model.WorkspaceEntry
 	Case      *model.Case
 
-	ChannelID   string
-	ThreadTS    string
-	MentionTS   string
+	ChannelID string
+	ThreadTS  string
+	MentionTS string
+	// MentionText is the raw text of the mention that triggered this turn.
 	MentionText string
+	// MentionUserID / MentionUserName identify its author. The ID is what makes
+	// a self-referential request ("assign me") actionable: case__assign takes
+	// Slack user IDs and no tool resolves a display name into one.
+	MentionUserID   string
+	MentionUserName string
 
 	SystemMessages []ConversationMessage
 	DeltaMessages  []ConversationMessage
@@ -171,12 +177,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		return planexec.QuestionResult{Terminate: true}, nil
 	}
 
-	// Per-mode wiring. A mention turn lets its sub-agent close / transition the
-	// case via the case__update_case_status tool (case_status_write toolset +
-	// AllowSubAgentWrites), so status changes are a tool-driven side effect
-	// inside the loop, not a host-applied terminal decision. A create turn has
-	// no case yet, so it stays observation-only and materializes the new case
-	// from the structured final output.
+	// Per-mode wiring. A mention turn hands its sub-agents the full case writer
+	// set (case_write toolset + AllowSubAgentWrites), so edits, assignee changes
+	// and status transitions are all tool-driven side effects inside the loop
+	// rather than host-applied terminal decisions. A create turn has no case yet,
+	// so it stays observation-only and materializes the new case from the
+	// structured final output.
 	isCreate := req.Mode == ModeCreate
 	knownToolIDs := agent.KnownToolSetIDsNoCore
 	allowWrites := false
@@ -237,7 +243,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 				"trigger_ts":   req.TriggerTS,
 			},
 		},
-		UserInput:    buildUserInput(req.SystemMessages, req.DeltaMessages, req.MentionText, req.MentionTS),
+		UserInput: buildUserInput(req.SystemMessages, req.DeltaMessages, ConversationMessage{
+			Timestamp: req.MentionTS,
+			UserID:    req.MentionUserID,
+			UserName:  req.MentionUserName,
+			Text:      req.MentionText,
+		}),
 		SystemPrompt: systemPrompt,
 		ToolResolver: resolver,
 		KnownToolIDs: knownToolIDs,
@@ -405,27 +416,28 @@ func (uc *UseCase) persistSession(ctx context.Context, ssn *model.Session, ended
 
 // buildToolResolver composes the sub-agent tool resolver. Thread-mode
 // workspaces manage no Actions, so the core (action) toolset is omitted entirely
-// — investigation reads Slack / Notion / GitHub / the web. The sub-agent's ONE
-// write capability is the case status-change tool (case_status_write): it is
-// wired only when a concrete case exists (mention / materialize turns), letting
-// the sub-agent close / transition that case as the investigation's conclusion.
-// Content materialization (title / description / fields) stays with the host, so
-// case__update_case is never wired here.
+// — investigation reads Slack / Notion / GitHub / the web. Case writes come from
+// the full casewriter set (case_write): edit, assign / unassign, and transition
+// the case under investigation. They are built whenever a concrete case exists;
+// which turns may actually request them is decided separately by the
+// per-mode KnownToolIDs list in RunTurn (mention turns only).
 func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 	d := uc.deps
 	wsID := ""
 	if req.Workspace != nil {
 		wsID = req.Workspace.Workspace.ID
 	}
-	// The status-change tool is scoped to the case under investigation. A create
-	// turn has no case yet (req.Case == nil), so CaseStatus stays zero and the
-	// resolver builds no status tool for it.
-	var caseStatus casewriter.Deps
+	// The writer tools are scoped to the case under investigation. A create turn
+	// has no case yet (req.Case == nil), so CaseWrite stays zero and the resolver
+	// builds no writer tools for it. Schema is required for case__update_case's
+	// custom-field coercion.
+	var caseWrite casewriter.Deps
 	if req.Case != nil {
-		caseStatus = casewriter.Deps{
+		caseWrite = casewriter.Deps{
 			CaseUC:      d.CaseUC,
 			WorkspaceID: wsID,
 			CaseID:      req.Case.ID,
+			Schema:      req.Workspace.FieldSchema,
 			StatusSet:   req.Workspace.CaseStatusSet,
 		}
 	}
@@ -441,11 +453,11 @@ func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 			Search:    d.SlackSearch,
 			Retriever: d.SlackRetriever,
 		},
-		Notion:     notiontool.Deps{Client: d.NotionClient},
-		GitHub:     d.GitHubClient,
-		WebFetch:   d.WebFetchClient,
-		Jira:       d.JiraTools,
-		CaseStatus: caseStatus,
+		Notion:    notiontool.Deps{Client: d.NotionClient},
+		GitHub:    d.GitHubClient,
+		WebFetch:  d.WebFetchClient,
+		Jira:      d.JiraTools,
+		CaseWrite: caseWrite,
 		Knowledge: knowledgetool.Deps{
 			WorkspaceID: wsID,
 			Accessor:    d.KnowledgeAccessor,

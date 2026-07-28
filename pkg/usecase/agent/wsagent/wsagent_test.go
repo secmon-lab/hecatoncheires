@@ -359,6 +359,14 @@ func (f *fakeCaseMultiUC) UpdateCase(_ context.Context, _ string, _ int64, _ cas
 	return nil, errors.New("not implemented: UpdateCase should not be called by this test")
 }
 
+func (f *fakeCaseMultiUC) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return nil, errors.New("not implemented: AssignCase should not be called by this test")
+}
+
+func (f *fakeCaseMultiUC) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return nil, errors.New("not implemented: UnassignCase should not be called by this test")
+}
+
 func (f *fakeCaseMultiUC) CloseCase(_ context.Context, _ string, _ int64) (*model.Case, error) {
 	return nil, errors.New("not implemented: CloseCase should not be called by this test")
 }

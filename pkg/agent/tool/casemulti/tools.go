@@ -103,13 +103,20 @@ type CaseUsecase interface {
 	CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error)
 	// UpdateCase is invoked by case__update_case.
 	UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error)
+	// AssignCase is invoked by case__assign. It is a delta add (set union), not
+	// a full replacement, so concurrent assignee edits never clobber.
+	AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
+	// UnassignCase is invoked by case__unassign (delta remove).
+	UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
 	// CloseCase is invoked by case__close_case.
 	CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 }
 
 // CaseUpdate mirrors the partial-update shape of usecase.CaseUpdate (compare
 // pkg/agent/tool/casewriter.CaseUpdate, which exists for the identical
-// import-cycle reason). nil means "preserve the existing value".
+// import-cycle reason). nil means "preserve the existing value". Assignees are
+// intentionally absent: they move through the delta AssignCase / UnassignCase
+// operations instead, so a partial update can never clobber a concurrent one.
 type CaseUpdate struct {
 	Title       *string
 	Description *string
@@ -194,6 +201,8 @@ func New(deps Deps) []gollem.Tool {
 		&getCaseTool{deps: deps},
 		&createCaseTool{deps: deps},
 		&updateCaseTool{deps: deps},
+		&assignCaseTool{deps: deps},
+		&unassignCaseTool{deps: deps},
 		&closeCaseTool{deps: deps},
 	}
 
@@ -633,8 +642,8 @@ func (t *updateCaseTool) Spec() gollem.ToolSpec {
 		Name: "case__update_case",
 		Description: "Update a case's title, description, or custom field values. " +
 			"This tool cannot change the case status (use case__close_case) or its " +
-			"assignees. Submit only the fields you intend to change; omit the rest " +
-			"to preserve them.",
+			"assignees (use case__assign / case__unassign). Submit only the fields " +
+			"you intend to change; omit the rest to preserve them.",
 		Parameters: map[string]*gollem.Parameter{
 			"case_id": {
 				Type:        gollem.TypeInteger,
@@ -711,6 +720,122 @@ func (t *updateCaseTool) Run(ctx context.Context, args map[string]any) (map[stri
 	}
 
 	return caseToDetailMap(updated), nil
+}
+
+type assignCaseTool struct {
+	deps Deps
+}
+
+func (t *assignCaseTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "case__assign",
+		Description: "Add one or more assignees to a case. This is a delta add: " +
+			"the listed user IDs are unioned onto the case's existing assignees, so " +
+			"already-assigned users are left untouched and other assignees are " +
+			"preserved. Use case__unassign to remove. New assignees must be known " +
+			"Slack users.",
+		Parameters: map[string]*gollem.Parameter{
+			"case_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the case to assign users to.",
+				Required:    true,
+			},
+			"user_ids": {
+				Type:        gollem.TypeArray,
+				Description: "Slack user IDs to add as assignees.",
+				Items:       &gollem.Parameter{Type: gollem.TypeString},
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *assignCaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	caseID, err := tool.ExtractInt64(args, "case_id")
+	if err != nil {
+		return nil, err
+	}
+	ids, err := assigneeIDsArg(args)
+	if err != nil {
+		return nil, err
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Assigning users to case #%d...", caseID))
+
+	updated, err := t.deps.CaseUC.AssignCase(ctx, t.deps.WorkspaceID, caseID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to assign case",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", caseID))
+	}
+
+	return caseToDetailMap(updated), nil
+}
+
+type unassignCaseTool struct {
+	deps Deps
+}
+
+func (t *unassignCaseTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "case__unassign",
+		Description: "Remove one or more assignees from a case. This is a delta " +
+			"remove: the listed user IDs are dropped from the case's existing " +
+			"assignees and the rest are preserved. Removing a user who is not " +
+			"assigned is a no-op.",
+		Parameters: map[string]*gollem.Parameter{
+			"case_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the case to remove assignees from.",
+				Required:    true,
+			},
+			"user_ids": {
+				Type:        gollem.TypeArray,
+				Description: "Slack user IDs to remove from the assignees.",
+				Items:       &gollem.Parameter{Type: gollem.TypeString},
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *unassignCaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	caseID, err := tool.ExtractInt64(args, "case_id")
+	if err != nil {
+		return nil, err
+	}
+	ids, err := assigneeIDsArg(args)
+	if err != nil {
+		return nil, err
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Unassigning users from case #%d...", caseID))
+
+	updated, err := t.deps.CaseUC.UnassignCase(ctx, t.deps.WorkspaceID, caseID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to unassign case",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", caseID))
+	}
+
+	return caseToDetailMap(updated), nil
+}
+
+// assigneeIDsArg extracts and validates the required non-empty user_ids array
+// shared by case__assign / case__unassign.
+func assigneeIDsArg(args map[string]any) ([]string, error) {
+	v, ok := args["user_ids"]
+	if !ok || v == nil {
+		return nil, goerr.New("user_ids is required")
+	}
+	ids, err := toStringSlice(v)
+	if err != nil {
+		return nil, goerr.Wrap(err, "user_ids invalid")
+	}
+	if len(ids) == 0 {
+		return nil, goerr.New("user_ids must not be empty")
+	}
+	return ids, nil
 }
 
 type closeCaseTool struct {

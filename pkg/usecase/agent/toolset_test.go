@@ -159,43 +159,69 @@ func TestToolSetResolver_ResolveWebFetch(t *testing.T) {
 	})
 }
 
-func TestToolSetResolver_CaseStatusWrite(t *testing.T) {
-	t.Run("thread-mode deps resolve to the status-change tool only", func(t *testing.T) {
+func TestToolSetResolver_CaseWrite(t *testing.T) {
+	t.Run("thread-mode deps resolve to the full writer set", func(t *testing.T) {
 		r := agent.NewToolSetResolver(agent.ToolSetDeps{
-			CaseStatus: casewriter.Deps{
+			CaseWrite: casewriter.Deps{
 				CaseUC:      stubCaseMutator{},
 				WorkspaceID: "ws",
 				CaseID:      7,
 				StatusSet:   testStatusSet(t),
 			},
 		})
-		tools := r.Resolve([]string{agent.ToolSetCaseStatusWrite})
-		gt.Array(t, tools).Length(1).Required()
-		gt.String(t, tools[0].Spec().Name).Equal("case__update_case_status")
+		tools := r.Resolve([]string{agent.ToolSetCaseWrite})
+		names := make([]string, 0, len(tools))
+		for _, tl := range tools {
+			names = append(names, tl.Spec().Name)
+		}
+		gt.Array(t, names).Equal([]string{
+			"case__update_case",
+			"case__assign",
+			"case__unassign",
+			"case__update_case_status",
+		})
 	})
 
-	t.Run("nil StatusSet builds no status tool (create turn / no case)", func(t *testing.T) {
+	t.Run("nil StatusSet still resolves to writes, closing via case__close_case", func(t *testing.T) {
 		r := agent.NewToolSetResolver(agent.ToolSetDeps{
-			CaseStatus: casewriter.Deps{CaseUC: stubCaseMutator{}, WorkspaceID: "ws"},
+			CaseWrite: casewriter.Deps{CaseUC: stubCaseMutator{}, WorkspaceID: "ws", CaseID: 7},
 		})
-		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseStatusWrite})).Length(0)
+		tools := r.Resolve([]string{agent.ToolSetCaseWrite})
+		names := make([]string, 0, len(tools))
+		for _, tl := range tools {
+			names = append(names, tl.Spec().Name)
+		}
+		gt.Array(t, names).Equal([]string{
+			"case__update_case",
+			"case__assign",
+			"case__unassign",
+			"case__close_case",
+		})
 	})
 
-	t.Run("nil CaseUC builds no status tool", func(t *testing.T) {
+	t.Run("no case pinned builds no writer tools (create turn)", func(t *testing.T) {
 		r := agent.NewToolSetResolver(agent.ToolSetDeps{
-			CaseStatus: casewriter.Deps{WorkspaceID: "ws", StatusSet: testStatusSet(t)},
+			CaseWrite: casewriter.Deps{CaseUC: stubCaseMutator{}, WorkspaceID: "ws", StatusSet: testStatusSet(t)},
 		})
-		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseStatusWrite})).Length(0)
+		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseWrite})).Length(0)
+	})
+
+	t.Run("nil CaseUC builds no writer tools", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			CaseWrite: casewriter.Deps{WorkspaceID: "ws", CaseID: 7, StatusSet: testStatusSet(t)},
+		})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseWrite})).Length(0)
 	})
 
 	t.Run("not requested means not included", func(t *testing.T) {
 		r := agent.NewToolSetResolver(agent.ToolSetDeps{
-			CaseStatus: casewriter.Deps{
+			CaseWrite: casewriter.Deps{
 				CaseUC:    stubCaseMutator{},
+				CaseID:    7,
 				StatusSet: testStatusSet(t),
 			},
 		})
-		// Only slack_ro requested (empty) — the status tool must not leak in.
+		// Only slack_ro requested (empty) — the writer tools must not leak in.
 		gt.Array(t, r.Resolve([]string{agent.ToolSetSlackRO})).Length(0)
 	})
 }
@@ -252,7 +278,7 @@ func TestToolSetResolver_ResolveJira(t *testing.T) {
 }
 
 func TestKnownToolSetIDsThreadWrite(t *testing.T) {
-	// It is the no-core list plus exactly the status-write id, in order.
-	want := append(append([]string{}, agent.KnownToolSetIDsNoCore...), agent.ToolSetCaseStatusWrite)
+	// It is the no-core list plus exactly the case-write id, in order.
+	want := append(append([]string{}, agent.KnownToolSetIDsNoCore...), agent.ToolSetCaseWrite)
 	gt.Array(t, agent.KnownToolSetIDsThreadWrite).Equal(want)
 }

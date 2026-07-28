@@ -38,11 +38,11 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, creat
 	case ModeMaterialize:
 		b.WriteString("A new case was just created from the first message in this thread. Investigate the message (using the read-only tools when helpful) and emit a `materialize` decision that fills a concise title, a clear description, and any custom fields you are confident about.\n")
 	default:
-		b.WriteString("A user mentioned you in this case thread. Investigate as needed. To close the case or move it to another board status when the thread indicates it is resolved, dispatch a task that uses the `case__update_case_status` tool — do NOT describe closing in your final answer, actually call the tool. Your terminal decision is then ONE of: `respond` to answer the user, or `materialize` to update the case title/description/fields.\n")
+		b.WriteString("A user mentioned you in this case thread. Investigate as needed. When the thread calls for a change to the case — a board status move (including closing it), an assignee change, or a content edit — dispatch a task that uses the matching `case__*` write tool; do NOT merely describe the change in your final answer, actually call the tool. Your terminal decision is then ONE of: `respond` to answer the user, or `materialize` to update the case title/description/fields.\n")
 	}
 	switch mode {
 	case ModeMention:
-		b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agents may read (Slack / Notion / GitHub / the web) and may change the case's board status via `case__update_case_status`, but cannot edit case content directly.\n\n")
+		b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agents may read (Slack / Notion / GitHub / the web) and may write to this case: `case__update_case_status` (board status), `case__assign` / `case__unassign` (assignees), and `case__update_case` (title / description / custom fields). The assignee tools take Slack user IDs, never display names: resolve a name to its user ID from the thread messages first, and never guess an ID. Because a `materialize` decision REPLACES the title and description wholesale, pick one content path per turn — either edit with `case__update_case` inside the loop, or emit `materialize` at the end, never both.\n\n")
 	default:
 		b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agent tools are read-only.\n\n")
 	}
@@ -51,6 +51,10 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, creat
 		b.WriteString("# Current case\n")
 		fmt.Fprintf(&b, "- Title: %s\n", orPlaceholder(c.Title))
 		fmt.Fprintf(&b, "- Description: %s\n", orPlaceholder(c.Description))
+		// Always rendered, including when empty: the agent has no tool to read the
+		// case back, so an omitted line would leave it unable to tell "no
+		// assignees" from "not shown" before calling case__assign / case__unassign.
+		fmt.Fprintf(&b, "- Assignees (Slack user IDs): %s\n", orPlaceholder(strings.Join(c.AssigneeIDs, ", ")))
 		if c.BoardStatus != "" {
 			fmt.Fprintf(&b, "- Current status: %s\n", c.BoardStatus)
 		}
@@ -119,23 +123,29 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, creat
 }
 
 // buildUserInput assembles the first user message handed to the planner. The
-// system / delta conversation messages are prepended; the current mention
-// text is appended last (when present).
-func buildUserInput(systemMessages, deltaMessages []ConversationMessage, mentionText, mentionTS string) string {
+// system / delta conversation messages are prepended; the current mention is
+// appended last (when it carries text). The mention is passed as a
+// ConversationMessage so its author is rendered exactly like every other
+// speaker — the agent needs the author's Slack user ID to satisfy a request
+// like "assign me".
+func buildUserInput(systemMessages, deltaMessages []ConversationMessage, mention ConversationMessage) string {
 	var b strings.Builder
 	if len(systemMessages) > 0 {
 		b.WriteString("# Thread so far\n")
-		writeMessages(&b, systemMessages, mentionTS)
+		writeMessages(&b, systemMessages, mention.Timestamp)
 		b.WriteString("\n")
 	}
 	if len(deltaMessages) > 0 {
 		b.WriteString("# New messages since last mention\n")
-		writeMessages(&b, deltaMessages, mentionTS)
+		writeMessages(&b, deltaMessages, mention.Timestamp)
 		b.WriteString("\n")
 	}
-	if mentionText != "" {
+	if mention.Text != "" {
 		b.WriteString("# Current mention\n")
-		b.WriteString(mentionText)
+		if speaker := speakerLabel(mention); speaker != "" {
+			fmt.Fprintf(&b, "From: %s\n", speaker)
+		}
+		b.WriteString(mention.Text)
 	}
 	if b.Len() == 0 {
 		// Defensive: never hand the planner an empty user input (planexec
@@ -150,11 +160,23 @@ func writeMessages(b *strings.Builder, msgs []ConversationMessage, skipTS string
 		if skipTS != "" && m.Timestamp == skipTS {
 			continue
 		}
-		name := m.UserName
-		if name == "" {
-			name = m.UserID
-		}
-		fmt.Fprintf(b, "[%s] %s: %s\n", m.Timestamp, name, m.Text)
+		fmt.Fprintf(b, "[%s] %s: %s\n", m.Timestamp, speakerLabel(m), m.Text)
+	}
+}
+
+// speakerLabel renders a message author as "Display Name (U123)", degrading to
+// whichever half is known. Both halves are emitted because the mention-mode
+// system prompt tells the agent to resolve a named person to a Slack user ID
+// before calling case__assign / case__unassign: a display name on its own
+// cannot satisfy that, and there is no user-directory tool to look one up.
+func speakerLabel(m ConversationMessage) string {
+	switch {
+	case m.UserName != "" && m.UserID != "":
+		return fmt.Sprintf("%s (%s)", m.UserName, m.UserID)
+	case m.UserName != "":
+		return m.UserName
+	default:
+		return m.UserID
 	}
 }
 

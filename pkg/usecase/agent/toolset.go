@@ -24,15 +24,17 @@ const (
 	ToolSetGitHub   = "github"
 	ToolSetWebFetch = "webfetch"
 	ToolSetJira     = "jira"
-	// ToolSetCaseStatusWrite is the writer toolset carrying ONLY the case
-	// status-change tool (case__update_case_status / case__close_case). It is
-	// the one write capability a thread-mode sub-agent is granted: closing /
-	// transitioning the case it investigates. Content materialization
-	// (title / description / fields) stays with the host, so case__update_case
-	// is deliberately NOT part of this set.
-	ToolSetCaseStatusWrite = "case_status_write"
+	// ToolSetCaseWrite is the writer toolset for the single case the turn is
+	// pinned to: the full casewriter set (case__update_case, case__assign,
+	// case__unassign, and the mode-appropriate case__update_case_status /
+	// case__close_case). Every mention-driven host grants it, so a sub-agent can
+	// carry out any case edit the user asked for. Note that a mention turn's
+	// terminal `materialize` decision replaces title / description wholesale, so
+	// a host offering both must tell the planner to pick one path per turn (see
+	// threadcase's system prompt).
+	ToolSetCaseWrite = "case_write"
 	// ToolSetCaseMulti is the cross-case ("workspace-scoped") toolset used by the
-	// workspace-channel agent. Unlike core/case_status_write (pinned to one case),
+	// workspace-channel agent. Unlike core/case_write (pinned to one case),
 	// its tools take case_id as a call-time argument so a single turn can operate
 	// across every case the requesting user can access. Advertised only via
 	// KnownToolSetIDsWorkspaceChannel (never the default lists) so it is not
@@ -64,15 +66,14 @@ var KnownToolSetIDsNoCore = []string{
 	ToolSetJira,
 }
 
-// KnownToolSetIDsThreadWrite is KnownToolSetIDsNoCore plus the case
-// status-change writer toolset. Thread-mode agents advertise this to the
-// planner ONLY when a concrete case exists to act on (mention / materialize
-// turns): the sub-agent may then close / transition that case via
-// case__update_case_status. Creation turns (no case yet) advertise the plain
-// KnownToolSetIDsNoCore instead, so the planner is never offered a writer tool
-// the resolver cannot wire — the prompt-vs-capability mismatch the architecture
-// rule forbids.
-var KnownToolSetIDsThreadWrite = append(append([]string{}, KnownToolSetIDsNoCore...), ToolSetCaseStatusWrite)
+// KnownToolSetIDsThreadWrite is KnownToolSetIDsNoCore plus the case writer
+// toolset. Thread-mode agents advertise this to the planner on mention turns,
+// where a concrete case exists to act on and a human asked for the change: the
+// sub-agent may then edit, assign, and transition that case. Materialize and
+// creation turns advertise the plain KnownToolSetIDsNoCore instead, so the
+// planner is never offered a writer tool the resolver cannot wire — the
+// prompt-vs-capability mismatch the architecture rule forbids.
+var KnownToolSetIDsThreadWrite = append(append([]string{}, KnownToolSetIDsNoCore...), ToolSetCaseWrite)
 
 // KnownToolSetIDsWorkspaceChannel is the planner-advertised list for the
 // workspace-channel agent: the cross-case toolset plus the read-only auxiliary
@@ -107,19 +108,18 @@ type ToolSetResolver struct {
 	// from a client here: it is handed in pre-expanded via ToolSetDeps.Jira
 	// because gollem has no exported ToolSet-to-[]Tool helper.
 	jira []gollem.Tool
-	// caseStatus is the case status-change writer tool set (case_status_write).
-	// Unlike knowledge it is NOT always included: a sub-agent gets it only when
-	// the planner requested ToolSetCaseStatusWrite for that task. Empty unless
-	// ToolSetDeps.CaseStatus.StatusSet is set (a thread-mode case with a board
-	// status set).
-	caseStatus []gollem.Tool
+	// caseWrite is the single-case writer tool set (case_write). Unlike
+	// knowledge it is NOT always included: a sub-agent gets it only when the
+	// planner requested ToolSetCaseWrite for that task. Empty unless
+	// ToolSetDeps.CaseWrite identifies a concrete case to write to.
+	caseWrite []gollem.Tool
 	// knowledge is the read-only workspace knowledge tool set. It is always
 	// included in every Resolve result (not gated by a planner-requested ID):
 	// investigation sub-agents may always consult shared knowledge, but never
 	// mutate it (write tools are wired only in the case-bound / job paths).
 	knowledge []gollem.Tool
 	// caseMulti is the cross-case ("workspace-scoped") tool set (case_multi).
-	// Unlike caseStatus it carries full cross-case read+write tools taking
+	// Unlike caseWrite it carries full cross-case read+write tools taking
 	// case_id at call time. Empty unless ToolSetDeps.CaseMulti.CaseUC is set;
 	// gated on the planner requesting ToolSetCaseMulti. Used by the
 	// workspace-channel agent, never the per-case mention / proposal planners.
@@ -142,12 +142,13 @@ type ToolSetDeps struct {
 	// "jira" ToolSet ID resolves to nothing.
 	Jira []gollem.Tool
 
-	// CaseStatus backs the case_status_write toolset (the status-change tool
-	// only). The status tool is built when CaseStatus.StatusSet is non-nil
-	// (a thread-mode case carrying a board status set); a nil StatusSet leaves
-	// the toolset empty so requesting the ID resolves to nothing. CaseUC /
-	// WorkspaceID / CaseID identify the case the sub-agent may transition.
-	CaseStatus casewriter.Deps
+	// CaseWrite backs the case_write toolset (the full single-case writer set).
+	// The tools are built when CaseUC and CaseID identify a concrete case; a zero
+	// value (no case yet, or no mutator wired) leaves the toolset empty so
+	// requesting the ID resolves to nothing. StatusSet selects the mode-specific
+	// "mark done" tool (case__update_case_status when set, case__close_case when
+	// not) and Schema drives case__update_case's custom-field coercion.
+	CaseWrite casewriter.Deps
 
 	// OmitCore omits the core (action) toolset entirely. Set by thread-mode
 	// agents: a thread-mode workspace manages no Actions, so even the
@@ -175,12 +176,13 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	if d.Knowledge.Accessor != nil {
 		knowledge = knowledgetool.NewReadOnly(d.Knowledge)
 	}
-	// The status-change tool needs both a mutator and a board status set; a nil
-	// StatusSet (non-thread-mode, or a create turn with no case yet) leaves the
-	// set empty so a stray case_status_write request resolves to nothing.
-	var caseStatus []gollem.Tool
-	if d.CaseStatus.StatusSet != nil && d.CaseStatus.CaseUC != nil {
-		caseStatus = casewriter.NewStatusTool(d.CaseStatus)
+	// The writer tools need a mutator and a concrete case to be pinned to. A
+	// create turn (no case yet) or a host that wires no CaseUC leaves the set
+	// empty, so a stray case_write request resolves to nothing rather than
+	// producing tools pinned to case 0.
+	var caseWrite []gollem.Tool
+	if d.CaseWrite.CaseUC != nil && d.CaseWrite.CaseID != 0 {
+		caseWrite = casewriter.New(d.CaseWrite)
 	}
 	// The cross-case toolset is built only when a CaseUsecase is wired (the
 	// workspace-channel host); casemulti.New returns nil otherwise.
@@ -189,15 +191,15 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 		caseMulti = casemulti.New(d.CaseMulti)
 	}
 	return &ToolSetResolver{
-		core:       coreTools,
-		slack:      slacktool.NewReadOnly(d.Slack),
-		notion:     notiontool.New(d.Notion),
-		github:     githubtool.New(d.GitHub),
-		webfetch:   webfetch.New(d.WebFetch),
-		jira:       d.Jira,
-		caseStatus: caseStatus,
-		knowledge:  knowledge,
-		caseMulti:  caseMulti,
+		core:      coreTools,
+		slack:     slacktool.NewReadOnly(d.Slack),
+		notion:    notiontool.New(d.Notion),
+		github:    githubtool.New(d.GitHub),
+		webfetch:  webfetch.New(d.WebFetch),
+		jira:      d.Jira,
+		caseWrite: caseWrite,
+		knowledge: knowledge,
+		caseMulti: caseMulti,
 	}
 }
 
@@ -234,8 +236,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			total += len(r.webfetch)
 		case ToolSetJira:
 			total += len(r.jira)
-		case ToolSetCaseStatusWrite:
-			total += len(r.caseStatus)
+		case ToolSetCaseWrite:
+			total += len(r.caseWrite)
 		case ToolSetCaseMulti:
 			total += len(r.caseMulti)
 		}
@@ -256,8 +258,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			out = append(out, r.webfetch...)
 		case ToolSetJira:
 			out = append(out, r.jira...)
-		case ToolSetCaseStatusWrite:
-			out = append(out, r.caseStatus...)
+		case ToolSetCaseWrite:
+			out = append(out, r.caseWrite...)
 		case ToolSetCaseMulti:
 			out = append(out, r.caseMulti...)
 		}
