@@ -90,6 +90,21 @@ var (
 	// Access control errors
 	ErrAccessDenied = errors.New("access denied to private case")
 
+	// Agent Job manual-trigger errors
+	//
+	// ErrJobNotFound is returned when a manual trigger names a Job that is
+	// not in the Case's triggerable set — an unknown id, a Job disabled in
+	// the workspace TOML, or a scheduled-only Job on a Case that is not
+	// OPEN. The set is exactly what ListCaseJobs returns, so a Job the web
+	// UI does not list cannot be started through the API either.
+	ErrJobNotFound = errors.New("job not found")
+	// ErrJobAlreadyRunning is returned when a manual trigger targets a
+	// (workspace, case, job) tuple that already holds a live lease or is
+	// suspended awaiting user input. The authoritative exclusion is the
+	// lease taken inside the runner; this check exists so the operator gets
+	// an immediate answer instead of a silent no-op.
+	ErrJobAlreadyRunning = errors.New("job is already running")
+
 	// Other errors
 	ErrDuplicateField = errors.New("duplicate field")
 

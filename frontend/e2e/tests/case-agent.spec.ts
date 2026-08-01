@@ -49,4 +49,50 @@ test.describe('Case agent settings', () => {
     expect(await agentPage.isPageLoaded()).toBeTruthy();
     await expect(agentPage.promptDisplay()).toContainText(promptText);
   });
+
+  test('starts a listed Job by hand and records the run in the history', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+    const agentPage = new CaseAgentPage(page);
+
+    const title = `Manual Run Case ${uniq()}`;
+
+    await caseListPage.navigate(TEST_WORKSPACE_ID);
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({ title, customFields: { category: 'task' } });
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+
+    const match = page.url().match(/\/cases\/(\d+)/);
+    expect(match).not.toBeNull();
+    const caseId = match![1];
+
+    await agentPage.navigate(TEST_WORKSPACE_ID, caseId);
+    expect(await agentPage.isPageLoaded()).toBeTruthy();
+
+    // A fresh case has no agent history at all.
+    await expect(agentPage.runLogRows()).toHaveCount(0);
+
+    // The Job defined in config.test.toml is listed and can be started.
+    const runButton = agentPage.jobRunButton('manual_probe');
+    await expect(runButton).toBeEnabled();
+    await runButton.click();
+
+    // The run shows up in the history through the page's polling, tagged as
+    // manually triggered. The E2E server has no LLM, so the run terminates
+    // as FAILED — what matters here is that the manual trigger produced a
+    // real run record.
+    const row = agentPage.runLogRowsForJob('Manual probe');
+    await expect(row).toHaveCount(1, { timeout: 30000 });
+    await expect(row.getByTestId('run-log-trigger')).toHaveText('Manual');
+
+    // It is persisted, not just optimistic UI.
+    await page.reload();
+    expect(await agentPage.isPageLoaded()).toBeTruthy();
+    await expect(agentPage.runLogRowsForJob('Manual probe')).toHaveCount(1);
+  });
 });

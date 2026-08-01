@@ -120,6 +120,15 @@ export const GET_CASE_JOBS = gql`
   }
 `
 
+// TRIGGER_CASE_JOB starts one of the Jobs listed by GET_CASE_JOBS against
+// this case. It returns as soon as the run is accepted, so the caller polls
+// GET_CASE_JOB_RUN_LOGS to watch the run appear and finish.
+export const TRIGGER_CASE_JOB = gql`
+  mutation TriggerCaseJob($workspaceId: String!, $caseId: Int!, $jobId: String!) {
+    triggerCaseJob(workspaceId: $workspaceId, caseId: $caseId, jobId: $jobId)
+  }
+`
+
 export const GET_JOB_RUN_LOG = gql`
   query GetJobRunLog($workspaceId: String!, $caseId: Int!, $runId: String!) {
     jobRunLog(workspaceId: $workspaceId, caseId: $caseId, runId: $runId) {

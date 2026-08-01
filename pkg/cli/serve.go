@@ -530,6 +530,9 @@ func cmdServe() *cli.Command {
 				TraceRepo:      agentTraceRepo,
 			})
 			uc.Case.SetEventPublisher(jobUC)
+			// The web UI's manual Run button drives the same runner through
+			// JobRunUseCase.TriggerJob.
+			uc.JobRun.SetTrigger(jobRunner)
 			tickScanner := job.NewScheduledScanner(job.ScannerDeps{
 				Repo:      repo,
 				Registry:  registry,

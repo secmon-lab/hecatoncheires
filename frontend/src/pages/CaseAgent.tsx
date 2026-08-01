@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 
@@ -6,10 +6,16 @@ import {
   GET_CASE_AGENT_SETTINGS,
   GET_CASE_JOB_RUN_LOGS,
   GET_CASE_JOBS,
+  TRIGGER_CASE_JOB,
   UPDATE_CASE_AGENT_SETTINGS,
 } from '../graphql/caseAgent'
 import { useTranslation } from '../i18n'
 import { runTriggerLabelKey } from '../utils/agentTrigger'
+import {
+  RUN_POLL_INTERVAL_MS,
+  RUN_POLL_MAX_MS,
+  shouldPollRunLogs,
+} from '../utils/runPolling'
 import {
   IconChevDown,
   IconChevLeft,
@@ -120,6 +126,8 @@ export default function CaseAgent() {
   const {
     data: runLogData,
     loading: runLogLoading,
+    startPolling: startRunLogPolling,
+    stopPolling: stopRunLogPolling,
   } = useQuery<{ caseJobRunLogs: JobRunLogConnection }>(GET_CASE_JOB_RUN_LOGS, {
     variables: { workspaceId, caseId, first: 20, after: currentCursor },
     skip: !workspaceId || !caseId,
@@ -143,6 +151,17 @@ export default function CaseAgent() {
     ],
   })
 
+  const [triggerJob, triggerState] = useMutation(TRIGGER_CASE_JOB)
+  // The job id whose trigger mutation is in flight. Cleared as soon as the
+  // mutation settles — from then on the run-log rows say whether it runs.
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null)
+  // Epoch ms until which a just-issued trigger keeps the page polling even
+  // though no RUNNING row has appeared yet. 0 = nothing pending. Held as
+  // state, not a ref, so reaching the deadline re-evaluates the polling
+  // effect — a poll that returns unchanged data does not re-render, so
+  // nothing else would.
+  const [pollDeadline, setPollDeadline] = useState(0)
+
   const [editingPrompt, setEditingPrompt] = useState(false)
   const [draftPrompt, setDraftPrompt] = useState('')
 
@@ -159,6 +178,47 @@ export default function CaseAgent() {
   // operator's selection, so use it directly. The earlier no-op
   // Set→filter wrapper has been removed.
   const selectedSources: AgentSource[] = caseData?.agentSources ?? []
+
+  // Jobs with a run in flight. The Run button for these is disabled — the
+  // backend refuses a second run anyway, so the UI says so up front.
+  const runningJobIds = new Set(
+    runLogs.filter((r) => r.stage === 'RUNNING').map((r) => r.jobId),
+  )
+  const hasRunningRun = runningJobIds.size > 0
+
+  // Start and stop polling from one place, so the page follows a run it did
+  // not start (opened while a run was already in flight) as well as one it
+  // did. Reading the clock here (an effect, not render) keeps the rendered
+  // output a pure function of state.
+  useEffect(() => {
+    const now = Date.now()
+    if (!shouldPollRunLogs({ rows: runLogs, page: currentPage, deadline: pollDeadline, now })) {
+      stopRunLogPolling()
+      if (pollDeadline !== 0) setPollDeadline(0)
+      return
+    }
+    startRunLogPolling(RUN_POLL_INTERVAL_MS)
+
+    // A visible RUNNING row keeps polling alive on its own, so the deadline
+    // that covered the wait for it has done its job. Dropping it here is what
+    // makes polling stop the moment that run reaches a terminal stage,
+    // instead of lingering for the rest of the window.
+    if (hasRunningRun) {
+      if (pollDeadline !== 0) setPollDeadline(0)
+      return
+    }
+    if (pollDeadline > now) {
+      const timer = setTimeout(() => setPollDeadline(0), pollDeadline - now)
+      return () => clearTimeout(timer)
+    }
+  }, [
+    runLogs,
+    hasRunningRun,
+    currentPage,
+    pollDeadline,
+    startRunLogPolling,
+    stopRunLogPolling,
+  ])
 
   if (!workspaceId || !caseId) {
     return null
@@ -252,6 +312,25 @@ export default function CaseAgent() {
       setEditingSources(false)
     } catch {
       // surfaced via updateState
+    }
+  }
+
+  const handleRunJob = async (jobId: string) => {
+    setPendingJobId(jobId)
+    try {
+      await triggerJob({ variables: { workspaceId, caseId, jobId } })
+      // The new run lands at the head of the history, so return there and
+      // watch for it. Setting the deadline is enough — the polling effect
+      // picks it up. RUN_POLL_MAX_MS bounds the wait if the run finishes
+      // between two polls and its RUNNING row is never observed.
+      setCursorStack([null])
+      setCurrentPage(0)
+      setPollDeadline(Date.now() + RUN_POLL_MAX_MS)
+    } catch {
+      // Apollo surfaces the failure via triggerState.error; the banner below
+      // renders it.
+    } finally {
+      setPendingJobId(null)
     }
   }
 
@@ -503,11 +582,19 @@ export default function CaseAgent() {
           )}
           <span className={styles.sectionHeadRule} />
         </div>
+        {triggerState.error && (
+          <div className={styles.errorBanner} data-testid="agent-job-run-error">
+            {t('caseAgentJobRunError', { message: triggerState.error.message })}
+          </div>
+        )}
         <CaseJobList
           jobs={jobs}
           loading={jobsLoading}
           error={!!jobsError}
           onRetry={() => void refetchJobs()}
+          onRun={(jobId) => void handleRunJob(jobId)}
+          runningJobIds={runningJobIds}
+          pendingJobId={pendingJobId}
         />
       </div>
 
@@ -596,6 +683,7 @@ export default function CaseAgent() {
               key={r.runId}
               to={`/ws/${workspaceId}/cases/${caseId}/agent/runs/${r.runId}`}
               className={styles.runRow}
+              data-testid="run-log-row"
             >
               <span className={styles.runColStatus}>
                 <StageBadge stage={r.stage} size="sm" />
@@ -627,7 +715,7 @@ export default function CaseAgent() {
                 {formatDuration(r.durationMs, r.stage, t('caseAgentRunDurationRunning'))}
               </span>
               <span className={styles.runColTrigger}>
-                <span className={styles.triggerChip}>
+                <span className={styles.triggerChip} data-testid="run-log-trigger">
                   {triggerKey ? t(triggerKey) : r.eventType || '—'}
                 </span>
               </span>

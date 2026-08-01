@@ -17,12 +17,19 @@
 .row:last-child {
   border-bottom: none;
 }
+/* The expand toggle and the Run button are siblings (nesting buttons is
+   invalid markup), so the row's top line is its own flex container. */
+.rowTop {
+  display: flex;
+  align-items: flex-start;
+}
 .rowHeader {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  width: 100%;
-  padding: 16px 18px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--spacing-md) 1.125rem;
   background: transparent;
   border: 0;
   text-align: left;
@@ -32,6 +39,12 @@
 }
 .rowHeader:hover {
   background: var(--bg-subtle);
+}
+.rowRun {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-md) 1.125rem var(--spacing-md) 0;
 }
 .rowMain {
   flex: 1 1 280px;

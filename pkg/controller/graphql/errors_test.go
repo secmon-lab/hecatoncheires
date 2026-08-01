@@ -35,6 +35,8 @@ func TestErrorCode(t *testing.T) {
 		// BAD_USER_INPUT, not the server-fault ACTIVATION_FAILED.
 		{"private joined with activation failed → bad user input", errors.Join(usecase.ErrActivationFailed, goerr.Wrap(usecase.ErrCasePrivateThreadModeUnsupported, "x")), gqlctrl.ErrCodeBadUserInput},
 		{"case not found", goerr.Wrap(usecase.ErrCaseNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"job not triggerable", goerr.Wrap(usecase.ErrJobNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"job already running", goerr.Wrap(usecase.ErrJobAlreadyRunning, "x"), gqlctrl.ErrCodeConflict},
 		{"access denied", goerr.Wrap(usecase.ErrAccessDenied, "x"), gqlctrl.ErrCodeForbidden},
 		{"already closed", goerr.Wrap(usecase.ErrCaseAlreadyClosed, "x"), gqlctrl.ErrCodeConflict},
 		{"invalid argument", goerr.Wrap(usecase.ErrInvalidArgument, "x"), gqlctrl.ErrCodeBadUserInput},

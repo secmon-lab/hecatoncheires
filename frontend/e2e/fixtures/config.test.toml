@@ -67,3 +67,17 @@ name = "Body"
 type = "markdown"
 required = false
 description = "Markdown body rendered in the Web UI."
+
+# A Job the Case Agent page can list and the E2E can start manually.
+# Its only trigger is a 24h interval, which the scheduled scanner never
+# reaches during a test run (the scan is driven by an HTTP tick hook, not a
+# timer), so the only run this Job ever produces is the manual one.
+# The E2E server has no LLM configured, so the run itself fails — that is
+# fine: the assertion is that a manually triggered run appears in the
+# history tagged as manual.
+[[job]]
+id = "manual_probe"
+name = "Manual probe"
+description = "Started by hand from the Case Agent page."
+prompt = "Summarise case {{.Case.ID}}."
+events.scheduled = { every = "24h" }

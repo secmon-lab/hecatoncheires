@@ -26,6 +26,21 @@ export class CaseAgentPage extends BasePage {
     await textarea.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
   }
 
+  /** The Run button of one Automated Jobs row. */
+  jobRunButton(jobId: string): Locator {
+    return this.page.getByTestId(`job-run-button-${jobId}`);
+  }
+
+  /** Rows of the Run logs table. */
+  runLogRows(): Locator {
+    return this.page.getByTestId('run-log-row');
+  }
+
+  /** The run-log rows naming the given Job. */
+  runLogRowsForJob(jobName: string): Locator {
+    return this.runLogRows().filter({ hasText: jobName });
+  }
+
   async isPageLoaded(): Promise<boolean> {
     try {
       await this.page.getByTestId('agent-prompt-edit-button').waitFor({ state: 'visible', timeout: 5000 });

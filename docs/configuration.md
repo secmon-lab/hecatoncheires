@@ -1204,6 +1204,42 @@ control: a caller who is not a member of a private Case's channel is refused.
 `CaseJob.trigger.schedule.everySeconds` reports `every` as whole seconds and
 `cron` reports the original cron expression (the two are mutually exclusive).
 
+### Running a Job by hand (Web UI)
+
+Each row of the **Automated Jobs** list carries a **Run** button that starts
+that Job against the Case immediately, without waiting for its trigger
+condition. The run is identical to an event-driven one — same prompt, same
+tools, same Slack session log (subject to `quiet`), same reflection pass —
+and appears in the *Run history* table below, where the **Trigger** column
+reads `Manual`.
+
+Rules worth knowing:
+
+- **Only the Jobs shown in the list can be started.** The button and the API
+  share one definition of "runnable for this Case", so a disabled Job, or a
+  scheduled-only Job on a `CLOSED` case, cannot be started by hand either.
+- **One run at a time per `(job, case)`.** While a run holds the lease — or
+  while an interactive run is waiting on a question the user has not answered
+  yet — a second Run press is refused with a conflict error instead of
+  queueing. A question left unanswered past the timeout no longer blocks it:
+  the next run recovers the abandoned one, exactly as an event-driven trigger
+  does.
+- **The button returns as soon as the run is accepted**, not when it
+  finishes. The page then polls the run history until the run reaches its
+  terminal stage.
+- **The trigger reason reaching the agent differs.** The system prompt's
+  *Trigger reason* section says the run was started by hand and names the
+  operator. A prompt that branches on `{{ .Event.CaseLifecycle }}` sees an
+  empty value on a manual run, because no lifecycle transition occurred —
+  write such a prompt to tolerate that, or keep it out of the prompt.
+
+The button is backed by the
+`triggerCaseJob(workspaceId, caseId, jobId): Boolean!` GraphQL mutation. It
+enforces the same private-case access control as `caseJobs` and reports
+refusals through `extensions.code`: `FORBIDDEN` (not a member of a private
+Case), `NOT_FOUND` (unknown Case, or a Job that is not runnable for it) and
+`CONFLICT` (a run is already in flight).
+
 ### Session log
 
 Each Job run posts a minimal operational log to the Case's Slack channel so

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +29,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
+	jobruntime "github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
@@ -90,6 +94,10 @@ type graphQLResponse struct {
 type graphQLError struct {
 	Message string        `json:"message"`
 	Path    []interface{} `json:"path,omitempty"`
+	// Extensions carries the classification the ErrorPresenter attaches
+	// (extensions.code and its code-specific detail keys). Only populated
+	// by handlers that wire gqlctrl.ErrorExtensions, as serve.go does.
+	Extensions map[string]interface{} `json:"extensions,omitempty"`
 }
 
 // executeGraphQLRequest sends a GraphQL request through the HTTP handler
@@ -4076,6 +4084,197 @@ func TestGraphQLHandler_CaseJobsQuery(t *testing.T) {
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 		resp := parseGraphQLResponse(t, rec)
 		gt.Array(t, resp.Errors).Length(1).Required()
+	})
+}
+
+// manualRunExecutor stands in for the LLM-backed Job executor so the
+// trigger test can drive a real JobRunner without an LLM. It records the
+// JobIDs it was asked to run.
+type manualRunExecutor struct {
+	mu     sync.Mutex
+	jobIDs []string
+}
+
+func (e *manualRunExecutor) Execute(_ context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.jobIDs = append(e.jobIDs, req.JobID)
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+func (e *manualRunExecutor) ran() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.jobIDs...)
+}
+
+// TestGraphQLHandler_TriggerCaseJobMutation drives the manual Job trigger
+// through the HTTP boundary with a real JobRunner behind it: a successful
+// call must actually produce a JobRunLog tagged with the manual
+// provenance, and each refusal must carry the documented extensions.code.
+func TestGraphQLHandler_TriggerCaseJobMutation(t *testing.T) {
+	const triggerMutation = `
+		mutation($wsid: String!, $cid: Int!, $jid: String!) {
+			triggerCaseJob(workspaceId: $wsid, caseId: $cid, jobId: $jid)
+		}
+	`
+
+	buildTriggerHandler := func(t *testing.T, repo interfaces.Repository) (http.Handler, *manualRunExecutor) {
+		t.Helper()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			Jobs: []*model.Job{
+				{
+					ID: "stale", Name: "Stale check", Description: "remind", Prompt: "stale prompt",
+					Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+				},
+				{
+					ID: "disabled-job", Name: "Disabled", Description: "never", Prompt: "p", Disabled: true,
+					Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+				},
+			},
+		})
+		uc := usecase.New(repo, registry)
+
+		exec := &manualRunExecutor{}
+		runner := jobruntime.NewJobRunner(jobruntime.RunnerDeps{
+			Repo:      repo,
+			Registry:  registry,
+			Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		})
+		uc.JobRun.SetTrigger(runner)
+
+		resolver := gqlctrl.NewResolver(repo, uc)
+		srv := handler.NewDefaultServer(
+			gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
+		)
+		// Mirror serve.go so extensions.code reaches the response body.
+		srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
+			gqlErr := graphql.DefaultErrorPresenter(ctx, err)
+			if gqlErr.Extensions == nil {
+				gqlErr.Extensions = map[string]any{}
+			}
+			maps.Copy(gqlErr.Extensions, gqlctrl.ErrorExtensions(err))
+			return gqlErr
+		})
+		gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			loaders := gqlctrl.NewDataLoaders(repo, nil)
+			ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+			srv.ServeHTTP(w, r.WithContext(ctx))
+		})
+		h, err := httpctrl.New(gqlHandler)
+		gt.NoError(t, err).Required()
+		return h, exec
+	}
+
+	openCase := func(t *testing.T, repo interfaces.Repository, private bool) *model.Case {
+		t.Helper()
+		c := &model.Case{
+			Title:      "agent target",
+			ReporterID: "U-REPORTER",
+			Status:     types.CaseStatusOpen,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		if private {
+			c.IsPrivate = true
+			c.ChannelUserIDs = []string{"U-REPORTER"}
+		}
+		created, err := repo.Case().Create(context.Background(), testWorkspaceID, c)
+		gt.NoError(t, err).Required()
+		return created
+	}
+
+	// errorCode returns the extensions.code of the single expected error.
+	errorCode := func(t *testing.T, resp *graphQLResponse) string {
+		t.Helper()
+		gt.Array(t, resp.Errors).Length(1).Required()
+		return fmt.Sprint(resp.Errors[0].Extensions["code"])
+	}
+
+	t.Run("runs the job and records a manual run log", func(t *testing.T) {
+		repo := memory.New()
+		h, exec := buildTriggerHandler(t, repo)
+		c := openCase(t, repo, false)
+
+		rec := executeGraphQLRequestWithAuth(t, h, triggerMutation, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID, "jid": "stale",
+		}, "U-REPORTER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var out struct {
+			TriggerCaseJob bool `json:"triggerCaseJob"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &out)).Required()
+		gt.Bool(t, out.TriggerCaseJob).True()
+
+		async.Wait()
+
+		gt.Array(t, exec.ran()).Length(1).Required()
+		gt.String(t, exec.ran()[0]).Equal("stale")
+
+		key := model.JobRunKey{WorkspaceID: testWorkspaceID, CaseID: c.ID, JobID: "stale"}
+		logs, err := repo.JobRunLog().List(context.Background(), key, 0)
+		gt.NoError(t, err).Required()
+		gt.Array(t, logs).Length(1).Required()
+		gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+		gt.String(t, logs[0].EventType).Equal("manual")
+		gt.String(t, logs[0].JobID).Equal("stale")
+	})
+
+	t.Run("refuses a non-member of a private case with FORBIDDEN", func(t *testing.T) {
+		repo := memory.New()
+		h, exec := buildTriggerHandler(t, repo)
+		c := openCase(t, repo, true)
+
+		rec := executeGraphQLRequestWithAuth(t, h, triggerMutation, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID, "jid": "stale",
+		}, "U-STRANGER")
+		gt.String(t, errorCode(t, parseGraphQLResponse(t, rec))).Equal("FORBIDDEN")
+
+		async.Wait()
+		gt.Array(t, exec.ran()).Length(0)
+	})
+
+	t.Run("refuses an untriggerable job with NOT_FOUND", func(t *testing.T) {
+		repo := memory.New()
+		h, exec := buildTriggerHandler(t, repo)
+		c := openCase(t, repo, false)
+
+		rec := executeGraphQLRequestWithAuth(t, h, triggerMutation, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID, "jid": "no-such-job",
+		}, "U-REPORTER")
+		gt.String(t, errorCode(t, parseGraphQLResponse(t, rec))).Equal("NOT_FOUND")
+
+		rec = executeGraphQLRequestWithAuth(t, h, triggerMutation, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID, "jid": "disabled-job",
+		}, "U-REPORTER")
+		gt.String(t, errorCode(t, parseGraphQLResponse(t, rec))).Equal("NOT_FOUND")
+
+		async.Wait()
+		gt.Array(t, exec.ran()).Length(0)
+	})
+
+	t.Run("refuses a run already in flight with CONFLICT", func(t *testing.T) {
+		repo := memory.New()
+		h, exec := buildTriggerHandler(t, repo)
+		c := openCase(t, repo, false)
+
+		key := model.JobRunKey{WorkspaceID: testWorkspaceID, CaseID: c.ID, JobID: "stale"}
+		acquired, err := repo.JobRun().TryAcquireLease(context.Background(), key, time.Now().UTC(), 10*time.Minute)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, acquired).True()
+
+		rec := executeGraphQLRequestWithAuth(t, h, triggerMutation, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID, "jid": "stale",
+		}, "U-REPORTER")
+		gt.String(t, errorCode(t, parseGraphQLResponse(t, rec))).Equal("CONFLICT")
+
+		async.Wait()
+		gt.Array(t, exec.ran()).Length(0)
 	})
 }
 

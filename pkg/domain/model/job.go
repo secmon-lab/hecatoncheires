@@ -52,6 +52,13 @@ type JobEventDomain string
 const (
 	JobEventDomainCase      JobEventDomain = "case"
 	JobEventDomainScheduled JobEventDomain = "scheduled"
+
+	// JobEventDomainManual tags a run started by an explicit operator
+	// request from the web UI. No Job ever *subscribes* to it — it is a
+	// provenance tag only, so JobEvents carries no manual filter and the
+	// dispatcher's event matching never matches it. The manual path
+	// bypasses matching entirely and drives the runner directly.
+	JobEventDomainManual JobEventDomain = "manual"
 )
 
 // CaseEventConfig is the listen filter for the `case` event domain. A Job

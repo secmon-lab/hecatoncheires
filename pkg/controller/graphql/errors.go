@@ -80,12 +80,14 @@ func ErrorCode(err error) string {
 	case errors.Is(err, usecase.ErrCaseNotFound),
 		errors.Is(err, usecase.ErrActionNotFound),
 		errors.Is(err, usecase.ErrActionStepNotFound),
+		errors.Is(err, usecase.ErrJobNotFound),
 		errors.Is(err, model.ErrWorkspaceNotFound):
 		return ErrCodeNotFound
 	case errors.Is(err, usecase.ErrAccessDenied):
 		return ErrCodeForbidden
 	case errors.Is(err, usecase.ErrCaseAlreadyClosed),
 		errors.Is(err, usecase.ErrCaseAlreadyOpen),
+		errors.Is(err, usecase.ErrJobAlreadyRunning),
 		errors.Is(err, usecase.ErrDuplicateField):
 		return ErrCodeConflict
 	}

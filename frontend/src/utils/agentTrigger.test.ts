@@ -7,6 +7,7 @@ describe('runTriggerLabelKey', () => {
     expect(runTriggerLabelKey('case')).toBe('caseAgentRunTriggerCase')
     expect(runTriggerLabelKey('scheduled')).toBe('caseAgentRunTriggerScheduled')
     expect(runTriggerLabelKey('mention')).toBe('caseAgentRunTriggerMention')
+    expect(runTriggerLabelKey('manual')).toBe('caseAgentRunTriggerManual')
   })
 
   it('returns null for unknown or empty values so the caller can fall back', () => {

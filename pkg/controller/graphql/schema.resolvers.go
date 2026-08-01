@@ -1009,6 +1009,14 @@ func (r *mutationResolver) UpdateCaseAgentSettings(ctx context.Context, workspac
 	return toGraphQLCase(updated, workspaceID), nil
 }
 
+// TriggerCaseJob is the resolver for the triggerCaseJob field.
+func (r *mutationResolver) TriggerCaseJob(ctx context.Context, workspaceID string, caseID int, jobID string) (bool, error) {
+	if err := r.UseCases.JobRun.TriggerJob(ctx, workspaceID, int64(caseID), jobID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // CreateCaseImport is the resolver for the createCaseImport field.
 func (r *mutationResolver) CreateCaseImport(ctx context.Context, workspaceID string, input graphql1.CreateCaseImportInput) (*graphql1.ImportSession, error) {
 	originalFileName := ""
