@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { AssigneeNamesStack } from './Primitives'
+import { AssigneeNamesStack, BoardStatusBadge } from './Primitives'
+import { actionStatusColor } from '../utils/actionStatusStyle'
 
 const u = (id: string, name: string, realName: string) => ({
   id,
@@ -78,5 +79,26 @@ describe('AssigneeNamesStack', () => {
       />,
     )
     expect(screen.getByTestId('row-assignees')).toHaveTextContent('alice')
+  })
+})
+
+describe('BoardStatusBadge', () => {
+  it('renders the configured status name', () => {
+    render(<BoardStatusBadge label="In Review" color="blocked" />)
+    expect(screen.getByTestId('board-status-badge')).toHaveTextContent('In Review')
+  })
+
+  it('paints the pip with the configured colour', () => {
+    render(<BoardStatusBadge label="Done" color="#1a7f4b" />)
+    const pip = screen.getByTestId('board-status-badge').querySelector('.pip') as HTMLElement
+    expect(pip).not.toBeNull()
+    // jsdom normalises a hex literal to its rgb() form.
+    expect(pip.style.background).toBe('rgb(26, 127, 75)')
+  })
+
+  it('falls back to the idle colour when the status carries none', () => {
+    render(<BoardStatusBadge label="ghost" />)
+    const pip = screen.getByTestId('board-status-badge').querySelector('.pip') as HTMLElement
+    expect(pip.style.background).toBe(actionStatusColor(null))
   })
 })

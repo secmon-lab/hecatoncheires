@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import { GET_CASES } from '../graphql/case'
+import { GET_CASES_WITH_SLACK_LINK } from '../graphql/case'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -19,8 +19,17 @@ import {
   IconDots,
   IconSettings,
 } from '../components/Icons'
-import { Avatar, AssigneeNamesStack, StatusBadge, SlackLink, TestBadge } from '../components/Primitives'
+import {
+  Avatar,
+  AssigneeNamesStack,
+  BoardStatusBadge,
+  StatusBadge,
+  SlackLink,
+  TestBadge,
+} from '../components/Primitives'
 import CaseForm from './CaseForm'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
+import { buildSlackCaseLink } from '../utils/slackLink'
 import { displayName } from '../utils/user'
 import {
   useBulkDraftAction,
@@ -105,7 +114,13 @@ interface CaseRow {
   reporterID?: string | null
   reporter?: CaseUser | null
   assignees: CaseUser[]
-  slackChannelID: string
+  slackChannelID: string | null
+  // Absent on Drafts-tab rows: GET_DRAFTS does not select these. A draft has
+  // no Slack channel until it is submitted and no board status until then
+  // either, so both fall back to the lifecycle rendering.
+  slackChannelURL?: string | null
+  slackThreadTS?: string | null
+  boardStatus?: string | null
   createdAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
@@ -128,6 +143,15 @@ function formatDate(iso: string) {
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
   return `${yyyy}/${mm}/${dd}`
+}
+
+// The Slack destination for a row. A thread-mode Case's channel is the
+// monitored channel it was raised in, not a channel of its own, so linking to
+// the channel alone lands the reader somewhere unrelated — the thread
+// timestamp is what identifies the Case. Shared with the row-link logic so the
+// two cannot disagree about whether the cell holds an <a>.
+function slackCaseLink(c: CaseRow): string | null {
+  return buildSlackCaseLink(c.slackChannelURL, c.slackChannelID, c.slackThreadTS)
 }
 
 // A blank value renders as a dash for every field type, which also means the
@@ -288,15 +312,32 @@ export default function CaseList() {
   // showing a stale cached list. Without this, the cached result from an
   // earlier visit is returned verbatim and the freshly-created rows never
   // appear until a hard reload.
-  const { data: openData } = useQuery(GET_CASES, {
+  //
+  // errorPolicy 'all' keeps the rows when a nullable field resolver fails.
+  // slackChannelURL resolves through Slack's auth.test, whose failure is
+  // cached for the life of the process — under the default 'none' policy a
+  // misconfigured Slack would blank the entire Case list instead of just
+  // dropping the per-row Slack link.
+  //
+  // returnPartialData covers the other half of that split: everything else
+  // refetches the narrower GET_CASES, which writes Cases carrying no
+  // slackChannelURL into the same normalised entries this query watches. The
+  // resulting cache read is incomplete, and without this the list would blank
+  // out until the network round-trip lands. Partial rows simply fall back to
+  // the slack.com link form.
+  const { data: openData } = useQuery(GET_CASES_WITH_SLACK_LINK, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
     fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    returnPartialData: true,
   })
-  const { data: closedData } = useQuery(GET_CASES, {
+  const { data: closedData } = useQuery(GET_CASES_WITH_SLACK_LINK, {
     variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
     skip: !currentWorkspace,
     fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    returnPartialData: true,
   })
   // Drafts are workspace-wide on the server; this query drives both the
   // Drafts tab and the sidebar / header count.
@@ -309,6 +350,10 @@ export default function CaseList() {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
+  // Thread-mode workspaces track a configurable board status per Case; the
+  // lifecycle OPEN/CLOSED is only its synced shadow. Null config (channel
+  // mode, still loading, or a failed query) leaves the lifecycle rendering.
+  const caseStatuses = useCaseStatuses(currentWorkspace?.id)
 
   const openCount = openData?.cases?.length ?? 0
   const closedCount = closedData?.cases?.length ?? 0
@@ -403,6 +448,14 @@ export default function CaseList() {
     if (!col.custom) {
       switch (col.key) {
         case 'status':
+          if (caseStatuses.isThreadMode && c.boardStatus) {
+            return (
+              <BoardStatusBadge
+                label={caseStatuses.label(c.boardStatus)}
+                color={caseStatuses.get(c.boardStatus)?.color}
+              />
+            )
+          }
           return <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} labelDraft={t('tabDrafts')} />
         case 'assignees':
           return <AssigneeNamesStack users={c.assignees ?? []} testId="case-row-assignees" />
@@ -426,10 +479,12 @@ export default function CaseList() {
           return <span className="soft">—</span>
         case 'created':
           return <span className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</span>
-        case 'slack':
-          return c.slackChannelID
-            ? <SlackLink name="" href={`slack://channel?id=${c.slackChannelID}`} />
+        case 'slack': {
+          const href = slackCaseLink(c)
+          return href
+            ? <SlackLink name="" href={href} />
             : <span className="soft">—</span>
+        }
       }
     } else {
       const fieldDef = col.def!
@@ -449,7 +504,7 @@ export default function CaseList() {
   // value is missing, and a dash is no link. Judging by column type alone left
   // every Slack-less Case with a dead cell in the always-visible Slack column.
   const hasOwnLink = (col: typeof allColumns[number], c: CaseRow) => {
-    if (!col.custom) return col.key === 'slack' && Boolean(c.slackChannelID)
+    if (!col.custom) return col.key === 'slack' && Boolean(slackCaseLink(c))
     const def = col.def!
     if (def.type !== 'URL') return false
     return !isBlankFieldValue(c.fields.find((cf) => cf.fieldId === def.id)?.value)

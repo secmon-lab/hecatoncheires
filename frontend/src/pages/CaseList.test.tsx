@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
+import { ApolloClient, ApolloProvider, InMemoryCache } from '@apollo/client'
+import { MockedProvider, MockLink, type MockedResponse } from '@apollo/client/testing'
+import { GraphQLError } from 'graphql'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { I18nProvider } from '../i18n'
-import { GET_CASES } from '../graphql/case'
+import { GET_CASES, GET_CASES_WITH_SLACK_LINK } from '../graphql/case'
+import { GET_CASE_STATUS_CONFIG } from '../graphql/caseStatus'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import CaseList from './CaseList'
@@ -69,6 +72,10 @@ interface CaseRowMock {
   assigneeIDs: string[]
   assignees: unknown[]
   slackChannelID: string | null
+  slackChannelURL: string | null
+  slackThreadTS: string | null
+  isThreadBound: boolean
+  boardStatus: string | null
   createdAt: string
   updatedAt: string
   fields: Array<{ fieldId: string; value: unknown }>
@@ -87,10 +94,65 @@ const caseRow = (id: number, title: string, status: 'OPEN' | 'CLOSED' | 'DRAFT')
   assigneeIDs: [],
   assignees: [],
   slackChannelID: null,
+  slackChannelURL: null,
+  slackThreadTS: null,
+  isThreadBound: false,
+  boardStatus: null,
   createdAt: '2026-05-01T00:00:00Z',
   updatedAt: '2026-05-01T00:00:00Z',
   fields: [],
 })
+
+interface StatusDefMock {
+  __typename: string
+  id: string
+  name: string
+  description: string | null
+  color: string | null
+  emoji: string | null
+}
+
+interface StatusConfigMock {
+  __typename: string
+  initial: string
+  closed: string[]
+  statuses: StatusDefMock[]
+}
+
+const statusDef = (id: string, name: string, color: string): StatusDefMock => ({
+  __typename: 'ActionStatusDef',
+  id,
+  name,
+  description: null,
+  color,
+  emoji: null,
+})
+
+// A thread-mode workspace exposes a configurable Case status set; a
+// channel-mode workspace resolves caseStatusConfig to null.
+const THREAD_STATUS_CONFIG: StatusConfigMock = {
+  __typename: 'ActionConfig',
+  initial: 'triage',
+  closed: ['done'],
+  statuses: [
+    statusDef('triage', 'Triage', 'backlog'),
+    statusDef('in_review', 'In Review', 'blocked'),
+    statusDef('done', 'Done', 'completed'),
+  ],
+}
+
+function caseStatusConfigMock(
+  workspaceId: string,
+  config: StatusConfigMock | null,
+): MockedResponse {
+  return {
+    request: {
+      query: GET_CASE_STATUS_CONFIG,
+      variables: { workspaceId },
+    },
+    result: { data: { caseStatusConfig: config } },
+  }
+}
 
 function casesMock(
   workspaceId: string,
@@ -103,7 +165,7 @@ function casesMock(
       : [caseRow(2, 'Closed Beta', 'CLOSED')]
   return {
     request: {
-      query: GET_CASES,
+      query: GET_CASES_WITH_SLACK_LINK,
       variables: { workspaceId, status },
     },
     result: { data: { cases: rows ?? defaultRows } },
@@ -144,10 +206,14 @@ function renderAt(
   initialPath: string,
   openRows?: CaseRowMock[],
   fields?: FieldDef[],
+  // Defaults to the channel-mode shape (null), which is also the state the
+  // page falls back to while the query is in flight or after it errors.
+  statusConfig: StatusConfigMock | null = null,
 ) {
   const workspaceId = 'risk'
   const mocks: MockedResponse[] = [
     fieldConfigMock(workspaceId, fields),
+    caseStatusConfigMock(workspaceId, statusConfig),
     casesMock(workspaceId, 'OPEN', openRows),
     casesMock(workspaceId, 'CLOSED'),
     draftsMock(workspaceId),
@@ -311,15 +377,23 @@ describe('CaseList row links', () => {
     expect(rowLinkIn(cellUnderHeader(11, 'Slack'), 11)).not.toBeNull()
   })
 
-  it('leaves the Slack cell to its own deep link when the case has a channel', async () => {
-    const rows = [{ ...caseRow(12, 'With Slack', 'OPEN'), slackChannelID: 'C12345' }]
+  it('leaves the Slack cell to its own link when the case has a channel', async () => {
+    const rows = [
+      {
+        ...caseRow(12, 'With Slack', 'OPEN'),
+        slackChannelID: 'C12345',
+        slackChannelURL: 'https://acme.slack.com/archives/C12345',
+      },
+    ]
     renderAt('/ws/risk/cases', rows)
     await waitFor(() => {
       expect(screen.getByTestId('case-row-link-12')).toBeInTheDocument()
     })
     const cell = cellUnderHeader(12, 'Slack')
     expect(rowLinkIn(cell, 12)).toBeNull()
-    expect(cell.querySelector('a[href="slack://channel?id=C12345"]')).not.toBeNull()
+    expect(
+      cell.querySelector('a[href="https://acme.slack.com/archives/C12345"]'),
+    ).not.toBeNull()
   })
 
   it('covers a URL field cell with the row link when the field is empty', async () => {
@@ -351,6 +425,154 @@ describe('CaseList row links', () => {
     const cell = cellUnderHeader(14, 'Doc')
     expect(rowLinkIn(cell, 14)).toBeNull()
     expect(cell.querySelector('a[href="https://example.com/x"]')).not.toBeNull()
+  })
+})
+
+describe('CaseList status column', () => {
+  const threadRow = (id: number, title: string, boardStatus: string | null) => ({
+    ...caseRow(id, title, 'OPEN' as const),
+    boardStatus,
+    slackThreadTS: '1700000000.123456',
+    isThreadBound: true,
+    slackChannelID: 'C999',
+  })
+
+  it('shows the configured board status in a thread-mode workspace', async () => {
+    renderAt('/ws/risk/cases', [threadRow(30, 'Thread Case', 'in_review')], undefined, THREAD_STATUS_CONFIG)
+    await waitFor(() => {
+      expect(screen.getByTestId('board-status-badge')).toBeInTheDocument()
+    })
+    const cell = cellUnderHeader(30, 'Status')
+    expect(cell).toHaveTextContent('In Review')
+    // The lifecycle badge must not sit alongside it (the Open/Closed tabs
+    // above the table carry those words too, so scope the check to the cell).
+    expect(cell).not.toHaveTextContent('Open')
+  })
+
+  it('shows the lifecycle status in a channel-mode workspace', async () => {
+    renderAt('/ws/risk/cases', [caseRow(31, 'Channel Case', 'OPEN')])
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-31')).toBeInTheDocument()
+    })
+    expect(cellUnderHeader(31, 'Status')).toHaveTextContent('Open')
+    expect(screen.queryByTestId('board-status-badge')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the lifecycle status when a thread-mode case has none set', async () => {
+    renderAt('/ws/risk/cases', [threadRow(32, 'No Board Status', null)], undefined, THREAD_STATUS_CONFIG)
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-32')).toBeInTheDocument()
+    })
+    expect(cellUnderHeader(32, 'Status')).toHaveTextContent('Open')
+    expect(screen.queryByTestId('board-status-badge')).not.toBeInTheDocument()
+  })
+
+  it('shows the raw id when the board status is no longer in the configuration', async () => {
+    renderAt('/ws/risk/cases', [threadRow(33, 'Removed Status', 'ghost')], undefined, THREAD_STATUS_CONFIG)
+    await waitFor(() => {
+      expect(screen.getByTestId('board-status-badge')).toBeInTheDocument()
+    })
+    expect(cellUnderHeader(33, 'Status')).toHaveTextContent('ghost')
+  })
+
+  it('shows the Draft badge on the Drafts tab of a thread-mode workspace', async () => {
+    renderAt('/ws/risk/cases?status=draft', undefined, undefined, THREAD_STATUS_CONFIG)
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-3')).toBeInTheDocument()
+    })
+    expect(cellUnderHeader(3, 'Status')).toHaveTextContent('Drafts')
+    expect(screen.queryByTestId('board-status-badge')).not.toBeInTheDocument()
+  })
+})
+
+describe('CaseList Slack link', () => {
+  it('links a thread-mode case to its thread, not to the monitored channel', async () => {
+    const rows = [
+      {
+        ...caseRow(40, 'Thread Case', 'OPEN' as const),
+        slackChannelID: 'C123',
+        slackChannelURL: 'https://acme.slack.com/archives/C123',
+        slackThreadTS: '1700000000.123456',
+        isThreadBound: true,
+        boardStatus: 'triage',
+      },
+    ]
+    renderAt('/ws/risk/cases', rows, undefined, THREAD_STATUS_CONFIG)
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-40')).toBeInTheDocument()
+    })
+    const cell = cellUnderHeader(40, 'Slack')
+    expect(
+      cell.querySelector('a[href="https://acme.slack.com/archives/C123/p1700000000123456"]'),
+    ).not.toBeNull()
+  })
+
+  it('links a channel-mode case to its own channel', async () => {
+    const rows = [
+      {
+        ...caseRow(41, 'Channel Case', 'OPEN' as const),
+        slackChannelID: 'C456',
+        slackChannelURL: 'https://acme.slack.com/archives/C456',
+      },
+    ]
+    renderAt('/ws/risk/cases', rows)
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-41')).toBeInTheDocument()
+    })
+    const cell = cellUnderHeader(41, 'Slack')
+    expect(cell.querySelector('a[href="https://acme.slack.com/archives/C456"]')).not.toBeNull()
+  })
+
+  it('falls back to the canonical slack.com host when the team URL is unavailable', async () => {
+    const rows = [{ ...caseRow(42, 'No Team URL', 'OPEN' as const), slackChannelID: 'C789' }]
+    renderAt('/ws/risk/cases', rows)
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-42')).toBeInTheDocument()
+    })
+    const cell = cellUnderHeader(42, 'Slack')
+    expect(cell.querySelector('a[href="https://slack.com/archives/C789"]')).not.toBeNull()
+  })
+
+  it('renders no link when the case has no Slack channel', async () => {
+    renderAt('/ws/risk/cases', [caseRow(43, 'No Slack', 'OPEN')])
+    await waitFor(() => {
+      expect(screen.getByTestId('case-row-link-43')).toBeInTheDocument()
+    })
+    const cell = cellUnderHeader(43, 'Slack')
+    expect(cell.querySelector('a.slack-link')).toBeNull()
+  })
+
+  it('still renders the rows when the slackChannelURL field resolves to an error', async () => {
+    // The resolver behind slackChannelURL calls Slack's auth.test and caches
+    // its failure for the life of the process. Under the default errorPolicy
+    // Apollo would discard the whole payload and blank the list.
+    const workspaceId = 'risk'
+    const row = { ...caseRow(44, 'Slack Broken', 'OPEN' as const), slackChannelID: 'C000' }
+    const mocks: MockedResponse[] = [
+      fieldConfigMock(workspaceId),
+      caseStatusConfigMock(workspaceId, null),
+      {
+        request: { query: GET_CASES_WITH_SLACK_LINK, variables: { workspaceId, status: 'OPEN' } },
+        result: {
+          data: { cases: [row] },
+          errors: [new GraphQLError('failed to get Slack team URL')],
+        },
+      },
+      casesMock(workspaceId, 'CLOSED'),
+      draftsMock(workspaceId),
+    ]
+    render(
+      <MemoryRouter initialEntries={['/ws/risk/cases']}>
+        <MockedProvider mocks={mocks} addTypename={false}>
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/cases" element={<CaseList />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Slack Broken')).toBeInTheDocument()
   })
 })
 
@@ -466,5 +688,65 @@ describe('CaseList page URL binding', () => {
       expect(probeRef.path).toBe('/ws/risk/cases/120')
     })
     expect(probeRef.state).toEqual({ fromStatus: undefined, fromPage: 2 })
+  })
+})
+
+describe('CaseList cache sharing with the narrower GET_CASES', () => {
+  // The Case list watches GET_CASES_WITH_SLACK_LINK, but every other page —
+  // and every post-mutation refetch — writes the same normalised `cases`
+  // entry through the narrower GET_CASES, which carries no slackChannelURL.
+  // A freshly created Case therefore lands in the cache without that field
+  // and makes the list's cache read incomplete.
+  it('keeps rendering rows after a GET_CASES refetch writes a Case with no slackChannelURL', async () => {
+    const workspaceId = 'risk'
+    const existing = {
+      ...caseRow(60, 'Existing Row', 'OPEN' as const),
+      slackChannelID: 'C60',
+      slackChannelURL: 'https://acme.slack.com/archives/C60',
+    }
+    const created = { ...caseRow(61, 'Created Row', 'OPEN' as const), slackChannelID: 'C61' }
+    const narrowCreated: Record<string, unknown> = { ...created }
+    delete narrowCreated.slackChannelURL
+
+    const cache = new InMemoryCache({ addTypename: false })
+    const client = new ApolloClient({
+      cache,
+      link: new MockLink(
+        [
+          fieldConfigMock(workspaceId),
+          caseStatusConfigMock(workspaceId, null),
+          casesMock(workspaceId, 'OPEN', [existing]),
+          casesMock(workspaceId, 'CLOSED'),
+          draftsMock(workspaceId),
+        ],
+        false,
+      ),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/ws/risk/cases']}>
+        <ApolloProvider client={client}>
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/cases" element={<CaseList />} />
+            </Routes>
+          </I18nProvider>
+        </ApolloProvider>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Existing Row')).toBeInTheDocument()
+
+    act(() => {
+      cache.writeQuery({
+        query: GET_CASES,
+        variables: { workspaceId, status: 'OPEN' },
+        data: { cases: [existing, narrowCreated] },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Created Row')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Existing Row')).toBeInTheDocument()
   })
 })

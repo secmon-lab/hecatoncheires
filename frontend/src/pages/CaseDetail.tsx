@@ -31,6 +31,7 @@ import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
+import { buildSlackCaseLink } from '../utils/slackLink'
 import { displayName } from '../utils/user'
 import { CASE_LIST_PAGE_PARAM, CASE_LIST_STATUS_PARAM } from './CaseList'
 import Button from '../components/Button'
@@ -223,6 +224,7 @@ export default function CaseDetail() {
   const threadMode = caseStatuses.isThreadMode
   const isThreadBound = !!c?.isThreadBound
   const slackThreadTS: string = c?.slackThreadTS || ''
+  const slackLink = buildSlackCaseLink(slackChannelURL, slackChannelID, slackThreadTS)
   // Effective board status: fall back to the configured initial status when the
   // case has none yet, so the selector always has a valid value to show.
   const boardStatus: string = c?.boardStatus || caseStatuses.initialId || ''
@@ -808,16 +810,12 @@ export default function CaseDetail() {
 
         {/* right column / sidebar */}
         <aside className="h-aside">
-          {slackChannelID && (
+          {slackLink && (
             <section className="h-aside-section h-aside-section-slack">
               <a
                 className="slack-link"
                 data-testid="aside-slack-link"
-                href={
-                  isThreadBound && slackThreadTS
-                    ? `https://slack.com/archives/${slackChannelID}/p${slackThreadTS.replace('.', '')}`
-                    : slackChannelURL || `slack://channel?id=${slackChannelID}`
-                }
+                href={slackLink}
                 target="_blank"
                 rel="noreferrer noopener"
               >

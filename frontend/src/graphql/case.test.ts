@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import type { DocumentNode, FieldNode, FragmentDefinitionNode, SelectionSetNode } from 'graphql'
 import { Kind } from 'graphql'
-import { GET_CASES, GET_CASE, CREATE_CASE, UPDATE_CASE, CLOSE_CASE, REOPEN_CASE } from './case'
+import {
+  GET_CASES,
+  GET_CASES_WITH_SLACK_LINK,
+  GET_CASE,
+  CREATE_CASE,
+  UPDATE_CASE,
+  CLOSE_CASE,
+  REOPEN_CASE,
+} from './case'
 
 // The fragment refactor must not change any operation's effective field
 // set: these tests flatten each document (resolving fragment spreads
@@ -82,6 +90,11 @@ const MUTATION_PATHS = [
 
 const LIST_PATHS = [...MUTATION_PATHS, 'slackThreadTS', 'isThreadBound', 'boardStatus'].sort()
 
+// The Case list page's own operation is the list set plus slackChannelURL.
+// The extra field is deliberately kept out of LIST_PATHS — see the comment on
+// GET_CASES_WITH_SLACK_LINK in case.ts.
+const LIST_WITH_SLACK_LINK_PATHS = [...LIST_PATHS, 'slackChannelURL'].sort()
+
 const DETAIL_PATHS = [
   ...LIST_PATHS,
   'channelUserCount',
@@ -108,6 +121,14 @@ describe('case.ts selection sets', () => {
 
   it('GET_CASES returns the mutation set plus the list-only fields', () => {
     expect(collectLeafPaths(GET_CASES)).toEqual(LIST_PATHS)
+  })
+
+  it('GET_CASES does not carry slackChannelURL, so a broken Slack cannot break its consumers', () => {
+    expect(collectLeafPaths(GET_CASES)).not.toContain('slackChannelURL')
+  })
+
+  it('GET_CASES_WITH_SLACK_LINK is GET_CASES plus slackChannelURL', () => {
+    expect(collectLeafPaths(GET_CASES_WITH_SLACK_LINK)).toEqual(LIST_WITH_SLACK_LINK_PATHS)
   })
 
   it('GET_CASE returns the list set plus detail-only fields and actions', () => {

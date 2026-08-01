@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { IconLock, IconSlack, IconFlask } from './Icons'
+import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { displayName } from '../utils/user'
 
 /* ─── Avatar ─── */
@@ -144,6 +145,38 @@ export function StatusBadge({ status, labelOpen = 'Open', labelClosed = 'Closed'
   if (status === 'CLOSED') return <Badge kind="closed">{labelClosed}</Badge>
   if (status === 'DRAFT') return <Badge>{labelDraft}</Badge>
   return <Badge>{status}</Badge>
+}
+
+interface BoardStatusBadgeProps {
+  label: string
+  color?: string | null
+}
+
+// BoardStatusBadge renders one configurable board status (the Kanban column of
+// a thread-mode Case). Unlike StatusBadge, whose three lifecycle values each
+// map to a fixed Badge kind, a board status carries an arbitrary configured
+// colour — hence the coloured pip + text form shared with the Case board and
+// the Case detail sidebar.
+export function BoardStatusBadge({ label, color }: BoardStatusBadgeProps) {
+  return (
+    <span
+      className="row"
+      data-testid="board-status-badge"
+      style={{ gap: 6, alignItems: 'center', fontSize: 12 }}
+    >
+      <span
+        className="pip"
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          flexShrink: 0,
+          ...actionStatusColorStyle(color),
+        }}
+      />
+      <span className="truncate">{label}</span>
+    </span>
+  )
 }
 
 export function PrivateBadge({ label = 'Private' }: { label?: string }) {

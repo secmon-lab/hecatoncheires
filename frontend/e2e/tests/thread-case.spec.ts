@@ -102,4 +102,58 @@ test.describe('Thread-mode Case board', () => {
     await status.selectOption('in_review');
     await expect(status).toHaveValue('in_review');
   });
+
+  test('Case list Status column shows the configured board status in thread mode', async ({ page }) => {
+    const caseList = new CaseListPage(page);
+    const caseForm = new CaseFormPage(page);
+    const detail = new CaseDetailPage(page);
+
+    await caseList.navigate(THREAD_WS);
+    await caseList.waitForTableLoad();
+    await caseList.clickNewCaseButton();
+    await caseForm.createCase({ title: 'Board Status Row', description: 'status column' });
+    await caseList.waitForTableLoad();
+
+    // The harness boots without Slack, so the thread binding that assigns the
+    // initial board status never runs and the row falls back to the lifecycle
+    // badge. Setting the status from the detail page is what a user does
+    // anyway, and it is what the list must then reflect.
+    await caseList.fillSearchFilter('Board Status Row');
+    expect(await caseList.getCaseRowCellTextByHeader('Board Status Row', 'Status')).toBe('Open');
+
+    await caseList.clickCaseByTitle('Board Status Row');
+    expect(await detail.isPageLoaded()).toBeTruthy();
+    const status = page.getByTestId('aside-board-status');
+    await status.selectOption('in_review');
+    await expect(status).toHaveValue('in_review');
+
+    await caseList.navigate(THREAD_WS);
+    await caseList.waitForTableLoad();
+    await caseList.fillSearchFilter('Board Status Row');
+    await expect(
+      caseList.getCaseRowByTitle('Board Status Row').getByTestId('board-status-badge'),
+    ).toHaveText('In Review');
+
+    // The Slack column is not asserted here: without Slack every case has an
+    // empty slackChannelID, so the cell is always a dash. The link target is
+    // covered by the slackLink and CaseList unit tests instead.
+  });
+
+  test('Case list Status column keeps the lifecycle badge in channel mode', async ({ page }) => {
+    const caseList = new CaseListPage(page);
+    const caseForm = new CaseFormPage(page);
+
+    await caseList.navigate(CHANNEL_WS);
+    await caseList.waitForTableLoad();
+    await caseList.clickNewCaseButton();
+    await caseForm.createCase({
+      title: 'Lifecycle Status Row',
+      description: 'status column',
+      customFields: { category: 'bug' },
+    });
+    await caseList.waitForTableLoad();
+    await caseList.fillSearchFilter('Lifecycle Status Row');
+    expect(await caseList.getCaseRowCellTextByHeader('Lifecycle Status Row', 'Status')).toBe('Open');
+    await expect(page.getByTestId('board-status-badge')).toHaveCount(0);
+  });
 });
