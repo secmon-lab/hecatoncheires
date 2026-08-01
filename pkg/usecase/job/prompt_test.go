@@ -230,6 +230,44 @@ func TestBuildSystemPrompt_ScheduledCron(t *testing.T) {
 	mustContain(t, got, "scheduled_for=2026-05-23T09:00:00Z")
 }
 
+func TestBuildSystemPrompt_ManualEvent(t *testing.T) {
+	j := &model.Job{
+		ID:     "daily",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		},
+	}
+	base := job.Event{
+		Domain:      model.JobEventDomainManual,
+		WorkspaceID: "ws",
+		CaseID:      7,
+		Timestamp:   time.Date(2026, 5, 23, 11, 30, 0, 0, time.UTC),
+	}
+
+	t.Run("names the operator who pressed Run", func(t *testing.T) {
+		ev := base
+		ev.ActorUserID = "U-OPERATOR"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: j, Workspace: newWorkspace("ws", "WS"), Case: newCase(7), Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "Manually triggered by U-OPERATOR for case #7 at 2026-05-23T11:30:00Z.")
+		mustContain(t, got, "This run was requested on demand, not by one of the trigger conditions above.")
+		// The Job's own scheduled trigger is still described in the
+		// "Trigger condition" section; only the reason differs.
+		mustContain(t, got, "the time since the last run reaches 1h0m0s")
+	})
+
+	t.Run("falls back to (unknown) without an actor", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: j, Workspace: newWorkspace("ws", "WS"), Case: newCase(7), Event: base,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "Manually triggered by (unknown) for case #7 at 2026-05-23T11:30:00Z.")
+	})
+}
+
 func TestRenderUserPrompt_TemplateExpansion(t *testing.T) {
 	j := &model.Job{
 		ID:     "demo",

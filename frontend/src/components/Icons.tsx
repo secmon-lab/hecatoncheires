@@ -36,6 +36,7 @@ export const IconChevDown = (p: P) => <Icon {...p} d="M6 9l6 6 6-6" />
 export const IconChevRight = (p: P) => <Icon {...p} d="M9 6l6 6-6 6" />
 export const IconChevLeft = (p: P) => <Icon {...p} d="M15 6l-6 6 6 6" />
 export const IconPlus = (p: P) => <Icon {...p} d="M12 5v14M5 12h14" />
+export const IconPlay = (p: P) => <Icon {...p} d="M7 4.5l12 7.5-12 7.5V4.5z" />
 export const IconSearch = (p: P) => <Icon {...p} d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM21 21l-4.3-4.3" />
 export const IconLock = (p: P) => <Icon {...p} d="M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4" />
 export const IconExt = (p: P) => <Icon {...p} d="M14 4h6v6M10 14L20 4M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />

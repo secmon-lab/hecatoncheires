@@ -258,8 +258,11 @@ type systemPromptLifecycle struct {
 }
 
 type systemPromptReason struct {
-	CaseCreated    bool
-	CaseClosed     bool
+	CaseCreated bool
+	CaseClosed  bool
+	// Manual marks a run an operator started from the web UI. Actor then
+	// names the user who pressed Run, not the author of a case transition.
+	Manual         bool
 	ScheduledEvery string
 	ScheduledCron  string
 	CaseID         int64
@@ -532,6 +535,15 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 		case model.CaseLifecycleClosed:
 			data.Reason.CaseClosed = true
 		}
+	case model.JobEventDomainManual:
+		actor := in.Event.ActorUserID
+		if actor == "" {
+			actor = "(unknown)"
+		}
+		data.Reason.Manual = true
+		data.Reason.Actor = actor
+		data.Reason.CaseID = in.Event.CaseID
+		data.Reason.Timestamp = in.Event.Timestamp.UTC().Format(time.RFC3339)
 	case model.JobEventDomainScheduled:
 		data.Reason.Timestamp = in.Event.Timestamp.UTC().Format(time.RFC3339)
 		data.Reason.LastRunAt = "(never)"

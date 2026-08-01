@@ -78,6 +78,7 @@ exempt_name := {
 	"SubAgentLoopMax",
 	"LLMCalls",
 	"SetEventPublisher",
+	"SetTrigger",
 	# in-memory registry / config lookups (no I/O)
 	"GetAuthURL",
 	"GetFieldConfiguration",

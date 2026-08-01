@@ -3,9 +3,11 @@ package usecase_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/robfig/cron/v3"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
 // seedLog stores one RUNNING-stage log and immediately marks it
@@ -321,6 +324,234 @@ func TestJobRunUseCase_ListCaseJobs(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, jobs).Length(0)
 		_ = repo
+	})
+}
+
+// recordingJobTrigger captures every RunManual invocation so the trigger
+// tests can assert exactly what was dispatched — and, for the refusal
+// cases, that nothing was.
+type recordingJobTrigger struct {
+	mu    sync.Mutex
+	calls []recordedManualRun
+	err   error
+
+	// canRun / canRunErr control the admission probe. The zero value admits
+	// every run, which is what most cases want.
+	canRun    *bool
+	canRunErr error
+	probes    int
+}
+
+func (r *recordingJobTrigger) CanRunManual(_ context.Context, _ string, _ int64, _ string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.probes++
+	if r.canRunErr != nil {
+		return false, r.canRunErr
+	}
+	if r.canRun != nil {
+		return *r.canRun, nil
+	}
+	return true, nil
+}
+
+type recordedManualRun struct {
+	workspaceID string
+	caseID      int64
+	jobID       string
+	actorUserID string
+}
+
+func (r *recordingJobTrigger) RunManual(_ context.Context, workspaceID string, caseID int64, jobID, actorUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, recordedManualRun{
+		workspaceID: workspaceID,
+		caseID:      caseID,
+		jobID:       jobID,
+		actorUserID: actorUserID,
+	})
+	return r.err
+}
+
+func (r *recordingJobTrigger) recorded() []recordedManualRun {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]recordedManualRun(nil), r.calls...)
+}
+
+func (r *recordingJobTrigger) probeCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.probes
+}
+
+func TestJobRunUseCase_TriggerJob(t *testing.T) {
+	// setupTrigger returns a use case wired with the shared Job registry and
+	// a recording trigger, plus the workspace / case it operates on.
+	setupTrigger := func(t *testing.T) (interfaces.Repository, *usecase.JobRunUseCase, *recordingJobTrigger, string, *model.Case) {
+		t.Helper()
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+		trigger := &recordingJobTrigger{}
+		uc.SetTrigger(trigger)
+		return repo, uc, trigger, ws, c
+	}
+	authCtx := func() context.Context {
+		return auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+	}
+
+	t.Run("dispatches the run with the caller as actor", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+
+		gt.NoError(t, uc.TriggerJob(authCtx(), ws, c.ID, "stale")).Required()
+		async.Wait()
+
+		calls := trigger.recorded()
+		gt.Array(t, calls).Length(1).Required()
+		gt.String(t, calls[0].workspaceID).Equal(ws)
+		gt.Number(t, calls[0].caseID).Equal(c.ID)
+		gt.String(t, calls[0].jobID).Equal("stale")
+		gt.String(t, calls[0].actorUserID).Equal("UREPORTER")
+	})
+
+	t.Run("system context without token dispatches with an empty actor", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+
+		gt.NoError(t, uc.TriggerJob(context.Background(), ws, c.ID, "triage")).Required()
+		async.Wait()
+
+		calls := trigger.recorded()
+		gt.Array(t, calls).Length(1).Required()
+		gt.String(t, calls[0].actorUserID).Equal("")
+	})
+
+	t.Run("rejects empty arguments", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+
+		gt.Error(t, uc.TriggerJob(authCtx(), "", c.ID, "stale")).Is(usecase.ErrInvalidArgument)
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, 0, "stale")).Is(usecase.ErrInvalidArgument)
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID, "")).Is(usecase.ErrInvalidArgument)
+
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(0)
+	})
+
+	t.Run("rejects an unknown case", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID+9999, "stale")).Is(usecase.ErrCaseNotFound)
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(0)
+	})
+
+	t.Run("rejects a non-member of a private case", func(t *testing.T) {
+		repo, uc, trigger, ws, c := setupTrigger(t)
+
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.IsPrivate = true
+		raw.ChannelUserIDs = []string{"UREPORTER"}
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+
+		other := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		gt.Error(t, uc.TriggerJob(other, ws, c.ID, "stale")).Is(usecase.ErrAccessDenied)
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(0)
+	})
+
+	t.Run("rejects a job outside the triggerable set", func(t *testing.T) {
+		repo, uc, trigger, ws, c := setupTrigger(t)
+
+		// Unknown id.
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID, "no-such-job")).Is(usecase.ErrJobNotFound)
+		// Disabled in the workspace TOML.
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID, "disabled-job")).Is(usecase.ErrJobNotFound)
+
+		// Scheduled-only Job on a CLOSED case: the scanner never sweeps such
+		// cases, so ListCaseJobs excludes it and the trigger must agree.
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.Status = types.CaseStatusClosed
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID, "stale")).Is(usecase.ErrJobNotFound)
+		// A case-lifecycle Job stays triggerable on a closed case.
+		gt.NoError(t, uc.TriggerJob(authCtx(), ws, c.ID, "closed-notify")).Required()
+
+		async.Wait()
+		calls := trigger.recorded()
+		gt.Array(t, calls).Length(1).Required()
+		gt.String(t, calls[0].jobID).Equal("closed-notify")
+	})
+
+	// Whether a run already holds the slot is the runtime's decision (see
+	// TestJobRunner_CanRunManual for the lease / suspension semantics). Here
+	// we assert only that TriggerJob asks it and honours the answer.
+	t.Run("refuses when the runtime says a run already holds the slot", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+		denied := false
+		trigger.canRun = &denied
+
+		gt.Error(t, uc.TriggerJob(authCtx(), ws, c.ID, "stale")).Is(usecase.ErrJobAlreadyRunning)
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(0)
+		gt.Number(t, trigger.probeCount()).Equal(1)
+	})
+
+	t.Run("fails closed when the admission check cannot be read", func(t *testing.T) {
+		_, uc, trigger, ws, c := setupTrigger(t)
+		trigger.canRunErr = goerr.New("firestore unavailable")
+
+		err := uc.TriggerJob(authCtx(), ws, c.ID, "stale")
+		gt.Value(t, err).NotNil()
+		// A read failure is not "already running" — it must not be presented
+		// to the operator as a conflict they can resolve by waiting.
+		gt.Error(t, err).IsNot(usecase.ErrJobAlreadyRunning)
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(0)
+	})
+
+	t.Run("fails loudly when the trigger runtime is not wired", func(t *testing.T) {
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+		// SetTrigger deliberately not called.
+
+		err := uc.TriggerJob(authCtx(), ws, c.ID, "stale")
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).IsNot(usecase.ErrJobNotFound)
+	})
+
+	// A private draft has no Slack channel yet, so its ChannelUserIDs are
+	// empty and a plain channel-membership test would lock out the reporter
+	// who owns it. The shared write gate admits them; the trigger must too.
+	t.Run("private draft admits its reporter and refuses everyone else", func(t *testing.T) {
+		repo, uc, trigger, ws, c := setupTrigger(t)
+
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.Status = types.CaseStatusDraft
+		raw.IsPrivate = true
+		raw.ChannelUserIDs = nil
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+		gt.String(t, raw.ReporterID).Equal("UREPORTER")
+
+		// A scheduled Job is not triggerable on a draft, but a case-lifecycle
+		// Job is — Jobs do fire on DRAFT cases.
+		gt.NoError(t, uc.TriggerJob(authCtx(), ws, c.ID, "triage")).Required()
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(1).Required()
+		gt.String(t, trigger.recorded()[0].jobID).Equal("triage")
+
+		other := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		gt.Error(t, uc.TriggerJob(other, ws, c.ID, "triage")).Is(usecase.ErrAccessDenied)
+
+		// No token at all (system context) keeps the existing bypass.
+		gt.NoError(t, uc.TriggerJob(context.Background(), ws, c.ID, "triage")).Required()
+		async.Wait()
+		gt.Array(t, trigger.recorded()).Length(2)
 	})
 }
 

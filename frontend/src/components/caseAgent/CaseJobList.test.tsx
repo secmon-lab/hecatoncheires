@@ -27,6 +27,7 @@ const dailyJob: CaseJob = {
 
 const renderList = (props: Partial<React.ComponentProps<typeof CaseJobList>> = {}) => {
   const onRetry = vi.fn()
+  const onRun = vi.fn()
   render(
     <I18nProvider>
       <CaseJobList
@@ -34,11 +35,14 @@ const renderList = (props: Partial<React.ComponentProps<typeof CaseJobList>> = {
         loading={false}
         error={false}
         onRetry={onRetry}
+        onRun={onRun}
+        runningJobIds={new Set()}
+        pendingJobId={null}
         {...props}
       />
     </I18nProvider>,
   )
-  return { onRetry }
+  return { onRetry, onRun }
 }
 
 describe('CaseJobList', () => {
@@ -80,6 +84,36 @@ describe('CaseJobList', () => {
     // Prompts of the sample jobs must be absent.
     expect(screen.queryByText('TRIAGE PROMPT BODY')).toBeNull()
     expect(screen.queryByText('Initial triage')).toBeNull()
+  })
+
+  it('runs the job whose Run button was pressed', () => {
+    const { onRun } = renderList()
+    fireEvent.click(screen.getByTestId('job-run-button-daily'))
+    expect(onRun).toHaveBeenCalledTimes(1)
+    expect(onRun).toHaveBeenCalledWith('daily')
+  })
+
+  it('does not expand the row when Run is pressed', () => {
+    renderList()
+    fireEvent.click(screen.getByTestId('job-run-button-triage'))
+    expect(screen.queryByText('TRIAGE PROMPT BODY')).toBeNull()
+  })
+
+  it('disables Run for a job that is already running', () => {
+    renderList({ runningJobIds: new Set(['triage']) })
+    const running = screen.getByTestId('job-run-button-triage')
+    expect(running).toBeDisabled()
+    expect(running).toHaveTextContent('Running')
+    // Other rows stay available.
+    expect(screen.getByTestId('job-run-button-daily')).toBeEnabled()
+  })
+
+  it('disables Run while its trigger request is in flight', () => {
+    renderList({ pendingJobId: 'daily' })
+    const pending = screen.getByTestId('job-run-button-daily')
+    expect(pending).toBeDisabled()
+    expect(pending).toHaveTextContent('Starting')
+    expect(screen.getByTestId('job-run-button-triage')).toBeEnabled()
   })
 
   it('renders an error state with a working retry button', () => {

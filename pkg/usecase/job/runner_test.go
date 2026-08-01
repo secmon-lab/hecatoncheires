@@ -71,6 +71,221 @@ func TestJobRunner_HappyPath(t *testing.T) {
 	gt.Number(t, exec.calls.Load()).Equal(int32(1))
 }
 
+// TestJobRunner_RunManual covers the web-UI trigger path: the Job is
+// resolved from the registry by id, the run is tagged with the manual
+// provenance, and a Job that is absent or disabled is refused without
+// producing a run log.
+func TestJobRunner_RunManual(t *testing.T) {
+	newManualRunner := func(t *testing.T, jobs []*model.Job) (*job.JobRunner, interfaces.Repository, *model.Case, *recordingExecutor) {
+		t.Helper()
+		exec := &recordingExecutor{}
+		repo, c := setupCase(t, "ws")
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: jobs})
+		runner := job.NewJobRunner(job.RunnerDeps{
+			Repo: repo, Registry: registry, LLMClient: inertLLM(),
+			Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		})
+		return runner, repo, c, exec
+	}
+
+	scheduledJob := func(id string, disabled bool) *model.Job {
+		return &model.Job{
+			ID:       id,
+			Prompt:   "review {{.Case.Title}}",
+			Disabled: disabled,
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: 24 * time.Hour},
+			},
+		}
+	}
+
+	t.Run("runs the job and records manual provenance", func(t *testing.T) {
+		j := scheduledJob("daily_review", false)
+		runner, repo, c, exec := newManualRunner(t, []*model.Job{j})
+
+		err := runner.RunManual(context.Background(), "ws", c.ID, j.ID, "U-OPERATOR")
+		gt.NoError(t, err).Required()
+		gt.Number(t, exec.calls.Load()).Equal(int32(1))
+
+		key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+		logs, listErr := repo.JobRunLog().List(context.Background(), key, 0)
+		gt.NoError(t, listErr).Required()
+		gt.Array(t, logs).Length(1).Required()
+		gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+		gt.String(t, logs[0].EventType).Equal("manual")
+		gt.String(t, logs[0].JobID).Equal(j.ID)
+
+		// The manual event is the run's trigger, so its timestamp must be
+		// populated rather than left at the zero value.
+		gt.Bool(t, logs[0].EventTriggerAt.IsZero()).False()
+
+		run, getErr := repo.JobRun().Get(context.Background(), key)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+	})
+
+	t.Run("refuses an unknown job id", func(t *testing.T) {
+		j := scheduledJob("daily_review", false)
+		runner, repo, c, exec := newManualRunner(t, []*model.Job{j})
+
+		err := runner.RunManual(context.Background(), "ws", c.ID, "no_such_job", "U-OPERATOR")
+		gt.Value(t, err).NotNil()
+		gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+		runs, listErr := repo.JobRun().ListByCase(context.Background(), "ws", c.ID)
+		gt.NoError(t, listErr).Required()
+		gt.Array(t, runs).Length(0)
+	})
+
+	t.Run("refuses a disabled job", func(t *testing.T) {
+		j := scheduledJob("daily_review", true)
+		runner, repo, c, exec := newManualRunner(t, []*model.Job{j})
+
+		err := runner.RunManual(context.Background(), "ws", c.ID, j.ID, "U-OPERATOR")
+		gt.Value(t, err).NotNil()
+		gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+		runs, listErr := repo.JobRun().ListByCase(context.Background(), "ws", c.ID)
+		gt.NoError(t, listErr).Required()
+		gt.Array(t, runs).Length(0)
+	})
+
+	t.Run("refuses an unknown workspace", func(t *testing.T) {
+		j := scheduledJob("daily_review", false)
+		runner, _, c, exec := newManualRunner(t, []*model.Job{j})
+
+		err := runner.RunManual(context.Background(), "other-ws", c.ID, j.ID, "U-OPERATOR")
+		gt.Value(t, err).NotNil()
+		gt.Number(t, exec.calls.Load()).Equal(int32(0))
+	})
+}
+
+// TestJobRunner_CanRunManual pins the admission rule behind the web UI's Run
+// button. The rule must match what Run itself does: a live lease or a
+// genuinely open question blocks a new run, while a stale or inconsistent
+// suspension marker — which Run recovers from — must not.
+func TestJobRunner_CanRunManual(t *testing.T) {
+	const unansweredTimeout = 30 * time.Minute
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	setup := func(t *testing.T) (*job.JobRunner, interfaces.Repository, model.JobRunKey) {
+		t.Helper()
+		j := &model.Job{
+			ID:          "ask_first",
+			Prompt:      "x",
+			Strategy:    model.JobStrategyPlanexec,
+			Interactive: true,
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: 24 * time.Hour},
+			},
+		}
+		repo, c := setupCase(t, "ws")
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+		runner := job.NewJobRunner(job.RunnerDeps{
+			Repo: repo, Registry: registry, LLMClient: inertLLM(),
+			Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: &recordingExecutor{}},
+			UnansweredTimeout: unansweredTimeout,
+			Clock:             func() time.Time { return now },
+		})
+		return runner, repo, model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	}
+
+	// seedAwaitingInput writes the AWAITING_INPUT run log a live suspension
+	// points at, so suspensionIsActive can confirm the question is open.
+	seedAwaitingInput := func(t *testing.T, repo interfaces.Repository, key model.JobRunKey, runID string) {
+		t.Helper()
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        runID,
+			TraceID:      "trace-" + runID,
+			Stage:        model.JobRunStageRunning,
+			StartedAt:    now.Add(-time.Minute),
+			ExecutorKind: model.ExecutorKindPlanexec,
+		}
+		gt.NoError(t, repo.JobRunLog().Create(context.Background(), log)).Required()
+		log.Stage = model.JobRunStageAwaitingInput
+		log.PendingInteraction = &model.PendingInteraction{
+			PostedChannelID: "C1",
+			PostedMessageTS: "1700000000.000100",
+			Reason:          "need input",
+			Items: []model.PendingInteractionItem{
+				{ID: "q1", Text: "Which one?", Type: "free_text"},
+			},
+		}
+		gt.NoError(t, repo.JobRunLog().Suspend(context.Background(), log)).Required()
+	}
+
+	t.Run("admits a job that has never run", func(t *testing.T) {
+		runner, _, key := setup(t)
+		ok, err := runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, ok).True()
+	})
+
+	t.Run("refuses while a lease is live and admits once it expires", func(t *testing.T) {
+		runner, repo, key := setup(t)
+		acquired, err := repo.JobRun().TryAcquireLease(context.Background(), key, now, 10*time.Minute)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, acquired).True()
+
+		ok, err := runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, ok).False()
+
+		gt.NoError(t, repo.JobRun().ReleaseLease(context.Background(), key)).Required()
+		ok, err = runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, ok).True()
+	})
+
+	t.Run("refuses while a question is genuinely open", func(t *testing.T) {
+		runner, repo, key := setup(t)
+		seedAwaitingInput(t, repo, key, "run-open")
+		gt.NoError(t, repo.JobRun().Suspend(context.Background(), key, "run-open", now.Add(-time.Minute))).Required()
+
+		ok, err := runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("admits when the question went unanswered past the timeout", func(t *testing.T) {
+		runner, repo, key := setup(t)
+		seedAwaitingInput(t, repo, key, "run-stale")
+		gt.NoError(t, repo.JobRun().Suspend(context.Background(), key, "run-stale", now.Add(-unansweredTimeout-time.Minute))).Required()
+
+		ok, err := runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		// Run itself recovers this marker, so the admission check must not
+		// leave the manual path blocked on it.
+		gt.Bool(t, ok).True()
+	})
+
+	t.Run("admits when the suspension marker points at no run log", func(t *testing.T) {
+		runner, repo, key := setup(t)
+		// A resume that crashed before writing its log leaves the marker with
+		// nothing behind it.
+		gt.NoError(t, repo.JobRun().Suspend(context.Background(), key, "run-vanished", now.Add(-time.Minute))).Required()
+
+		ok, err := runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, key.JobID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, ok).True()
+	})
+
+	t.Run("rejects an incomplete key", func(t *testing.T) {
+		runner, _, key := setup(t)
+		_, err := runner.CanRunManual(context.Background(), "", key.CaseID, key.JobID)
+		gt.Value(t, err).NotNil()
+		_, err = runner.CanRunManual(context.Background(), key.WorkspaceID, 0, key.JobID)
+		gt.Value(t, err).NotNil()
+		_, err = runner.CanRunManual(context.Background(), key.WorkspaceID, key.CaseID, "")
+		gt.Value(t, err).NotNil()
+	})
+}
+
 // TestJobRunner_StrategyDispatchPicksRegisteredExecutor verifies that
 // the runner picks the executor that matches Job.Strategy at Run time
 // and writes the matching ExecutorKind onto the JobRunLog.

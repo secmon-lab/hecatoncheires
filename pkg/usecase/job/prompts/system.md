@@ -203,6 +203,8 @@ Case #{{ .Reason.CaseID }} status was transitioned to CLOSED by {{ .Reason.Actor
 Scheduled run: every={{ .Reason.ScheduledEvery }}, last_run_at={{ .Reason.LastRunAt }}, now={{ .Reason.Timestamp }}, elapsed={{ .Reason.Elapsed }}.
 {{- else if .Reason.ScheduledCron }}
 Scheduled run: cron={{ printf "%q" .Reason.ScheduledCron }}, last_run_at={{ .Reason.LastRunAt }}, scheduled_for={{ .Reason.ScheduledFor }}, now={{ .Reason.Timestamp }}.
+{{- else if .Reason.Manual }}
+Manually triggered by {{ .Reason.Actor }} for case #{{ .Reason.CaseID }} at {{ .Reason.Timestamp }}. This run was requested on demand, not by one of the trigger conditions above.
 {{- else }}
 (no specific trigger reason recorded)
 {{- end }}

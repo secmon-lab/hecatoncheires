@@ -481,6 +481,102 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	return r.finishRun(ctx, j, c, key, logRec, handler, channelID, sessionThreadTS, runID, traceID, execErr)
 }
 
+// CanRunManual reports whether a manual run may start right now for the given
+// (workspace, case, job). It is the admission check behind the web UI's Run
+// button: a caller that gets false should be told the Job is already running
+// instead of being handed a run that Run would silently step aside from.
+//
+// It deliberately mirrors the two conditions Run itself applies — a live lease
+// and a *genuinely open* question — rather than a looser "is there a
+// suspension marker" test. A stale or inconsistent marker (an unanswered
+// question past the timeout, or a run log left behind by a crashed resume) is
+// something Run recovers from, so refusing it here would leave the manual path
+// permanently blocked on a Job the event path can still run.
+//
+// This is a read-only probe of shared state, not a reservation: the run may
+// still lose the race for the lease inside Run. That is intended — the lease
+// is the authority, this is the immediate answer for the operator.
+func (r *JobRunner) CanRunManual(ctx context.Context, workspaceID string, caseID int64, jobID string) (bool, error) {
+	if r == nil {
+		return false, goerr.New("job runner is not configured")
+	}
+	key := model.JobRunKey{WorkspaceID: workspaceID, CaseID: caseID, JobID: jobID}
+	if err := key.Validate(); err != nil {
+		return false, goerr.Wrap(err, "invalid job-run key")
+	}
+
+	run, err := r.deps.Repo.JobRun().Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, interfaces.ErrJobRunNotFound) {
+			// Never ran for this Case.
+			return true, nil
+		}
+		return false, goerr.Wrap(err, "get job run",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("case_id", caseID),
+			goerr.V("job_id", jobID))
+	}
+
+	now := r.clock()
+	if run.IsLeased(now) {
+		return false, nil
+	}
+	if r.suspensionIsActive(ctx, run, now) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// RunManual executes the Job identified by jobID against the given Case on
+// an explicit operator request (the web UI's Run button). It resolves the
+// Job definition from the workspace registry — the caller only holds an ID,
+// and keeping *model.Job out of that boundary lets the usecase layer depend
+// on a one-method interface instead of this package.
+//
+// Everything after the resolution is the ordinary Run path: the same lease,
+// prompts, run log, trace and notifications. The only difference is the
+// Event's domain, which is recorded as the run's provenance.
+//
+// The enabled / existence re-check is deliberate even though the caller
+// already validated it: this runs in a background goroutine, and the
+// registry may have been replaced by a config reload in between.
+func (r *JobRunner) RunManual(ctx context.Context, workspaceID string, caseID int64, jobID, actorUserID string) error {
+	if r == nil || r.deps.Registry == nil {
+		return goerr.New("job runner registry is not configured")
+	}
+
+	ws, err := r.deps.Registry.Get(workspaceID)
+	if err != nil {
+		return goerr.Wrap(err, "get workspace from registry",
+			goerr.V("workspace_id", workspaceID))
+	}
+	if ws == nil {
+		return goerr.New("workspace has no registry entry",
+			goerr.V("workspace_id", workspaceID))
+	}
+
+	var target *model.Job
+	for _, j := range ws.Jobs {
+		if j != nil && j.ID == jobID && !j.Disabled {
+			target = j
+			break
+		}
+	}
+	if target == nil {
+		return goerr.New("job not found in workspace registry",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("job_id", jobID))
+	}
+
+	return r.Run(ctx, target, Event{
+		Domain:      model.JobEventDomainManual,
+		WorkspaceID: workspaceID,
+		CaseID:      caseID,
+		Timestamp:   r.clock(),
+		ActorUserID: actorUserID,
+	})
+}
+
 // finishRun transitions the run log to its terminal stage, emits the
 // completion / failure session-log marker, runs the optional reflection
 // pass, and records the outcome on the JobRun lock doc. Shared by the

@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
 // JobRunUseCase exposes read-only access to Job execution history and the
@@ -31,6 +32,22 @@ import (
 type JobRunUseCase struct {
 	repo     interfaces.Repository
 	registry *model.WorkspaceRegistry
+	trigger  JobTrigger
+}
+
+// JobTrigger is the Job runtime as the manual-trigger path needs it.
+// Implemented by *job.JobRunner; declared here so the usecase layer does not
+// import the Job runtime package (which would invert the dependency).
+type JobTrigger interface {
+	// CanRunManual reports whether a manual run may start right now for the
+	// given tuple. false means a run already holds the slot. The decision
+	// lives in the runtime because it depends on the lease, the run log and
+	// the unanswered-question timeout that the runtime owns.
+	CanRunManual(ctx context.Context, workspaceID string, caseID int64, jobID string) (bool, error)
+
+	// RunManual executes the Job. It is called from a background goroutine,
+	// so it blocks for the whole run.
+	RunManual(ctx context.Context, workspaceID string, caseID int64, jobID, actorUserID string) error
 }
 
 // NewJobRunUseCase wires the JobRunUseCase. registry may be nil: the
@@ -38,6 +55,14 @@ type JobRunUseCase struct {
 // is registered (e.g. early bootstrap), and never blocks the call.
 func NewJobRunUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry) *JobRunUseCase {
 	return &JobRunUseCase{repo: repo, registry: registry}
+}
+
+// SetTrigger wires the manual-trigger runtime. Called once at startup
+// after the JobRunner has been constructed — it cannot be a New() option
+// because the runner is built from the UseCases themselves. Leaving it
+// unset makes TriggerJob fail loudly rather than accept a silent no-op.
+func (uc *JobRunUseCase) SetTrigger(t JobTrigger) {
+	uc.trigger = t
 }
 
 // JobRunLogPageDefaultSize is the page size used when the caller does
@@ -394,6 +419,16 @@ func (uc *JobRunUseCase) ListCaseJobs(ctx context.Context, workspaceID string, c
 			goerr.V("user_id", token.Sub))
 	}
 
+	return uc.jobsForCase(workspaceID, c)
+}
+
+// jobsForCase resolves the workspace registry entry and returns the Jobs that
+// can fire against c. It performs NO access control — the caller has already
+// gated the Case — so that the listing and the manual trigger share one
+// definition of "runnable for this Case" and cannot drift apart. An unset
+// registry or a workspace with no entry yields an empty slice rather than an
+// error, matching ResolveJobName's tolerance during early bootstrap.
+func (uc *JobRunUseCase) jobsForCase(workspaceID string, c *model.Case) ([]*model.Job, error) {
 	if uc.registry == nil {
 		return []*model.Job{}, nil
 	}
@@ -402,8 +437,6 @@ func (uc *JobRunUseCase) ListCaseJobs(ctx context.Context, workspaceID string, c
 		return nil, goerr.Wrap(err, "get workspace from registry",
 			goerr.V("workspace_id", workspaceID))
 	}
-	// Defensive parity with ResolveJobName, which also tolerates a nil
-	// entry: no Jobs to list when the workspace has no registry entry.
 	if entry == nil {
 		return []*model.Job{}, nil
 	}
@@ -426,6 +459,100 @@ func (uc *JobRunUseCase) ListCaseJobs(ctx context.Context, workspaceID string, c
 		}
 	}
 	return out, nil
+}
+
+// TriggerJob starts a manual run of jobID against the Case on behalf of the
+// authenticated caller (the web UI's Run button).
+//
+// Every check that can be made synchronously is made here — the Case exists
+// and is readable, the Job is one the Case can run, and no run is currently
+// in flight — so the operator gets an immediate answer. The run itself is
+// dispatched to the background: it takes minutes (LLM round-trips) and the
+// GraphQL request must not block on it.
+//
+// The triggerable set comes from jobsForCase — the same filter the caseJobs
+// query applies — so the mutation and the query can never disagree about
+// which Jobs are available.
+//
+// Returns:
+//   - ErrInvalidArgument   — empty workspace id / zero case id / empty job id
+//   - ErrCaseNotFound      — the Case does not exist
+//   - ErrAccessDenied      — private Case and the caller cannot access it
+//   - ErrJobNotFound       — jobID is not triggerable for this Case
+//   - ErrJobAlreadyRunning — a live lease or an open question holds the slot
+func (uc *JobRunUseCase) TriggerJob(ctx context.Context, workspaceID string, caseID int64, jobID string) error {
+	if workspaceID == "" {
+		return goerr.Wrap(ErrInvalidArgument, "workspace id is empty")
+	}
+	if caseID == 0 {
+		return goerr.Wrap(ErrInvalidArgument, "case id is zero")
+	}
+	if jobID == "" {
+		return goerr.Wrap(ErrInvalidArgument, "job id is empty")
+	}
+	if uc.trigger == nil {
+		return goerr.New("job trigger runtime is not configured")
+	}
+
+	// Starting a Job lets its agent write to the Case, so this is a Case
+	// write path and goes through the shared access gate — not the read-side
+	// check ListCaseJobs uses. The gate is draft-aware: the reporter of their
+	// own private draft is admitted, which an open-coded channel-membership
+	// test would refuse.
+	c, err := loadCaseForWrite(ctx, uc.repo, workspaceID, caseID)
+	if err != nil {
+		return err
+	}
+	jobs, err := uc.jobsForCase(workspaceID, c)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, j := range jobs {
+		if j != nil && j.ID == jobID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return goerr.Wrap(ErrJobNotFound, "job is not triggerable for this case",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V(CaseIDKey, caseID),
+			goerr.V("job_id", jobID))
+	}
+
+	// Whether a run already holds the slot is the runtime's judgement, not a
+	// second opinion formed here: it owns the lease, the unanswered-question
+	// timeout, and the run-log state that together decide it. Asking it keeps
+	// this check and the one Run performs from drifting apart.
+	canRun, err := uc.trigger.CanRunManual(ctx, workspaceID, caseID, jobID)
+	if err != nil {
+		// Fail closed on a read failure: a transient error must not be read
+		// as "idle" and let a second run start alongside a live one.
+		return goerr.Wrap(err, "check job run state before manual trigger",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V(CaseIDKey, caseID),
+			goerr.V("job_id", jobID))
+	}
+	if !canRun {
+		return goerr.Wrap(ErrJobAlreadyRunning, "a run for this job is already in flight",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V(CaseIDKey, caseID),
+			goerr.V("job_id", jobID))
+	}
+
+	// System contexts without a token (never the web UI) run with an empty
+	// actor, the same carve-out the reads above use.
+	actorUserID := ""
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		actorUserID = token.Sub
+	}
+
+	trigger := uc.trigger
+	async.Dispatch(ctx, func(bgCtx context.Context) error {
+		return trigger.RunManual(bgCtx, workspaceID, caseID, jobID, actorUserID)
+	})
+	return nil
 }
 
 // checkCaseAccess loads the parent Case and refuses the call when a

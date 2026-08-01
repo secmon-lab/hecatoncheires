@@ -859,6 +859,17 @@ type Mutation {
   # preserved verbatim so the UI round-trips unchanged.
   updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
 
+  # Start a manual run of an automated Job against the given Case. `jobId`
+  # must be one of the Jobs `caseJobs` returns for this Case — a Job that is
+  # not listed there cannot be started here either. Every check that can be
+  # made synchronously (case access, the Job being triggerable, no run
+  # already in flight) happens before this returns; the run itself proceeds
+  # in the background, so the caller polls `caseJobRunLogs` to observe it.
+  # Returns true once the run is accepted. Failures surface as GraphQL
+  # errors with extensions.code FORBIDDEN (private case), NOT_FOUND (case or
+  # job) or CONFLICT (a run is already in flight).
+  triggerCaseJob(workspaceId: String!, caseId: Int!, jobId: String!): Boolean!
+
   # Case Import — create a pending ImportSession from raw YAML content.
   # The session is persisted to Firestore and identified by an ImportSessionID
   # (returned in `id`). The caller is captured from the auth context and

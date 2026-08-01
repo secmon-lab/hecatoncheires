@@ -418,6 +418,7 @@ type ComplexityRoot struct {
 		SetFavoriteWorkspaces   func(childComplexity int, workspaceIds []string) int
 		SubmitDraft             func(childComplexity int, workspaceID string, id int, input *graphql1.SubmitDraftInput) int
 		SyncCaseChannelUsers    func(childComplexity int, workspaceID string, id int) int
+		TriggerCaseJob          func(childComplexity int, workspaceID string, caseID int, jobID string) int
 		UnarchiveAction         func(childComplexity int, workspaceID string, id int) int
 		UnarchiveMemo           func(childComplexity int, workspaceID string, caseID int, id string) int
 		UnassignCase            func(childComplexity int, workspaceID string, id int, userIDs []string) int
@@ -677,6 +678,7 @@ type MutationResolver interface {
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
 	UpdateCaseAgentSettings(ctx context.Context, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) (*graphql1.Case, error)
+	TriggerCaseJob(ctx context.Context, workspaceID string, caseID int, jobID string) (bool, error)
 	CreateCaseImport(ctx context.Context, workspaceID string, input graphql1.CreateCaseImportInput) (*graphql1.ImportSession, error)
 	ExecuteCaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error)
 	CreateMemo(ctx context.Context, workspaceID string, input graphql1.CreateMemoInput) (*graphql1.Memo, error)
@@ -2517,6 +2519,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.SyncCaseChannelUsers(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.triggerCaseJob":
+		if e.ComplexityRoot.Mutation.TriggerCaseJob == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_triggerCaseJob_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.TriggerCaseJob(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["jobId"].(string)), true
 	case "Mutation.unarchiveAction":
 		if e.ComplexityRoot.Mutation.UnarchiveAction == nil {
 			break
@@ -4538,6 +4551,17 @@ type Mutation {
   # passing an empty list clears it (= "use every Source"); the order is
   # preserved verbatim so the UI round-trips unchanged.
   updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
+
+  # Start a manual run of an automated Job against the given Case. ` + "`" + `jobId` + "`" + `
+  # must be one of the Jobs ` + "`" + `caseJobs` + "`" + ` returns for this Case — a Job that is
+  # not listed there cannot be started here either. Every check that can be
+  # made synchronously (case access, the Job being triggerable, no run
+  # already in flight) happens before this returns; the run itself proceeds
+  # in the background, so the caller polls ` + "`" + `caseJobRunLogs` + "`" + ` to observe it.
+  # Returns true once the run is accepted. Failures surface as GraphQL
+  # errors with extensions.code FORBIDDEN (private case), NOT_FOUND (case or
+  # job) or CONFLICT (a run is already in flight).
+  triggerCaseJob(workspaceId: String!, caseId: Int!, jobId: String!): Boolean!
 
   # Case Import — create a pending ImportSession from raw YAML content.
   # The session is persisted to Firestore and identified by an ImportSessionID
@@ -6646,6 +6670,36 @@ func (ec *executionContext) field_Mutation_syncCaseChannelUsers_args(ctx context
 		return nil, err
 	}
 	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_triggerCaseJob_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseId",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["caseId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "jobId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["jobId"] = arg2
 	return args, nil
 }
 
@@ -15051,6 +15105,50 @@ func (ec *executionContext) fieldContext_Mutation_updateCaseAgentSettings(ctx co
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_updateCaseAgentSettings_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_triggerCaseJob(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_triggerCaseJob(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().TriggerCaseJob(ctx, fc.Args["workspaceId"].(string), fc.Args["caseId"].(int), fc.Args["jobId"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_triggerCaseJob(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_triggerCaseJob_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -24796,6 +24894,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "updateCaseAgentSettings":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_updateCaseAgentSettings(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "triggerCaseJob":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_triggerCaseJob(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

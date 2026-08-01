@@ -5,11 +5,13 @@ import {
   IconCalendar,
   IconCheck,
   IconChevRight,
+  IconPlay,
   IconPlus,
   IconRefresh,
   IconRobot,
   IconWarn,
 } from '../Icons'
+import Button from '../Button'
 import { intervalLabel } from '../../utils/jobTrigger'
 import styles from './CaseJobList.module.css'
 
@@ -40,9 +42,23 @@ interface CaseJobListProps {
   loading: boolean
   error: boolean
   onRetry: () => void
+  /** Start a manual run of the given Job against the current case. */
+  onRun: (jobId: string) => void
+  /** Job ids that currently have a RUNNING run log. */
+  runningJobIds: Set<string>
+  /** The job id whose trigger mutation is in flight, or null. */
+  pendingJobId: string | null
 }
 
-export default function CaseJobList({ jobs, loading, error, onRetry }: CaseJobListProps) {
+export default function CaseJobList({
+  jobs,
+  loading,
+  error,
+  onRetry,
+  onRun,
+  runningJobIds,
+  pendingJobId,
+}: CaseJobListProps) {
   const { t } = useTranslation()
   // Multiple rows may be expanded at once; the design lets operators
   // compare two prompts side by side without one collapsing the other.
@@ -99,6 +115,9 @@ export default function CaseJobList({ jobs, loading, error, onRetry }: CaseJobLi
               job={job}
               open={openIds.has(job.id)}
               onToggle={() => toggle(job.id)}
+              onRun={() => onRun(job.id)}
+              running={runningJobIds.has(job.id)}
+              pending={pendingJobId === job.id}
             />
           ))
         )}
@@ -111,49 +130,77 @@ function JobRow({
   job,
   open,
   onToggle,
+  onRun,
+  running,
+  pending,
 }: {
   job: CaseJob
   open: boolean
   onToggle: () => void
+  onRun: () => void
+  running: boolean
+  pending: boolean
 }) {
   const { t } = useTranslation()
+  const runLabel = pending
+    ? t('caseAgentJobRunStarting')
+    : running
+      ? t('caseAgentJobRunning')
+      : t('caseAgentJobRun')
   return (
     <div className={styles.row}>
-      {/* A native <button> handles Enter/Space activation itself, so no
-          IME-composition guard is required (see frontend-keyboard rule). */}
-      <button
-        type="button"
-        className={styles.rowHeader}
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-controls={`job-prompt-${job.id}`}
-      >
-        <span className={styles.rowMain}>
-          <span className={styles.rowName}>{job.name}</span>
-          {job.description && <span className={styles.rowDesc}>{job.description}</span>}
-        </span>
+      {/* The expand toggle and the Run button are siblings rather than
+          nested: a <button> inside a <button> is invalid markup and the
+          inner click would never reach the browser reliably. */}
+      <div className={styles.rowTop}>
+        {/* A native <button> handles Enter/Space activation itself, so no
+            IME-composition guard is required (see frontend-keyboard rule). */}
+        <button
+          type="button"
+          className={styles.rowHeader}
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={`job-prompt-${job.id}`}
+        >
+          <span className={styles.rowMain}>
+            <span className={styles.rowName}>{job.name}</span>
+            {job.description && <span className={styles.rowDesc}>{job.description}</span>}
+          </span>
 
-        <span className={styles.rowMeta}>
-          <TriggerBadges trigger={job.trigger} />
-          {job.strategy === 'PLANEXEC' && (
-            <span className={[styles.chip, styles.chipStrategy].join(' ')}>
-              {t('jobStrategyPlanexec')}
-            </span>
-          )}
-          {job.quiet && (
-            <span
-              className={[styles.chip, styles.chipQuiet].join(' ')}
-              title={t('caseAgentJobQuietTitle')}
-            >
-              {t('caseAgentJobQuiet')}
-            </span>
-          )}
-        </span>
+          <span className={styles.rowMeta}>
+            <TriggerBadges trigger={job.trigger} />
+            {job.strategy === 'PLANEXEC' && (
+              <span className={[styles.chip, styles.chipStrategy].join(' ')}>
+                {t('jobStrategyPlanexec')}
+              </span>
+            )}
+            {job.quiet && (
+              <span
+                className={[styles.chip, styles.chipQuiet].join(' ')}
+                title={t('caseAgentJobQuietTitle')}
+              >
+                {t('caseAgentJobQuiet')}
+              </span>
+            )}
+          </span>
 
-        <span className={[styles.chevron, open ? styles.chevronOpen : ''].join(' ')}>
-          <IconChevRight size={16} />
+          <span className={[styles.chevron, open ? styles.chevronOpen : ''].join(' ')}>
+            <IconChevRight size={16} />
+          </span>
+        </button>
+
+        <span className={styles.rowRun}>
+          <Button
+            size="sm"
+            icon={<IconPlay size={12} />}
+            onClick={onRun}
+            disabled={pending || running}
+            data-testid={`job-run-button-${job.id}`}
+          >
+            {runLabel}
+          </Button>
         </span>
-      </button>
+      </div>
 
       {open && (
         <div className={styles.promptWrap} id={`job-prompt-${job.id}`}>
