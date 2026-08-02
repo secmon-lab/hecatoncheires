@@ -104,6 +104,22 @@ export class CaseListPage extends BasePage {
   }
 
   /**
+   * The text of one cell of a case row, selected by its column header. Use it
+   * to read what a column actually renders (e.g. the Status column, which
+   * shows the configured board status in a thread-mode workspace and the
+   * lifecycle Open/Closed badge in a channel-mode one).
+   */
+  async getCaseRowCellTextByHeader(title: string, header: string): Promise<string> {
+    const headers = await this.casesTable.locator('thead th').allTextContents();
+    const index = headers.findIndex((h) => h.trim().toLowerCase() === header.toLowerCase());
+    if (index < 0) {
+      throw new Error(`column header not found: ${header} (have: ${headers.join(', ')})`);
+    }
+    const cell = this.getCaseRowByTitle(title).locator('td').nth(index);
+    return (await cell.textContent())?.trim() ?? '';
+  }
+
+  /**
    * Check if a case with the given title exists
    */
   async caseExists(title: string): Promise<boolean> {

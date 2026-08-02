@@ -5,6 +5,7 @@ import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useTranslation, type MsgKey } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
+import { buildSlackPermalink } from '../utils/slackLink'
 import { displayName } from '../utils/user'
 import Button from './Button'
 
@@ -64,23 +65,6 @@ interface ActionActivityProps {
   slackMessageTS?: string | null
   slackChannelID?: string | null
   slackChannelURL?: string | null
-}
-
-// buildSlackPermalink composes a permalink to the action's thread root.
-// Slack accepts archive URLs of the form {channelURL}/p{ts-without-dot}, and
-// also tolerates the canonical https://slack.com/archives/... fallback when
-// the workspace subdomain isn't known.
-function buildSlackPermalink(channelURL: string | null | undefined, channelID: string | null | undefined, ts: string | null | undefined): string | null {
-  if (!ts) return null
-  const tsCompact = ts.replace('.', '')
-  if (channelURL) {
-    const trimmed = channelURL.replace(/\/+$/, '')
-    return `${trimmed}/p${tsCompact}`
-  }
-  if (channelID) {
-    return `https://slack.com/archives/${channelID}/p${tsCompact}`
-  }
-  return null
 }
 
 type Tab = 'all' | 'comments' | 'history'

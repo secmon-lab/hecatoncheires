@@ -66,6 +66,27 @@ export const GET_CASES = gql`
   }
 `
 
+// GET_CASES_WITH_SLACK_LINK is the Case list page's own operation: GET_CASES
+// plus slackChannelURL, which it needs to build a workspace-qualified Slack
+// link per row.
+//
+// That field is deliberately NOT in CaseListFields. Its resolver calls Slack's
+// auth.test, and a failure there is cached for the life of the server process,
+// so every consumer of the shared GET_CASES — the Case board, the sidebar
+// counts, the Action form's case picker, and the refetches that follow a
+// mutation — would break for good on a misconfigured Slack. None of them need
+// the link, so only this operation carries the risk (and the Case list pairs
+// it with errorPolicy 'all' so its own rows survive).
+export const GET_CASES_WITH_SLACK_LINK = gql`
+  ${CASE_LIST_FIELDS}
+  query GetCasesWithSlackLink($workspaceId: String!, $status: CaseStatus) {
+    cases(workspaceId: $workspaceId, status: $status) {
+      ...CaseListFields
+      slackChannelURL
+    }
+  }
+`
+
 export const GET_CASE = gql`
   ${CASE_LIST_FIELDS}
   query GetCase($workspaceId: String!, $id: Int!, $actionsFilter: ActionArchiveFilter) {
