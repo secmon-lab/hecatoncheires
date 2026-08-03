@@ -174,17 +174,23 @@ func TestHandler_RunTotals_AccumulatesTokensAcrossCalls(t *testing.T) {
 	})
 }
 
-func TestHandler_RunTotals_IgnoresCallsWithNoData(t *testing.T) {
-	h, _ := newHandlerFixture(t)
+func TestHandler_RunTotals_CountsCallThatReportedNoData(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
-	// nil LLMCallData appends no event, so it must not count as a call either.
-	h.EndLLMCall(h.StartLLMCall(ctx), nil, nil)
-	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{})
+	// A provider that could not open the stream calls EndLLMCall with a nil
+	// LLMCallData. Reaching the model is a step the run took, so it is counted
+	// even though there is no request / response body to record.
+	h.EndLLMCall(h.StartLLMCall(ctx), nil, errors.New("failed to create chat completion stream"))
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{LLMCalls: 1})
 
-	// A failed call still reports whatever tokens the provider billed.
+	events, err := repo.JobRunEvent().List(ctx, model.JobRunKey{WorkspaceID: "ws1", CaseID: 42, JobID: "job-A"}, "run-1")
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(0)
+
+	// A failed call that did report data still contributes its tokens.
 	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(10, 0), errors.New("upstream refused"))
-	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{InputTokens: 10, LLMCalls: 1})
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{InputTokens: 10, LLMCalls: 2})
 }
 
 func TestHandler_RunTotals_CountsConcurrentSubAgentCalls(t *testing.T) {

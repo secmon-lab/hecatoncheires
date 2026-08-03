@@ -189,8 +189,19 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 		durationMs = max(endedAt.Sub(span.startedAt).Milliseconds(), 0)
 	}
 
+	// Count the attempt before inspecting data. A provider that could not open
+	// the stream calls this with a nil LLMCallData (gollem's openai client does
+	// exactly that when CreateChatCompletionStream fails), and reaching the model
+	// is still a step the run took — the same reason EndToolExec counts a failed
+	// tool execution.
+	h.mu.Lock()
+	h.totals.LLMCalls++
+	h.mu.Unlock()
+
 	if data == nil {
-		// Nothing to record; we still skip rather than fabricate.
+		// No call data means no request / response body to record, and we skip
+		// the events rather than fabricate them. The attempt is already counted,
+		// so LLMCallCount can exceed the number of LLM_RESPONSE events.
 		return
 	}
 
@@ -210,7 +221,6 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	h.lastLLMResponseSeq = respEv.Sequence
 	h.totals.InputTokens += respEv.LLMResponse.InputTokens
 	h.totals.OutputTokens += respEv.LLMResponse.OutputTokens
-	h.totals.LLMCalls++
 	h.mu.Unlock()
 }
 

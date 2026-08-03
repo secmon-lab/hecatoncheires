@@ -118,13 +118,24 @@ count is `llm_call_count + tool_call_count`. Interactive runs that paused for a
 question accumulate across both turns. **Runs that finished before these columns
 existed report zero; there is no backfill.**
 
+Note that `input_tokens` and `output_tokens` also exist on `job_run_events`, where
+they are one call's figures rather than the run's total. Do not sum the
+`job_run_logs` columns across a run's events, or compare the two without
+qualifying which table you mean.
+
+`llm_call_count` counts every attempt to reach the model, including one that
+failed before any response arrived (a provider that cannot open its stream reports
+no call data). Such an attempt produces no `job_run_events` row, so
+`llm_call_count` can exceed the number of `LLM_RESPONSE` events for the same run.
+`tool_call_count` counts completed tool executions, successful and failed alike;
+a tool that never returned is not counted.
+
 #### The `job_run_events` timeline
 
 One flat table holds all four event kinds so a run reads back as a single ordered
 scan. `sequence` is the authoritative order within a run (document ids may
-diverge under clock skew), and `parent_sequence` links a `TOOL_CALL` back to the
-`LLM_RESPONSE` that requested it. Only the columns belonging to a row's `kind`
-are populated; the rest are NULL.
+diverge under clock skew). Only the columns belonging to a row's `kind` are
+populated; the rest are NULL.
 
 | Columns | Populated for |
 |---------|---------------|
@@ -148,6 +159,31 @@ serially.
 
 `pending_interaction` (the question form of a run sitting at `AWAITING_INPUT`) is
 deliberately not exported: it is transient state with no scalar representation.
+
+#### Limits of the timeline
+
+Three things the timeline does not tell you. None of them is a property of the
+export — each is inherited from how the run was recorded.
+
+**`parent_sequence` and `agent_label` are unreliable while sub-agents run in
+parallel.** A `plan_execute` run drives several sub-agents concurrently through
+one trace handler that keeps a single "most recent response" and a single active
+label. When two sub-agents interleave, a `TOOL_CALL` can be attributed to another
+agent's `LLM_RESPONSE`, and an event can carry a neighbouring agent's
+`agent_label` (or none). Treat both columns as hints on parallel runs; `sequence`
+and `run_id` remain exact.
+
+**An empty payload is indistinguishable from an unrecorded one.** Both repository
+backends decode a stored empty array back into a nil slice, so a response that
+returned no text and a response whose text was never recorded both arrive as NULL
+in `texts_json`. The event row and its scalar columns still identify the call.
+
+**A run whose summary document was never written is missing entirely.** The export
+walks `job_runs` first and reaches logs and events through it. A mention-triggered
+run writes its log and events before its summary, so if that final write fails the
+run is durably stored in Firestore yet never exported. Configured Jobs are not
+affected: they create the summary when taking the run lease, before the log
+exists.
 
 Custom field column types: `text` / `markdown` / `url` / `select` / `user` /
 `case_ref` → `STRING`; `number` → `FLOAT64`; `multi-*` → `ARRAY<STRING>`;

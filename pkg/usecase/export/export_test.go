@@ -163,6 +163,17 @@ func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID in
 	}
 	gt.NoError(t, repo.JobRunEvent().Append(ctx, tool)).Required()
 
+	// A response that carried no text and requested no tool. Its empty payload
+	// fields must stay distinguishable from "nothing was recorded".
+	empty := baseEvent(4, model.JobRunEventKindLLMResponse)
+	empty.LLMResponse = &model.LLMResponsePayload{
+		Model:         "claude-opus-4-7",
+		Texts:         []string{},
+		FunctionCalls: []model.LLMFunctionCall{},
+		InputTokens:   90,
+	}
+	gt.NoError(t, repo.JobRunEvent().Append(ctx, empty)).Required()
+
 	log.Stage = model.JobRunStageSuccess
 	log.EndedAt = now.Add(time.Minute)
 	log.InputTokens = 1500
@@ -345,9 +356,9 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.Value(t, normalLogRow["llm_call_count"]).Equal(int64(4))
 	gt.Value(t, normalLogRow["tool_call_count"]).Equal(int64(6))
 
-	// Job run events: the full timeline of each exported run (3 events x 2 cases).
+	// Job run events: the full timeline of each exported run (4 events x 2 cases).
 	jobRunEvents := sink.table("ds", "job_run_events")
-	gt.Array(t, jobRunEvents.Rows).Length(6)
+	gt.Array(t, jobRunEvents.Rows).Length(8)
 	gt.True(t, findRow(jobRunEvents, "case_id", draftID) == nil)
 
 	// Each kind populates only its own columns; the rest stay absent (NULL).
@@ -381,6 +392,18 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.Value(t, toolRow["tool_result_json"]).Equal(`{"hits":2}`)
 	gt.Value(t, toolRow["tool_is_error"]).Equal(false)
 	gt.True(t, toolRow["model"] == nil)
+
+	// A response whose payload slices were empty exports them as NULL, because
+	// both repository backends decode a stored empty array back into a nil slice
+	// (see "Append + List returns an empty payload slice as nil" in
+	// pkg/repository/job_run_test.go). The row itself and its scalars survive, so
+	// the call is still visible in the timeline.
+	emptyRow := findEventRow(jobRunEvents, normalID, 4)
+	gt.Value(t, emptyRow).NotNil().Required()
+	gt.Value(t, emptyRow["kind"]).Equal("LLM_RESPONSE")
+	gt.True(t, emptyRow["texts_json"] == nil)
+	gt.True(t, emptyRow["function_calls_json"] == nil)
+	gt.Value(t, emptyRow["input_tokens"]).Equal(int64(90))
 
 	// Knowledge / Tag.
 	knowledge := sink.table("ds", "knowledge")
@@ -432,7 +455,7 @@ func TestExporter_Run_excludePrivate(t *testing.T) {
 
 	// The excluded cases' timelines go too — prompts, tool results and all.
 	jobRunEvents := sink.table("ds", "job_run_events")
-	gt.Array(t, jobRunEvents.Rows).Length(3)
+	gt.Array(t, jobRunEvents.Rows).Length(4)
 	gt.Value(t, findEventRow(jobRunEvents, normalID, 1)).NotNil()
 	gt.True(t, findRow(jobRunEvents, "case_id", privateID) == nil)
 	gt.True(t, findRow(jobRunEvents, "case_id", draftID) == nil)
@@ -457,6 +480,61 @@ func TestExporter_Run_collectsErrorsAndContinues(t *testing.T) {
 	gt.Value(t, sink.table("ds", "job_runs")).NotNil()
 	gt.Value(t, sink.table("ds", "job_run_logs")).NotNil()
 	gt.Value(t, sink.table("ds", "job_run_events")).NotNil()
+	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
+	gt.Value(t, sink.table("ds", "tags")).NotNil()
+}
+
+// eventReadFailingRepository is a Repository whose event timeline cannot be
+// read. It stands in for a Firestore failure on the heaviest query the export
+// makes; everything else behaves normally.
+type eventReadFailingRepository struct {
+	interfaces.Repository
+}
+
+func (r eventReadFailingRepository) JobRunEvent() interfaces.JobRunEventRepository {
+	return failingJobRunEventRepository{}
+}
+
+type failingJobRunEventRepository struct{}
+
+func (failingJobRunEventRepository) Append(context.Context, *model.JobRunEvent) error { return nil }
+
+func (failingJobRunEventRepository) List(context.Context, model.JobRunKey, string) ([]*model.JobRunEvent, error) {
+	return nil, errors.New("injected job run event read failure")
+}
+
+// TestExporter_Run_eventFailureKeepsJobRunTables pins the failure granularity of
+// the agent-run tables. The event timeline is the largest and most failure-prone
+// read the export makes; when it breaks, the summaries and logs — which were
+// collected in full — must still be refreshed rather than left as a stale
+// snapshot in BigQuery.
+func TestExporter_Run_eventFailureKeepsJobRunTables(t *testing.T) {
+	ctx := context.Background()
+	repo, entry, _, normalID, _, _ := seededWorkspace(t)
+	sink := newFakeSink()
+
+	err := export.New(eventReadFailingRepository{Repository: repo}, sink).
+		Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})
+	// The event failure is surfaced, not swallowed.
+	gt.Error(t, err)
+
+	// The two levels that completed are written.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Value(t, jobRuns).NotNil().Required()
+	gt.Array(t, jobRuns.Rows).Length(2)
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Value(t, jobRunLogs).NotNil().Required()
+	gt.Array(t, jobRunLogs.Rows).Length(2)
+	gt.Value(t, findRow(jobRunLogs, "case_id", normalID)).NotNil()
+
+	// The incomplete level is skipped entirely: a partial slice must never be
+	// published, because every write is a full refresh.
+	gt.Value(t, sink.table("ds", "job_run_events")).Nil()
+
+	// The unrelated tables are unaffected.
+	gt.Value(t, sink.table("ds", "cases")).NotNil()
+	gt.Value(t, sink.table("ds", "actions")).NotNil()
+	gt.Value(t, sink.table("ds", "memos")).NotNil()
 	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
 	gt.Value(t, sink.table("ds", "tags")).NotNil()
 }
@@ -556,8 +634,8 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	// The event timeline round-trips through the real BigQuery schema, including
 	// the JSON payload columns and the per-kind NULLs.
 	jobEventRows := readAllRows(t, ctx, client, dataset, tbl("job_run_events"))
-	gt.Array(t, jobEventRows).Length(6).Required()
-	var sawRequest, sawTool bool
+	gt.Array(t, jobEventRows).Length(8).Required()
+	var sawRequest, sawTool, sawEmptyPayload bool
 	for _, r := range jobEventRows {
 		switch r["kind"] {
 		case "LLM_REQUEST":
@@ -571,10 +649,21 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 			gt.Value(t, r["tool_result_json"]).Equal(`{"hits":2}`)
 			gt.Value(t, r["parent_sequence"]).Equal(int64(2))
 			gt.Value(t, r["messages_json"]).Nil()
+		case "LLM_RESPONSE":
+			// The sequence-4 response carried no text and requested no tool. Its
+			// payload columns are NULL (the repository decodes a stored empty
+			// array as a nil slice) while its scalars still identify the call.
+			if r["sequence"] == int64(4) {
+				sawEmptyPayload = true
+				gt.Value(t, r["texts_json"]).Nil()
+				gt.Value(t, r["function_calls_json"]).Nil()
+				gt.Value(t, r["input_tokens"]).Equal(int64(90))
+			}
 		}
 	}
 	gt.Bool(t, sawRequest).True()
 	gt.Bool(t, sawTool).True()
+	gt.Bool(t, sawEmptyPayload).True()
 
 	// Second run: full refresh — the row count must not double.
 	gt.NoError(t, exporter.Run(ctx, targets)).Required()
@@ -589,7 +678,7 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("actions"))).Length(1)
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_runs"))).Length(1)
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_logs"))).Length(1)
-	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_events"))).Length(3)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_events"))).Length(4)
 
 	// Schema evolution: add a field, set it on the normal case, re-run. The new
 	// column must appear (evolved in place) and carry the value. The append right

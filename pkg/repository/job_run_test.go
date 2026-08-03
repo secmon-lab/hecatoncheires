@@ -611,6 +611,47 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 	t.Helper()
 	ctx := context.Background()
 
+	// Both backends collapse an empty payload slice to nil on the way back:
+	// Firestore's DataTo decodes an empty array as a nil slice, and the memory
+	// repo's copy does the same because append([]T(nil)) of nothing stays nil.
+	// The behaviour is pinned here because it is what makes "the model returned
+	// nothing" indistinguishable from "no payload was recorded" downstream — the
+	// BigQuery export can only publish NULL for both (see docs/export.md).
+	t.Run("Append + List returns an empty payload slice as nil", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		runID := "run-empty-payload"
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		gt.NoError(t, repo.JobRunEvent().Append(ctx, &model.JobRunEvent{
+			WorkspaceID: key.WorkspaceID,
+			CaseID:      key.CaseID,
+			JobID:       key.JobID,
+			RunID:       runID,
+			TraceID:     "trace-empty",
+			EventID:     "ev-empty",
+			Sequence:    1,
+			OccurredAt:  now,
+			Kind:        model.JobRunEventKindLLMResponse,
+			Phase:       "execute",
+			LLMResponse: &model.LLMResponsePayload{
+				Model:         "claude-opus-4-7",
+				Texts:         []string{},
+				FunctionCalls: []model.LLMFunctionCall{},
+				InputTokens:   90,
+			},
+		})).Required()
+
+		got, err := repo.JobRunEvent().List(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].LLMResponse).NotNil().Required()
+		gt.Value(t, got[0].LLMResponse.Texts).Nil()
+		gt.Value(t, got[0].LLMResponse.FunctionCalls).Nil()
+		// The scalar alongside them survives, so the row is not simply lost.
+		gt.Number(t, got[0].LLMResponse.InputTokens).Equal(90)
+	})
+
 	t.Run("Append + List round-trips all fields and orders by Sequence", func(t *testing.T) {
 		repo := newRepo(t)
 		key := newJobRunKey("ws")

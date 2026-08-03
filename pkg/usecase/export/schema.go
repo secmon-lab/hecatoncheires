@@ -300,9 +300,16 @@ func addEventPayload(ctx context.Context, row map[string]any, e *model.JobRunEve
 }
 
 // encodeEventJSON marshals a structured payload field to its JSON column value.
-// A nil/empty field yields nil (NULL) rather than "null" so the column reads as
-// absent. A marshal failure is reported (non-fatal) and the cell left NULL — one
+// A marshal failure is reported (non-fatal) and the cell left NULL — one
 // unencodable payload must not abort the export of the rest of the timeline.
+//
+// An absent field marshals to "null" and is written as NULL; an empty slice is
+// preserved as "[]". That distinction does NOT reach BigQuery today, because both
+// repository backends decode a stored empty array back into a nil slice (pinned
+// by "Append + List returns an empty payload slice as nil" in
+// pkg/repository/job_run_test.go), so an empty payload arrives here as nil. The
+// encoding is kept faithful anyway so this layer is not the one losing the
+// information; see docs/export.md for what a consumer can actually rely on.
 func encodeEventJSON(ctx context.Context, e *model.JobRunEvent, field string, v any) any {
 	if v == nil {
 		return nil
@@ -316,9 +323,7 @@ func encodeEventJSON(ctx context.Context, e *model.JobRunEvent, field string, v 
 			"export job run event payload")
 		return nil
 	}
-	// An empty slice marshals to "[]"; treat it as absent so a caller does not
-	// have to distinguish "[]" from a genuinely empty conversation.
-	if string(b) == "[]" || string(b) == "null" {
+	if string(b) == "null" {
 		return nil
 	}
 	return string(b)
