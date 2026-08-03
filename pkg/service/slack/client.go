@@ -568,18 +568,7 @@ func (c *client) GetConversationReplies(ctx context.Context, channelID string, t
 			goerr.V("thread_ts", threadTS))
 	}
 
-	result := make([]ConversationMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		result = append(result, ConversationMessage{
-			UserID:    msg.User,
-			UserName:  msg.Username,
-			Text:      msg.Text,
-			Timestamp: msg.Timestamp,
-			ThreadTS:  msg.ThreadTimestamp,
-		})
-	}
-
-	return result, nil
+	return ToConversationMessages(msgs), nil
 }
 
 // GetConversationHistory retrieves channel messages from the specified time
@@ -597,18 +586,29 @@ func (c *client) GetConversationHistory(ctx context.Context, channelID string, o
 			goerr.V("oldest", oldest))
 	}
 
-	result := make([]ConversationMessage, 0, len(resp.Messages))
-	for _, msg := range resp.Messages {
+	return ToConversationMessages(resp.Messages), nil
+}
+
+// ToConversationMessages converts slack-go messages to ConversationMessage.
+// The body goes through MessageBody because an integration such as the GitHub
+// Slack app renders its whole notification into `attachments` and leaves
+// `text` empty — reading msg.Text alone yields "" for those messages.
+//
+// Exported because the agent's User-token client (pkg/agent/tool/slack) reads
+// the same endpoints with its own slack-go client and must not diverge on how
+// a message body is derived.
+func ToConversationMessages(msgs []slack.Message) []ConversationMessage {
+	result := make([]ConversationMessage, 0, len(msgs))
+	for _, msg := range msgs {
 		result = append(result, ConversationMessage{
 			UserID:    msg.User,
 			UserName:  msg.Username,
-			Text:      msg.Text,
+			Text:      MessageBody(msg.Text, msg.Blocks, msg.Attachments),
 			Timestamp: msg.Timestamp,
 			ThreadTS:  msg.ThreadTimestamp,
 		})
 	}
-
-	return result, nil
+	return result
 }
 
 // PostThreadReply posts a text message as a thread reply and returns the message timestamp

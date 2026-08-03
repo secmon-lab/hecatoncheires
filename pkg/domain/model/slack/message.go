@@ -1,13 +1,14 @@
 package slack
 
 import (
-	"context"
 	"time"
-
-	"github.com/slack-go/slack/slackevents"
 )
 
-// Message represents a Slack message domain model
+// Message represents a Slack message domain model.
+//
+// Construction from a Slack Events API payload lives in pkg/service/slack
+// (MessageFromEvent): decoding the Slack wire format is protocol work, and the
+// domain layer holds only the resulting values.
 type Message struct {
 	id        string
 	channelID string
@@ -19,56 +20,6 @@ type Message struct {
 	eventTS   string
 	files     []File
 	createdAt time.Time
-}
-
-// NewMessage creates a new Message from a Slack Events API event
-func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
-	if ev.Type != slackevents.CallbackEvent {
-		return nil
-	}
-
-	innerEvent := ev.InnerEvent
-	now := time.Now()
-
-	switch evt := innerEvent.Data.(type) {
-	case *slackevents.AppMentionEvent:
-		return &Message{
-			id:        evt.TimeStamp,
-			channelID: evt.Channel,
-			threadTS:  evt.ThreadTimeStamp,
-			teamID:    ev.TeamID,
-			userID:    evt.User,
-			userName:  evt.User, // Default to user ID, will be updated later if needed
-			text:      evt.Text,
-			eventTS:   evt.EventTimeStamp,
-			createdAt: now,
-		}
-	case *slackevents.MessageEvent:
-		threadTS := ""
-		if evt.ThreadTimeStamp != "" && evt.ThreadTimeStamp != evt.TimeStamp {
-			threadTS = evt.ThreadTimeStamp
-		}
-		var files []File
-		if evt.Message != nil {
-			for _, f := range evt.Message.Files {
-				files = append(files, NewFileFromSlack(f))
-			}
-		}
-		return &Message{
-			id:        evt.TimeStamp,
-			channelID: evt.Channel,
-			threadTS:  threadTS,
-			teamID:    ev.TeamID,
-			userID:    evt.User,
-			userName:  evt.User, // Default to user ID
-			text:      evt.Text,
-			eventTS:   evt.EventTimeStamp,
-			files:     files,
-			createdAt: now,
-		}
-	default:
-		return nil
-	}
 }
 
 // Getters to maintain immutability

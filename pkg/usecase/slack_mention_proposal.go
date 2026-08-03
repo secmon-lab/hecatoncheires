@@ -79,6 +79,12 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	}
 	logger := logging.From(ctx)
 
+	// The mention body may live in blocks or attachments rather than ev.Text
+	// (an integration that @-mentions the bot renders its payload there and
+	// leaves the text field empty), so derive it once here and use it for both
+	// the persisted MentionText and the planner's user input.
+	mentionText := slacksvc.MessageBody(ev.Text, ev.Blocks, ev.Attachments)
+
 	// Post a "processing…" context block immediately so the user sees we're
 	// working on it before the (slow) LLM call starts. The TS is reused later
 	// to UpdateMessage the same row into the final preview.
@@ -134,7 +140,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	}
 
 	d := model.NewCaseProposal(time.Now().UTC(), ev.User)
-	d.MentionText = ev.Text
+	d.MentionText = mentionText
 	d.RawMessages = msgs
 	d.Source = model.ProposalSource{
 		ChannelID: ev.Channel,
@@ -164,7 +170,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		candidates, d.ID, processingTS, "",
 	)
 
-	userInput := buildProposalUserInput(d, ev.Text, channelInfo)
+	userInput := buildProposalUserInput(d, mentionText, channelInfo)
 
 	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
 		Session:          session,
@@ -389,7 +395,11 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 	)
 
 	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
-		Session:          session,
+		Session: session,
+		// ev.Text is used raw here, unlike HandleAppMention: shouldResumeOnReply
+		// only lets through events with no SubType and no BotID, so this path
+		// sees human-composed replies, whose body Slack always mirrors into
+		// text. The blocks/attachments carriers are bot posts, already filtered.
 		UserInput:        ev.Text,
 		Trigger:          proposal.TriggerThreadReply,
 		TriggerTS:        ev.TimeStamp,

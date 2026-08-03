@@ -80,7 +80,7 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	}
 
 	// Convert event to domain model
-	msg := slack.NewMessage(ctx, event)
+	msg := slacksvc.MessageFromEvent(ctx, event)
 	if msg == nil {
 		// Unsupported event type: slack.NewMessage returned nil. This is an
 		// unexpected path — surface to Sentry so we notice schema drift or
