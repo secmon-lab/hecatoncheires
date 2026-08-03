@@ -463,7 +463,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		execReq.Interactive = true
 		execReq.Interactor = newJobInteractor(
 			r.deps.Repo, r.deps.InteractionPoster, key, runID,
-			channelID, questionThreadTS, requesterUserID, logRec, r.clock,
+			channelID, questionThreadTS, requesterUserID, logRec, handler, r.clock,
 		)
 	}
 	res, execErr := executor.Execute(ctx, execReq)
@@ -620,6 +620,14 @@ func (r *JobRunner) finishRun(
 		// and the reflection deps being wired.
 		r.maybeReflect(ctx, j, c, key, runID, handler)
 	}
+
+	// Fold this turn's tokens in. Deliberately after maybeReflect: the
+	// reflection agent shares this handler, so reading the totals earlier would
+	// drop its calls. On a resumed run logRec was re-read from storage and
+	// already carries the suspended turn's totals, so this adds rather than
+	// overwrites; the resume prepare-failure path passes no handler and keeps
+	// whatever was persisted.
+	runtrace.AddTokenUsage(logRec, handler)
 
 	if finErr := r.deps.Repo.JobRunLog().Finish(ctx, logRec); finErr != nil {
 		errutil.Handle(ctx, finErr, "job: finish job run log")
@@ -871,7 +879,7 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 	}
 	interactor := newJobInteractor(
 		r.deps.Repo, r.deps.InteractionPoster, key, runID,
-		prep.channelID, questionThreadTS, requesterUserID, logRec, r.clock,
+		prep.channelID, questionThreadTS, requesterUserID, logRec, handler, r.clock,
 	)
 
 	execReq := job.ExecuteRequest{

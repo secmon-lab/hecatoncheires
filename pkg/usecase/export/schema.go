@@ -105,6 +105,94 @@ func buildMemoTable(ctx context.Context, memoConfig *config.MemoConfig, memos []
 	return &Table{Name: "memos", Columns: cols, Rows: rows}
 }
 
+// buildJobRunTable builds the "job_runs" table: the per-(case, job) summary of
+// the most recent run, joinable to job_run_logs on
+// (workspace_id, case_id, job_id).
+func buildJobRunTable(runs []*model.JobRun) *Table {
+	cols := []Column{
+		{Name: "workspace_id", Type: TypeString},
+		{Name: "case_id", Type: TypeInt},
+		{Name: "job_id", Type: TypeString},
+		{Name: "last_run_at", Type: TypeTimestamp, Nullable: true},
+		{Name: "last_status", Type: TypeString, Nullable: true},
+		{Name: "last_error", Type: TypeString, Nullable: true},
+		{Name: "last_run_id", Type: TypeString, Nullable: true},
+		{Name: "last_trace_id", Type: TypeString, Nullable: true},
+		{Name: "lease_until", Type: TypeTimestamp, Nullable: true},
+		{Name: "suspended_run_id", Type: TypeString, Nullable: true},
+		{Name: "suspended_at", Type: TypeTimestamp, Nullable: true},
+	}
+	rows := make([]map[string]any, 0, len(runs))
+	for _, r := range runs {
+		rows = append(rows, map[string]any{
+			"workspace_id":     r.WorkspaceID,
+			"case_id":          r.CaseID,
+			"job_id":           r.JobID,
+			"last_run_at":      r.LastRunAt,
+			"last_status":      string(r.LastStatus),
+			"last_error":       r.LastError,
+			"last_run_id":      r.LastRunID,
+			"last_trace_id":    r.LastTraceID,
+			"lease_until":      r.LeaseUntil,
+			"suspended_run_id": r.SuspendedRunID,
+			"suspended_at":     r.SuspendedAt,
+		})
+	}
+	return &Table{Name: "job_runs", Columns: cols, Rows: rows}
+}
+
+// buildJobRunLogTable builds the "job_run_logs" table: one row per agent run
+// against a Case, TOML-configured Jobs and mention-triggered runs alike (the
+// event_type column discriminates them — see model.EventTypeMention).
+//
+// PendingInteraction is deliberately not exported: it is transient state that
+// exists only while a run sits at AWAITING_INPUT, and a Table column carries a
+// scalar, so the nested question form has no faithful representation here.
+func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
+	cols := []Column{
+		{Name: "workspace_id", Type: TypeString},
+		{Name: "case_id", Type: TypeInt},
+		{Name: "job_id", Type: TypeString},
+		{Name: "run_id", Type: TypeString},
+		{Name: "trace_id", Type: TypeString, Nullable: true},
+		{Name: "stage", Type: TypeString, Nullable: true},
+		{Name: "started_at", Type: TypeTimestamp, Nullable: true},
+		{Name: "ended_at", Type: TypeTimestamp, Nullable: true},
+		{Name: "error", Type: TypeString, Nullable: true},
+		{Name: "executor_kind", Type: TypeString, Nullable: true},
+		{Name: "executor_version", Type: TypeString, Nullable: true},
+		{Name: "event_type", Type: TypeString, Nullable: true},
+		{Name: "event_trigger_at", Type: TypeTimestamp, Nullable: true},
+		{Name: "system_prompt", Type: TypeString, Nullable: true},
+		{Name: "input_tokens", Type: TypeInt, Nullable: true},
+		{Name: "output_tokens", Type: TypeInt, Nullable: true},
+		{Name: "llm_call_count", Type: TypeInt, Nullable: true},
+	}
+	rows := make([]map[string]any, 0, len(logs))
+	for _, l := range logs {
+		rows = append(rows, map[string]any{
+			"workspace_id":     l.WorkspaceID,
+			"case_id":          l.CaseID,
+			"job_id":           l.JobID,
+			"run_id":           l.RunID,
+			"trace_id":         l.TraceID,
+			"stage":            string(l.Stage),
+			"started_at":       l.StartedAt,
+			"ended_at":         l.EndedAt,
+			"error":            l.Error,
+			"executor_kind":    l.ExecutorKind,
+			"executor_version": l.ExecutorVersion,
+			"event_type":       l.EventType,
+			"event_trigger_at": l.EventTriggerAt,
+			"system_prompt":    l.SystemPrompt,
+			"input_tokens":     l.InputTokens,
+			"output_tokens":    l.OutputTokens,
+			"llm_call_count":   l.LLMCallCount,
+		})
+	}
+	return &Table{Name: "job_run_logs", Columns: cols, Rows: rows}
+}
+
 // buildKnowledgeTable builds the "knowledge" table (Embedding is intentionally
 // excluded — it is never exposed).
 func buildKnowledgeTable(entries []*model.Knowledge) *Table {

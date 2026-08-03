@@ -53,9 +53,19 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	h := rec.Handler()
 	llmCtx := h.StartLLMCall(ctx)
 	h.EndLLMCall(llmCtx, &trace.LLMCallData{
-		Model:    "m",
-		Request:  &trace.LLMRequest{},
-		Response: &trace.LLMResponse{Texts: []string{"done"}},
+		Model:        "m",
+		InputTokens:  310,
+		OutputTokens: 44,
+		Request:      &trace.LLMRequest{},
+		Response:     &trace.LLMResponse{Texts: []string{"done"}},
+	}, nil)
+	llmCtx2 := h.StartLLMCall(ctx)
+	h.EndLLMCall(llmCtx2, &trace.LLMCallData{
+		Model:        "m",
+		InputTokens:  90,
+		OutputTokens: 6,
+		Request:      &trace.LLMRequest{},
+		Response:     &trace.LLMResponse{Texts: []string{"and done"}},
 	}, nil)
 	rec.Finish(ctx, nil)
 
@@ -65,6 +75,12 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	gt.Value(t, done.Stage).Equal(model.JobRunStageSuccess)
 	gt.Bool(t, done.EndedAt.Equal(started)).True()
 	gt.String(t, done.Error).Equal("")
+
+	// The run's token usage is summed over both calls and persisted on the log,
+	// so a consumer gets the run's cost without reading the event timeline.
+	gt.Number(t, done.InputTokens).Equal(400)
+	gt.Number(t, done.OutputTokens).Equal(50)
+	gt.Number(t, done.LLMCallCount).Equal(2)
 
 	// The JobRun summary doc was materialised so ListByCase (the read path the
 	// case agent page uses) surfaces the run.
@@ -79,10 +95,13 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	// The per-call events the handler emitted are attributed to this run.
 	events, err := repo.JobRunEvent().List(ctx, key, "run-abc")
 	gt.NoError(t, err).Required()
-	gt.Array(t, events).Length(2).Required()
+	gt.Array(t, events).Length(4).Required()
 	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
 	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
 	gt.String(t, events[1].TraceID).Equal("trace-abc")
+	gt.Value(t, events[2].Kind).Equal(model.JobRunEventKindLLMRequest)
+	gt.Value(t, events[3].Kind).Equal(model.JobRunEventKindLLMResponse)
+	gt.Number(t, events[3].LLMResponse.InputTokens).Equal(90)
 }
 
 // A failed run must leave a FAILED JobRunLog carrying the error, append a

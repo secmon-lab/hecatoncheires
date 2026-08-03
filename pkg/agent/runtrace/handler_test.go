@@ -147,6 +147,96 @@ func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
 	gt.Number(t, respEv.LLMResponse.DurationMs).Equal(0)
 }
 
+// llmCall is a minimal LLMCallData carrying only the token figures, for tests
+// that care about accumulation rather than payload content.
+func llmCall(input, output int) *trace.LLMCallData {
+	return &trace.LLMCallData{
+		Model:        "claude-opus-4-7",
+		InputTokens:  input,
+		OutputTokens: output,
+		Response:     &trace.LLMResponse{Texts: []string{"ok"}},
+	}
+}
+
+func TestHandler_TokenUsage_AccumulatesAcrossCalls(t *testing.T) {
+	h, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{})
+
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(120, 60), nil)
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(30, 5), nil)
+
+	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{
+		InputTokens:  150,
+		OutputTokens: 65,
+		Calls:        2,
+	})
+}
+
+func TestHandler_TokenUsage_IgnoresCallsWithNoData(t *testing.T) {
+	h, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	// nil LLMCallData appends no event, so it must not count as a call either.
+	h.EndLLMCall(h.StartLLMCall(ctx), nil, nil)
+	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{})
+
+	// A failed call still reports whatever tokens the provider billed.
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(10, 0), errors.New("upstream refused"))
+	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{InputTokens: 10, Calls: 1})
+}
+
+func TestHandler_TokenUsage_CountsConcurrentSubAgentCalls(t *testing.T) {
+	h, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	// planexec wires one handler into every parallel sub-agent, so concurrent
+	// EndLLMCall must not lose counts.
+	const N = 50
+	var wg sync.WaitGroup
+	for range N {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.EndLLMCall(h.StartLLMCall(ctx), llmCall(2, 3), nil)
+		}()
+	}
+	wg.Wait()
+
+	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{
+		InputTokens:  2 * N,
+		OutputTokens: 3 * N,
+		Calls:        N,
+	})
+}
+
+func TestAddTokenUsage(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("adds to the totals already on the log", func(t *testing.T) {
+		h, _ := newHandlerFixture(t)
+		h.EndLLMCall(h.StartLLMCall(ctx), llmCall(40, 7), nil)
+
+		// A resumed run's log carries the suspended turn's totals.
+		log := &model.JobRunLog{InputTokens: 100, OutputTokens: 20, LLMCallCount: 3}
+		runtrace.AddTokenUsage(log, h)
+
+		gt.Number(t, log.InputTokens).Equal(140)
+		gt.Number(t, log.OutputTokens).Equal(27)
+		gt.Number(t, log.LLMCallCount).Equal(4)
+	})
+
+	t.Run("leaves the log untouched when there is no handler", func(t *testing.T) {
+		log := &model.JobRunLog{InputTokens: 100, OutputTokens: 20, LLMCallCount: 3}
+		runtrace.AddTokenUsage(log, nil)
+
+		gt.Number(t, log.InputTokens).Equal(100)
+		gt.Number(t, log.OutputTokens).Equal(20)
+		gt.Number(t, log.LLMCallCount).Equal(3)
+	})
+}
+
 func TestHandler_ToolExec_AppendsToolCallWithParent(t *testing.T) {
 	h, repo := newHandlerFixture(t)
 	ctx := context.Background()

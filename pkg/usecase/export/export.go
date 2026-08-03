@@ -136,7 +136,7 @@ func (e *Exporter) Run(ctx context.Context, targets []Target) error {
 	return errors.Join(errs...)
 }
 
-// exportWorkspace writes all five entity tables for one workspace. Per-table
+// exportWorkspace writes every entity table for one workspace. Per-table
 // failures are collected (not fail-fast) so one bad table does not hide the
 // rest, and are returned joined.
 func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
@@ -186,6 +186,22 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 				errs = append(errs, goerr.Wrap(err, "failed to write actions table"))
 			}
 		}
+
+		// Job runs are Case-scoped and read per Case, so iterating the kept
+		// cases excludes an excluded Case's runs the same way memos are
+		// excluded. Both tables come from one traversal because job_run_logs is
+		// reached through the job_runs summary docs.
+		runs, logs, jobRunErr := e.collectJobRuns(ctx, wsID, cases)
+		if jobRunErr != nil {
+			errs = append(errs, jobRunErr)
+		} else {
+			if err := e.writeTable(ctx, ns, buildJobRunTable(runs)); err != nil {
+				errs = append(errs, goerr.Wrap(err, "failed to write job runs table"))
+			}
+			if err := e.writeTable(ctx, ns, buildJobRunLogTable(logs)); err != nil {
+				errs = append(errs, goerr.Wrap(err, "failed to write job run logs table"))
+			}
+		}
 	}
 
 	// Knowledge / Tag are workspace-level (not Case-scoped), always exported.
@@ -219,6 +235,38 @@ func (e *Exporter) collectMemos(ctx context.Context, wsID string, cases []*model
 		memos = append(memos, ms...)
 	}
 	return memos, nil
+}
+
+// collectJobRuns gathers the per-(case, job) run summaries across the given
+// cases, plus every run log filed under each summary. Both come from the same
+// traversal: JobRunLog is only readable through a JobRunKey, which the summary
+// docs supply.
+//
+// The read cost is one subcollection scan per case plus one per (case, job)
+// pair. Note that every mention-triggered run carries its own fresh JobID (see
+// model.EventTypeMention), so a busy Case contributes one summary doc — and one
+// log query — per mention turn.
+func (e *Exporter) collectJobRuns(ctx context.Context, wsID string, cases []*model.Case) ([]*model.JobRun, []*model.JobRunLog, error) {
+	var runs []*model.JobRun
+	var logs []*model.JobRunLog
+	for _, c := range cases {
+		rs, err := e.repo.JobRun().ListByCase(ctx, wsID, c.ID)
+		if err != nil {
+			return nil, nil, goerr.Wrap(err, "failed to list job runs", goerr.V("case_id", c.ID))
+		}
+		runs = append(runs, rs...)
+		for _, r := range rs {
+			// limit 0 means no limit: the export is a full snapshot, so it must
+			// not silently drop a Job's older runs.
+			ls, err := e.repo.JobRunLog().List(ctx, r.Key(), 0)
+			if err != nil {
+				return nil, nil, goerr.Wrap(err, "failed to list job run logs",
+					goerr.V("case_id", c.ID), goerr.V("job_id", r.JobID))
+			}
+			logs = append(logs, ls...)
+		}
+	}
+	return runs, logs, nil
 }
 
 // filterNonPrivate returns only the cases that are not private.

@@ -343,6 +343,9 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			EventType:       "CASE_OPENED",
 			EventTriggerAt:  triggered,
 			SystemPrompt:    "you are a careful agent",
+			InputTokens:     4200,
+			OutputTokens:    360,
+			LLMCallCount:    9,
 		}
 		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
 
@@ -362,6 +365,9 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, got.EventType).Equal("CASE_OPENED")
 		gt.Bool(t, got.EventTriggerAt.Equal(triggered)).True()
 		gt.String(t, got.SystemPrompt).Equal("you are a careful agent")
+		gt.Number(t, got.InputTokens).Equal(4200)
+		gt.Number(t, got.OutputTokens).Equal(360)
+		gt.Number(t, got.LLMCallCount).Equal(9)
 	})
 
 	t.Run("Create rejects duplicate (key, runID)", func(t *testing.T) {

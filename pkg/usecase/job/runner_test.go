@@ -17,6 +17,7 @@ import (
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -628,6 +629,12 @@ func TestJobRunner_GoldenPath(t *testing.T) {
 	gt.String(t, log.EventType).Equal(string(model.JobEventDomainCase))
 	gt.Bool(t, log.EventTriggerAt.Equal(triggeredAt.UTC())).True()
 	gt.String(t, log.SystemPrompt).NotEqual("")
+	// The run's token totals come from the single LLM call the fixture LLM
+	// serves (120 in / 60 out), summed by the trace handler and stamped on the
+	// log before Finish.
+	gt.Number(t, log.InputTokens).Equal(120)
+	gt.Number(t, log.OutputTokens).Equal(60)
+	gt.Number(t, log.LLMCallCount).Equal(1)
 
 	// Assert event list: LLM_REQUEST -> LLM_RESPONSE -> TOOL_CALL.
 	events, err := repo.JobRunEvent().List(ctx, key, runID)
@@ -702,6 +709,144 @@ var traceLLMCallDataForTest = trace.LLMCallData{
 			{ID: "fc-1", Name: "slack_search", Arguments: map[string]any{"q": "foo"}},
 		},
 	},
+}
+
+// interactiveScriptedExecutor drives both halves of an interactive run without
+// a live LLM. gollem's trace hooks are invoked by the provider clients, not by
+// the agent loop, so a mock LLMClient never reaches EndLLMCall — this fake
+// stands in by emitting a known LLMCallData through the trace handler the
+// runner supplied, then asking the user via the runner's Interactor.
+type interactiveScriptedExecutor struct {
+	// firstTokens / secondTokens are emitted through the trace handler on the
+	// pre-question turn and the resumed turn respectively.
+	firstTokens  trace.LLMCallData
+	secondTokens trace.LLMCallData
+}
+
+func (e *interactiveScriptedExecutor) emit(ctx context.Context, req jobagent.ExecuteRequest, data *trace.LLMCallData) error {
+	h, ok := req.TraceHandler.(*job.JobRunTraceHandlerForTest)
+	if !ok {
+		return errors.New("interactiveScriptedExecutor: TraceHandler is not the job run trace handler")
+	}
+	h.EndLLMCall(h.StartLLMCall(ctx), data, nil)
+	return nil
+}
+
+func (e *interactiveScriptedExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	if err := e.emit(ctx, req, &e.firstTokens); err != nil {
+		return nil, err
+	}
+	if req.Interactor == nil {
+		return nil, errors.New("interactiveScriptedExecutor: no interactor wired")
+	}
+	out, err := req.Interactor.Solicit(ctx, interaction.Request{
+		Reason: "which environment?",
+		Items: []interaction.Item{
+			{ID: "env", Text: "Which environment?", Type: interaction.ItemSelect, Options: []string{"prod", "stg"}},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !out.Paused {
+		return nil, errors.New("interactiveScriptedExecutor: expected the solicit to pause the run")
+	}
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusAwaitingInput}, nil
+}
+
+func (e *interactiveScriptedExecutor) Resume(ctx context.Context, req jobagent.ExecuteRequest, _ model.PendingInteraction, _ []interaction.Answer) (*jobagent.ExecuteResult, error) {
+	if err := e.emit(ctx, req, &e.secondTokens); err != nil {
+		return nil, err
+	}
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+// TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume pins the token
+// accounting across a suspend/resume boundary. The resumed turn builds a FRESH
+// trace handler, so the suspended turn's tokens survive only because Solicit
+// persists them and finishRun adds to the persisted value instead of
+// overwriting it. Without both halves the run under-reports its cost.
+func TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-interactive-tokens"
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+	j := &model.Job{
+		ID:          "interactive_tokens",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	gt.NoError(t, j.Validate()).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      []*model.Job{j},
+	})
+
+	exec := &interactiveScriptedExecutor{
+		firstTokens:  trace.LLMCallData{Model: "m", InputTokens: 500, OutputTokens: 70},
+		secondTokens: trace.LLMCallData{Model: "m", InputTokens: 300, OutputTokens: 25},
+	}
+	poster := &fakeQuestionPoster{returnTS: "FORM-TS-1"}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:              repo,
+		Registry:          registry,
+		LLMClient:         inertLLM(),
+		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+		InteractionPoster: poster,
+		NewRunID:          func() string { return "RUN-1" },
+		NewTraceID:        func() string { return "TRACE-1" },
+		Clock:             func() time.Time { return now },
+	})
+
+	// --- Turn 1: the run suspends at the question ------------------------
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     now.Add(-time.Second),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	suspended, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, suspended.Stage).Equal(model.JobRunStageAwaitingInput)
+	// The pre-question turn's tokens are persisted at the suspend, not deferred
+	// to the terminal write.
+	gt.Number(t, suspended.InputTokens).Equal(500)
+	gt.Number(t, suspended.OutputTokens).Equal(70)
+	gt.Number(t, suspended.LLMCallCount).Equal(1)
+
+	// --- Turn 2: the user answers and the run resumes to completion ------
+	gt.Array(t, poster.posts).Length(1).Required()
+	refValue := submitValueFromBlocks(t, poster.posts[0].blocks)
+	callback := &goslack.InteractionCallback{
+		BlockActionState: &goslack.BlockActionStates{
+			Values: map[string]map[string]goslack.BlockAction{
+				"job_question_item:env": {
+					"job_question_choice": {SelectedOption: goslack.OptionBlockObject{Value: "prod"}},
+				},
+			},
+		},
+	}
+	callback.Channel.ID = "C-CASE"
+	callback.Message.Timestamp = "FORM-TS-1"
+	gt.NoError(t, runner.HandleQuestionSubmit(ctx, callback, &goslack.BlockAction{Value: refValue})).Required()
+
+	final, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, final.Stage).Equal(model.JobRunStageSuccess)
+	// Both halves are billed to the same record: 500+300 in, 70+25 out, 2 calls.
+	gt.Number(t, final.InputTokens).Equal(800)
+	gt.Number(t, final.OutputTokens).Equal(95)
+	gt.Number(t, final.LLMCallCount).Equal(2)
 }
 
 // TestJobRunner_LLMFailure_AppendsRunErrorAndFails verifies that when
@@ -1027,10 +1172,22 @@ func TestJobRunner_WorkspaceLoadFailure_NoLog(t *testing.T) {
 type fakeReflector struct {
 	calls []jobagent.ReflectRequest
 	err   error
+	// emitTokens, when non-nil, is pushed through the trace handler the runner
+	// handed to the reflection pass. It stands in for the reflection agent's own
+	// LLM calls, which a mock LLMClient never reports (gollem's trace hooks live
+	// in the provider clients, not the agent loop).
+	emitTokens *trace.LLMCallData
 }
 
-func (f *fakeReflector) Reflect(_ context.Context, req jobagent.ReflectRequest) error {
+func (f *fakeReflector) Reflect(ctx context.Context, req jobagent.ReflectRequest) error {
 	f.calls = append(f.calls, req)
+	if f.emitTokens != nil {
+		h, ok := req.TraceHandler.(*job.JobRunTraceHandlerForTest)
+		if !ok {
+			return errors.New("fakeReflector: TraceHandler is not the job run trace handler")
+		}
+		h.EndLLMCall(h.StartLLMCall(ctx), f.emitTokens, nil)
+	}
 	return f.err
 }
 
@@ -1039,10 +1196,20 @@ func (f *fakeReflector) Reflect(_ context.Context, req jobagent.ReflectRequest) 
 // maybeReflect skips reflection when the loaded history is nil.
 type historyWritingExecutor struct {
 	calls atomic.Int32
+	// emitTokens, when non-nil, is pushed through the run's trace handler so a
+	// test can distinguish the executor's token usage from the reflection pass's.
+	emitTokens *trace.LLMCallData
 }
 
 func (e *historyWritingExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
 	e.calls.Add(1)
+	if e.emitTokens != nil {
+		h, ok := req.TraceHandler.(*job.JobRunTraceHandlerForTest)
+		if !ok {
+			return nil, errors.New("historyWritingExecutor: TraceHandler is not the job run trace handler")
+		}
+		h.EndLLMCall(h.StartLLMCall(ctx), e.emitTokens, nil)
+	}
 	if req.HistoryRepository != nil && req.HistoryKey != "" {
 		// Save a minimal non-nil history so maybeReflect can load it.
 		if err := req.HistoryRepository.Save(ctx, req.HistoryKey, &gollem.History{
@@ -1116,6 +1283,33 @@ func TestJobRunner_Reflection_CalledOnSuccess(t *testing.T) {
 	gt.Number(t, fake.calls[0].CaseID).Equal(c.ID)
 	gt.String(t, fake.calls[0].JobID).Equal(j.ID)
 	gt.Value(t, fake.calls[0].History).NotNil()
+}
+
+// TestJobRunner_Reflection_TokensIncludeReflectionPass pins that the run's
+// persisted token totals cover the reflection agent too. Reflection shares the
+// run's trace handler and runs AFTER the executor returns, so reading the
+// totals any earlier than the terminal write would silently drop its calls.
+func TestJobRunner_Reflection_TokensIncludeReflectionPass(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-reflect-tokens"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{emitTokens: &trace.LLMCallData{Model: "m", InputTokens: 40, OutputTokens: 9}}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{emitTokens: &trace.LLMCallData{Model: "m", InputTokens: 200, OutputTokens: 30}}
+
+	gt.NoError(t, runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)).Required()
+	gt.Array(t, fake.calls).Length(1).Required()
+
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	logs, err := repo.JobRunLog().List(ctx, key, 0)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	// The executor's call (200/30) plus the reflection call (40/9).
+	gt.Number(t, logs[0].InputTokens).Equal(240)
+	gt.Number(t, logs[0].OutputTokens).Equal(39)
+	gt.Number(t, logs[0].LLMCallCount).Equal(2)
 }
 
 // TestJobRunner_Reflection_SkippedWhenFlagFalse verifies that a job with

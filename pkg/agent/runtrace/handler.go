@@ -106,6 +106,20 @@ type Handler struct {
 	phase              string // current phase label; default "execute"
 	agentLabel         string // current sub-agent label
 	lastLLMResponseSeq int64  // most recent LLM_RESPONSE Sequence (for TOOL_CALL parents)
+	usage              tokenUsage
+}
+
+// tokenUsage is the running token total across every LLM call a Handler saw.
+// planexec wires the SAME handler into the planner and all parallel
+// sub-agents, so one Handler's totals cover the whole turn — including
+// sub-agent calls that happen concurrently, which is why the counters are
+// guarded by the handler mutex.
+type tokenUsage struct {
+	InputTokens  int64
+	OutputTokens int64
+	// Calls is the number of LLM calls counted. Zero distinguishes "never
+	// reached the model" from "the provider reported no token usage".
+	Calls int64
 }
 
 var _ trace.Handler = (*Handler)(nil)
@@ -188,10 +202,41 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	h.append(ctx, respEv)
 
 	// Track the response Sequence so subsequent TOOL_CALL events can point
-	// ParentSequence at it.
+	// ParentSequence at it, and fold this call's tokens into the run total.
 	h.mu.Lock()
 	h.lastLLMResponseSeq = respEv.Sequence
+	h.usage.InputTokens += respEv.LLMResponse.InputTokens
+	h.usage.OutputTokens += respEv.LLMResponse.OutputTokens
+	h.usage.Calls++
 	h.mu.Unlock()
+}
+
+// tokenUsage returns the tokens counted so far by THIS handler. It is a
+// per-handler delta, not the run's lifetime total: a resumed run builds a
+// fresh handler, so the caller adds this to whatever the persisted log
+// already carries (see AddTokenUsage).
+func (h *Handler) tokenUsage() tokenUsage {
+	if h == nil {
+		return tokenUsage{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.usage
+}
+
+// AddTokenUsage folds the handler's counted tokens into the run log. Callers
+// invoke it once per handler, immediately before persisting the log
+// (Suspend / Finish), so a suspended turn's tokens survive into the resumed
+// turn's totals. Both arguments may be nil (the resume prepare-failure path
+// has no handler), in which case the log is left untouched.
+func AddTokenUsage(log *model.JobRunLog, h *Handler) {
+	if log == nil || h == nil {
+		return
+	}
+	u := h.tokenUsage()
+	log.InputTokens += u.InputTokens
+	log.OutputTokens += u.OutputTokens
+	log.LLMCallCount += u.Calls
 }
 
 // StartToolExec caches the tool name + args + start timestamp on a

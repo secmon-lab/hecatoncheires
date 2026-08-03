@@ -8,7 +8,7 @@ current state rather than accumulating history.
 - One **BigQuery dataset per workspace** (schemas differ per workspace because
   custom fields differ, and dataset-level IAM keeps access separated).
 - One **table per entity** within each dataset: `cases`, `actions`, `memos`,
-  `knowledge`, `tags`.
+  `job_runs`, `job_run_logs`, `knowledge`, `tags`.
 - Per-workspace **custom fields** are expanded into typed `field_<id>` columns.
 - Schema changes are detected and applied **in place** (columns are added; the
   table is never dropped/recreated), so downstream views and column ACLs
@@ -83,8 +83,36 @@ dataset names must be unique.
 | `cases` | non-draft Cases | drafts excluded; `field_<id>` per workspace field; private cases excluded unless `include_private` |
 | `actions` | Actions (archived included) | only actions whose parent Case is exported |
 | `memos` | Memos (archived included) | `field_<id>` per workspace memo field; only memos of exported cases |
+| `job_runs` | Latest run state per (case, job) | only runs of exported cases |
+| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt and token totals |
 | `knowledge` | Knowledge | workspace-level; embedding vector excluded |
 | `tags` | Tags | workspace-level |
+
+### Agent run tables
+
+`job_runs` and `job_run_logs` are Case-scoped and follow the same privacy rule
+as Actions and Memos: a Case excluded from the export (a draft, or a private Case
+when `include_private` is off) contributes no rows to either table, so its
+prompts, errors and token counts never reach BigQuery.
+
+Join them on `(workspace_id, case_id, job_id)`; `job_run_logs` is keyed by
+`(workspace_id, case_id, job_id, run_id)`.
+
+`job_run_logs` is not limited to TOML-configured Jobs — every case-scoped agent
+run lands there, including Slack mentions handled by the case agent. The
+`event_type` column discriminates them: mention runs carry `mention` (and a fresh
+per-turn `job_id`), while Job runs carry their triggering event domain (`case`,
+`scheduled`, `manual`).
+
+`input_tokens` / `output_tokens` / `llm_call_count` are the run's totals across
+every LLM call it made — planner, sub-agents and the reflection pass included —
+accumulated while the run executes and stored on the run record. Interactive runs
+that paused for a question accumulate across both turns. **Runs that finished
+before these columns existed report zero; there is no backfill.** Per-call token
+figures are not exported (they live on the Firestore event timeline).
+
+`pending_interaction` (the question form of a run sitting at `AWAITING_INPUT`) is
+deliberately not exported: it is transient state with no scalar representation.
 
 Custom field column types: `text` / `markdown` / `url` / `select` / `user` /
 `case_ref` → `STRING`; `number` → `FLOAT64`; `multi-*` → `ARRAY<STRING>`;

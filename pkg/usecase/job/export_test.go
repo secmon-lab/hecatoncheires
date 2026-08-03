@@ -21,9 +21,10 @@ func NewJobInteractorForTest(
 	key model.JobRunKey,
 	runID, channelID, threadTS, requesterUserID string,
 	runningLog *model.JobRunLog,
+	handler *runtrace.Handler,
 	now func() time.Time,
 ) *JobInteractor {
-	return newJobInteractor(repo, poster, key, runID, channelID, threadTS, requesterUserID, runningLog, now)
+	return newJobInteractor(repo, poster, key, runID, channelID, threadTS, requesterUserID, runningLog, handler, now)
 }
 
 // ParseJobQuestionAnswersForTest exposes parseJobQuestionAnswers.

@@ -75,10 +75,44 @@ func hasColumn(t *export.Table, name string) bool {
 	return false
 }
 
+// seedJobRun files one finished agent run against the given case: a SUCCESS
+// JobRunLog carrying token totals plus the JobRun summary doc that
+// JobRun().ListByCase surfaces (the export reaches the logs through it).
+func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID int64, jobID string, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: caseID, JobID: jobID}
+	log := &model.JobRunLog{
+		WorkspaceID:    wsID,
+		CaseID:         caseID,
+		JobID:          jobID,
+		RunID:          "run-" + jobID,
+		TraceID:        "trace-" + jobID,
+		Stage:          model.JobRunStageRunning,
+		StartedAt:      now,
+		ExecutorKind:   model.ExecutorKindPlanexec,
+		EventType:      "case",
+		EventTriggerAt: now,
+		SystemPrompt:   "you are the job agent",
+	}
+	gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+
+	log.Stage = model.JobRunStageSuccess
+	log.EndedAt = now.Add(time.Minute)
+	log.InputTokens = 1500
+	log.OutputTokens = 210
+	log.LLMCallCount = 4
+	gt.NoError(t, repo.JobRunLog().Finish(ctx, log)).Required()
+	gt.NoError(t, repo.JobRun().RecordRun(ctx, key,
+		model.JobRunStatusSuccess, log.EndedAt, log.RunID, log.TraceID, "")).Required()
+}
+
 // seededWorkspace builds a WorkspaceEntry and seeds a memory repository with a
 // normal case, a private case, a draft case, one action per non-draft case, one
-// memo per non-draft case, one tag, and one knowledge entry.
-func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry, string, int64, int64) {
+// memo per non-draft case, one finished job run per case (the draft included, so
+// the tests can prove its runs are dropped rather than merely absent), one tag,
+// and one knowledge entry. It returns the normal, private and draft case ids.
+func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry, string, int64, int64, int64) {
 	t.Helper()
 	ctx := context.Background()
 	repo := memory.New()
@@ -126,7 +160,7 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 	})
 	gt.NoError(t, err).Required()
 
-	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+	draft, err := repo.Case().Create(ctx, wsID, &model.Case{
 		Title:      "Draft",
 		Status:     types.CaseStatusDraft,
 		ReporterID: "U3",
@@ -155,6 +189,13 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 		gt.NoError(t, err).Required()
 	}
 
+	// One finished job run per case. The draft gets one too: without it, an empty
+	// job_runs row set could mean either "the draft's runs were dropped" or
+	// "the draft never ran".
+	seedJobRun(t, repo, wsID, normal.ID, "triage", now)
+	seedJobRun(t, repo, wsID, private.ID, "triage", now)
+	seedJobRun(t, repo, wsID, draft.ID, "triage", now)
+
 	tag, err := repo.Tag().Create(ctx, wsID, &model.Tag{
 		ID: model.NewTagID(), WorkspaceID: wsID, Name: "urgent",
 		CreatedAt: now, UpdatedAt: now,
@@ -168,12 +209,12 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 	})
 	gt.NoError(t, err).Required()
 
-	return repo, entry, wsID, normal.ID, private.ID
+	return repo, entry, wsID, normal.ID, private.ID, draft.ID
 }
 
 func TestExporter_Run_full(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, normalID, privateID := seededWorkspace(t)
+	repo, entry, _, normalID, privateID, draftID := seededWorkspace(t)
 	sink := newFakeSink()
 
 	err := export.New(repo, sink).Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})
@@ -210,6 +251,32 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.True(t, hasColumn(memos, "field_note"))
 	gt.Value(t, memos.Rows[0]["field_note"]).Equal("hello")
 
+	// Job runs: one summary + one log per non-draft case.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Array(t, jobRuns.Rows).Length(2)
+	normalRunRow := findRow(jobRuns, "case_id", normalID)
+	gt.Value(t, normalRunRow).NotNil().Required()
+	gt.Value(t, normalRunRow["job_id"]).Equal("triage")
+	gt.Value(t, normalRunRow["last_status"]).Equal("SUCCESS")
+	gt.Value(t, normalRunRow["last_run_id"]).Equal("run-triage")
+	gt.Value(t, findRow(jobRuns, "case_id", privateID)).NotNil()
+	// The draft case ran a job too, and its run is excluded along with the case.
+	gt.True(t, findRow(jobRuns, "case_id", draftID) == nil)
+
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Array(t, jobRunLogs.Rows).Length(2)
+	gt.True(t, findRow(jobRunLogs, "case_id", draftID) == nil)
+	normalLogRow := findRow(jobRunLogs, "case_id", normalID)
+	gt.Value(t, normalLogRow).NotNil().Required()
+	gt.Value(t, normalLogRow["run_id"]).Equal("run-triage")
+	gt.Value(t, normalLogRow["stage"]).Equal("SUCCESS")
+	gt.Value(t, normalLogRow["executor_kind"]).Equal(model.ExecutorKindPlanexec)
+	gt.Value(t, normalLogRow["event_type"]).Equal("case")
+	gt.Value(t, normalLogRow["system_prompt"]).Equal("you are the job agent")
+	gt.Value(t, normalLogRow["input_tokens"]).Equal(int64(1500))
+	gt.Value(t, normalLogRow["output_tokens"]).Equal(int64(210))
+	gt.Value(t, normalLogRow["llm_call_count"]).Equal(int64(4))
+
 	// Knowledge / Tag.
 	knowledge := sink.table("ds", "knowledge")
 	gt.Array(t, knowledge.Rows).Length(1)
@@ -222,7 +289,7 @@ func TestExporter_Run_full(t *testing.T) {
 
 func TestExporter_Run_excludePrivate(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, normalID, privateID := seededWorkspace(t)
+	repo, entry, _, normalID, privateID, draftID := seededWorkspace(t)
 	sink := newFakeSink()
 
 	err := export.New(repo, sink).Run(ctx, []export.Target{{Entry: entry, Namespace: "ds", ExcludePrivate: true}})
@@ -244,6 +311,20 @@ func TestExporter_Run_excludePrivate(t *testing.T) {
 	gt.Array(t, memos.Rows).Length(1)
 	gt.Value(t, memos.Rows[0]["case_id"]).Equal(normalID)
 
+	// Job runs / run logs: the private case's run is dropped, so neither its
+	// summary nor its prompts and token counts reach BigQuery.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Array(t, jobRuns.Rows).Length(1)
+	gt.Value(t, jobRuns.Rows[0]["case_id"]).Equal(normalID)
+	gt.True(t, findRow(jobRuns, "case_id", privateID) == nil)
+	gt.True(t, findRow(jobRuns, "case_id", draftID) == nil)
+
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Array(t, jobRunLogs.Rows).Length(1)
+	gt.Value(t, jobRunLogs.Rows[0]["case_id"]).Equal(normalID)
+	gt.True(t, findRow(jobRunLogs, "case_id", privateID) == nil)
+	gt.True(t, findRow(jobRunLogs, "case_id", draftID) == nil)
+
 	// Knowledge / Tag are workspace-level and always exported.
 	gt.Array(t, sink.table("ds", "knowledge").Rows).Length(1)
 	gt.Array(t, sink.table("ds", "tags").Rows).Length(1)
@@ -251,7 +332,7 @@ func TestExporter_Run_excludePrivate(t *testing.T) {
 
 func TestExporter_Run_collectsErrorsAndContinues(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, _, _ := seededWorkspace(t)
+	repo, entry, _, _, _, _ := seededWorkspace(t)
 	sink := newFakeSink()
 	sink.failOn["cases"] = true
 
@@ -261,6 +342,8 @@ func TestExporter_Run_collectsErrorsAndContinues(t *testing.T) {
 	// Remaining tables are still written despite the cases failure.
 	gt.Value(t, sink.table("ds", "cases")).Nil()
 	gt.Value(t, sink.table("ds", "actions")).NotNil()
+	gt.Value(t, sink.table("ds", "job_runs")).NotNil()
+	gt.Value(t, sink.table("ds", "job_run_logs")).NotNil()
 	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
 	gt.Value(t, sink.table("ds", "tags")).NotNil()
 }
@@ -317,12 +400,12 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	// Unique per-run table names within the shared, pre-provisioned dataset.
 	prefix := fmt.Sprintf("export_it_%d_", time.Now().UnixNano())
 	tbl := func(name string) string { return prefix + name }
-	for _, name := range []string{"cases", "actions", "memos", "knowledge", "tags"} {
+	for _, name := range []string{"cases", "actions", "memos", "job_runs", "job_run_logs", "knowledge", "tags"} {
 		table := tbl(name)
 		t.Cleanup(func() { _ = client.Dataset(dataset).Table(table).Delete(ctx) })
 	}
 
-	repo, entry, wsID, normalID, privateID := seededWorkspace(t)
+	repo, entry, wsID, normalID, privateID, _ := seededWorkspace(t)
 	targets := []export.Target{{Entry: entry, Namespace: dataset}}
 	exporter := export.New(repo, sink, export.WithTablePrefix(prefix))
 
@@ -339,6 +422,19 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("memos"))).Length(2)
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("tags"))).Length(1)
 
+	// Job runs: one summary + one log per non-draft case, with the token totals
+	// read back through the real BigQuery INT64 columns.
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_runs"))).Length(2)
+	jobLogRows := readAllRows(t, ctx, client, dataset, tbl("job_run_logs"))
+	gt.Array(t, jobLogRows).Length(2).Required()
+	for _, r := range jobLogRows {
+		gt.Value(t, r["stage"]).Equal("SUCCESS")
+		gt.Value(t, r["run_id"]).Equal("run-triage")
+		gt.Value(t, r["input_tokens"]).Equal(int64(1500))
+		gt.Value(t, r["output_tokens"]).Equal(int64(210))
+		gt.Value(t, r["llm_call_count"]).Equal(int64(4))
+	}
+
 	// Second run: full refresh — the row count must not double.
 	gt.NoError(t, exporter.Run(ctx, targets)).Required()
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("cases"))).Length(2)
@@ -350,6 +446,8 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, privateFiltered).Length(1)
 	gt.Value(t, findRowByID(privateFiltered, privateID)).Nil()
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("actions"))).Length(1)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_runs"))).Length(1)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_logs"))).Length(1)
 
 	// Schema evolution: add a field, set it on the normal case, re-run. The new
 	// column must appear (evolved in place) and carry the value. The append right

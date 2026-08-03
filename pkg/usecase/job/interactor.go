@@ -11,6 +11,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -102,7 +103,11 @@ type JobInteractor struct {
 	// runningLog is the Stage=RUNNING JobRunLog created at run start; Solicit
 	// transitions a copy of it to AWAITING_INPUT.
 	runningLog *model.JobRunLog
-	now        func() time.Time
+	// handler is this turn's trace handler. Solicit folds its token counts into
+	// the suspended log so the pre-question turn's usage is not lost: the
+	// resumed turn builds a fresh handler and adds to the persisted totals.
+	handler *runtrace.Handler
+	now     func() time.Time
 }
 
 // newJobInteractor builds the per-run interactor. The caller (JobRunner)
@@ -114,6 +119,7 @@ func newJobInteractor(
 	key model.JobRunKey,
 	runID, channelID, threadTS, requesterUserID string,
 	runningLog *model.JobRunLog,
+	handler *runtrace.Handler,
 	now func() time.Time,
 ) *JobInteractor {
 	if now == nil {
@@ -128,6 +134,7 @@ func newJobInteractor(
 		threadTS:        threadTS,
 		requesterUserID: requesterUserID,
 		runningLog:      runningLog,
+		handler:         handler,
 		now:             now,
 	}
 }
@@ -183,6 +190,10 @@ func (i *JobInteractor) Solicit(ctx context.Context, req interaction.Request) (i
 	suspendLog := *i.runningLog
 	suspendLog.Stage = model.JobRunStageAwaitingInput
 	suspendLog.PendingInteraction = pending
+	// Persist the tokens this turn burned before pausing. The totals go on the
+	// copy, not on runningLog: the resumed turn re-reads the log from storage,
+	// so double-counting would follow from mutating the shared pointer here.
+	runtrace.AddTokenUsage(&suspendLog, i.handler)
 	if err := i.repo.JobRunLog().Suspend(ctx, &suspendLog); err != nil {
 		return interaction.Outcome{}, goerr.Wrap(err, "suspend job run log",
 			goerr.V("job_id", i.key.JobID), goerr.V("run_id", i.runID))

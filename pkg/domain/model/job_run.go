@@ -232,6 +232,25 @@ type JobRunLog struct {
 	// Truncated from the tail to MaxInlineBytes if longer.
 	SystemPrompt string
 
+	// Token usage totals for the whole Run, summed over every LLM call the
+	// run made (planner, sub-agents and reflection alike). The per-call
+	// figures live on JobRunEvent.LLMResponse; these totals are accumulated
+	// by runtrace.Handler and stamped onto the log by the run's owner right
+	// before Suspend / Finish, so a consumer (the BigQuery export, the run
+	// detail UI) gets the run's cost without reading the event timeline.
+	//
+	// They accumulate ACROSS turns of an interactive Run: the suspending
+	// turn persists its own totals, and the resumed turn adds to them (see
+	// runtrace.AddTokenUsage). Runs recorded before these fields existed
+	// stay at zero — there is no backfill.
+	InputTokens  int64
+	OutputTokens int64
+	// LLMCallCount is the number of LLM calls the run made. It makes a zero
+	// token total interpretable: zero calls means the run never reached the
+	// model, whereas calls with zero tokens means the provider reported no
+	// usage.
+	LLMCallCount int64
+
 	// PendingInteraction is set ONLY while Stage == AWAITING_INPUT: it holds
 	// the question put to the user and the Slack message coordinates needed
 	// to update the form in place on resume. It MUST be nil in every other
@@ -311,6 +330,18 @@ func (l *JobRunLog) Validate() error {
 	if len(l.SystemPrompt) > MaxInlineBytes {
 		return goerr.New("system prompt exceeds MaxInlineBytes (truncate before save)",
 			goerr.V("len", len(l.SystemPrompt)))
+	}
+	// Token totals are monotonic counters; a negative value means an
+	// accumulator was mis-wired (e.g. a subtraction, or a provider figure
+	// coerced from an unsigned type that wrapped).
+	if l.InputTokens < 0 {
+		return goerr.New("input tokens is negative", goerr.V("input_tokens", l.InputTokens))
+	}
+	if l.OutputTokens < 0 {
+		return goerr.New("output tokens is negative", goerr.V("output_tokens", l.OutputTokens))
+	}
+	if l.LLMCallCount < 0 {
+		return goerr.New("llm call count is negative", goerr.V("llm_call_count", l.LLMCallCount))
 	}
 	return nil
 }
