@@ -1664,7 +1664,7 @@ func (r *queryResolver) CaseJobs(ctx context.Context, workspaceID string, caseID
 	}
 	out := make([]*graphql1.CaseJob, 0, len(jobs))
 	for _, j := range jobs {
-		out = append(out, toGraphQLCaseJob(j))
+		out = append(out, toGraphQLCaseJob(j, workspaceID))
 	}
 	return out, nil
 }

@@ -5,6 +5,7 @@ import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { I18nProvider } from '../i18n'
 import { GET_HOME_MESSAGE, GET_MY_OPEN_CASES, GET_MY_DUE_ACTIONS } from '../graphql/dashboard'
+import { createCache } from '../graphql/cache'
 import { toRFC3339WithOffset } from '../utils/time'
 import Home from './Home'
 
@@ -104,6 +105,7 @@ function caseRow(overrides: Partial<{
     case: {
       __typename: 'Case',
       id,
+      workspaceId,
       title,
       status: 'OPEN',
       assigneeIDs: assignees.map((a) => a.id),
@@ -140,6 +142,7 @@ function actionRow(overrides: Partial<{
     action: {
       __typename: 'Action',
       id,
+      workspaceId,
       title,
       status: 'TODO',
       dueDate,
@@ -383,5 +386,80 @@ describe('Home', () => {
 
     fireEvent.click(screen.getByTestId('workspace-favorite-risk'))
     expect(toggleFavorite).toHaveBeenCalledWith('risk')
+  })
+
+  // Case/Action ids are per-workspace counters, so the Home aggregation can
+  // legitimately return the same id twice. This runs against the production
+  // cache (renderHome's addTypename={false} disables normalization entirely,
+  // which is exactly why the bug shipped unnoticed).
+  it('keeps each row distinct when two workspaces return the same case id', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <MockedProvider
+          cache={createCache()}
+          mocks={[
+            homeMessageMock('Hi'),
+            openCasesMock([
+              caseRow({ id: 12, title: 'Risk case twelve', workspaceId: 'risk', workspaceName: 'Risk' }),
+              caseRow({
+                id: 12,
+                title: 'Support case twelve',
+                workspaceId: 'support',
+                workspaceName: 'Support',
+                assignees: [
+                  { __typename: 'SlackUser', id: 'U9', name: 'zoe', realName: 'Zoe Poe', imageUrl: null },
+                ],
+              }),
+            ]),
+            dueActionsMock([]),
+          ]}
+        >
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/" element={<Home />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+    const rows = await screen.findAllByTestId('home-case-row')
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]).getByText('Risk case twelve')).toBeInTheDocument()
+    expect(within(rows[0]).getByTitle('Alice Doe')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('Support case twelve')).toBeInTheDocument()
+    expect(within(rows[1]).getByTitle('Zoe Poe')).toBeInTheDocument()
+  })
+
+  it('keeps each due-action row distinct when two workspaces return the same action id', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <MockedProvider
+          cache={createCache()}
+          mocks={[
+            homeMessageMock('Hi'),
+            openCasesMock([]),
+            dueActionsMock([
+              actionRow({ id: 7, title: 'Risk action seven', workspaceId: 'risk', workspaceName: 'Risk' }),
+              actionRow({
+                id: 7,
+                title: 'Support action seven',
+                workspaceId: 'support',
+                workspaceName: 'Support',
+              }),
+            ]),
+          ]}
+        >
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/" element={<Home />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+    const rows = await screen.findAllByTestId('home-action-row')
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]).getByText('Risk action seven')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('Support action seven')).toBeInTheDocument()
   })
 })

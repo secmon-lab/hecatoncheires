@@ -61,6 +61,7 @@ type ComplexityRoot struct {
 		Steps          func(childComplexity int) int
 		Title          func(childComplexity int) int
 		UpdatedAt      func(childComplexity int) int
+		WorkspaceID    func(childComplexity int) int
 	}
 
 	ActionConfig struct {
@@ -155,6 +156,7 @@ type ComplexityRoot struct {
 		Status                func(childComplexity int) int
 		Title                 func(childComplexity int) int
 		UpdatedAt             func(childComplexity int) int
+		WorkspaceID           func(childComplexity int) int
 	}
 
 	CaseJob struct {
@@ -165,6 +167,7 @@ type ComplexityRoot struct {
 		Quiet       func(childComplexity int) int
 		Strategy    func(childComplexity int) int
 		Trigger     func(childComplexity int) int
+		WorkspaceID func(childComplexity int) int
 	}
 
 	CaseRef struct {
@@ -870,6 +873,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Action.UpdatedAt(childComplexity), true
+	case "Action.workspaceId":
+		if e.ComplexityRoot.Action.WorkspaceID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Action.WorkspaceID(childComplexity), true
 
 	case "ActionConfig.closed":
 		if e.ComplexityRoot.ActionConfig.Closed == nil {
@@ -1296,6 +1305,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Case.UpdatedAt(childComplexity), true
+	case "Case.workspaceId":
+		if e.ComplexityRoot.Case.WorkspaceID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Case.WorkspaceID(childComplexity), true
 
 	case "CaseJob.description":
 		if e.ComplexityRoot.CaseJob.Description == nil {
@@ -1339,6 +1354,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.CaseJob.Trigger(childComplexity), true
+	case "CaseJob.workspaceId":
+		if e.ComplexityRoot.CaseJob.WorkspaceID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CaseJob.WorkspaceID(childComplexity), true
 
 	case "CaseRef.id":
 		if e.ComplexityRoot.CaseRef.ID == nil {
@@ -3726,6 +3747,12 @@ enum FieldType {
   MARKDOWN
 }
 
+# FieldOption and FieldDefinition are configuration value objects, not
+# entities: ` + "`" + `id` + "`" + ` is a config key that is only meaningful inside the enclosing
+# configuration document. The same id is reused across workspaces AND across
+# the two independent field configurations (FieldConfiguration.fields for
+# Cases, MemoConfiguration.fields for Memos), so no combination of fields
+# here identifies one globally. Clients MUST NOT cache these by identity.
 type FieldOption {
   id: String!
   name: String!
@@ -3766,6 +3793,11 @@ type FieldConfiguration {
 # operator in whatever language they prefer. ` + "`" + `color` + "`" + ` is either a semantic
 # preset name or a #RRGGBB hex code. See the user-facing config docs for
 # the accepted preset list.
+# Like FieldDefinition, this is a configuration value object rather than an
+# entity: the same id ("TODO") is defined independently per workspace and,
+# within one workspace, separately for Actions (fieldConfiguration.action-
+# Config) and for thread-mode Cases (caseStatusConfig). Clients MUST NOT
+# cache these by identity.
 type ActionStatusDefinition {
   id: ID!
   name: String!
@@ -3848,6 +3880,10 @@ type ChannelUserConnection {
 # Entity types
 type Case {
   id: Int!
+  # workspaceId scopes id: Case ids come from a per-workspace counter, so
+  # (workspaceId, id) — not id alone — identifies a Case. Clients that cache
+  # by identity MUST key on both.
+  workspaceId: String!
   title: String!
   description: String
   status: CaseStatus!
@@ -3895,6 +3931,9 @@ type Case {
 
 type Action {
   id: Int!
+  # workspaceId scopes id, exactly as on Case: Action ids come from a
+  # per-workspace counter, so (workspaceId, id) identifies an Action.
+  workspaceId: String!
   caseID: Int!
   case: Case
   title: String!
@@ -4721,6 +4760,9 @@ type JobTrigger {
 # (see Query.caseJobs).
 type CaseJob {
   id: String!
+  # workspaceId scopes id: Job ids are workspace-unique kebab-case keys from
+  # the workspace's TOML config, not global identifiers.
+  workspaceId: String!
   name: String!
   description: String!
   strategy: JobStrategy!
@@ -4867,6 +4909,8 @@ func (ec *executionContext) childFields_Action(ctx context.Context, field graphq
 	switch field.Name {
 	case "id":
 		return ec.fieldContext_Action_id(ctx, field)
+	case "workspaceId":
+		return ec.fieldContext_Action_workspaceId(ctx, field)
 	case "caseID":
 		return ec.fieldContext_Action_caseID(ctx, field)
 	case "case":
@@ -5039,6 +5083,8 @@ func (ec *executionContext) childFields_Case(ctx context.Context, field graphql.
 	switch field.Name {
 	case "id":
 		return ec.fieldContext_Case_id(ctx, field)
+	case "workspaceId":
+		return ec.fieldContext_Case_workspaceId(ctx, field)
 	case "title":
 		return ec.fieldContext_Case_title(ctx, field)
 	case "description":
@@ -5097,6 +5143,8 @@ func (ec *executionContext) childFields_CaseJob(ctx context.Context, field graph
 	switch field.Name {
 	case "id":
 		return ec.fieldContext_CaseJob_id(ctx, field)
+	case "workspaceId":
+		return ec.fieldContext_CaseJob_workspaceId(ctx, field)
 	case "name":
 		return ec.fieldContext_CaseJob_name(ctx, field)
 	case "description":
@@ -7890,6 +7938,29 @@ func (ec *executionContext) fieldContext_Action_id(_ context.Context, field grap
 	return graphql.NewScalarFieldContext("Action", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
+func (ec *executionContext) _Action_workspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Action_workspaceId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Action_workspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Action", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _Action_caseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -9379,6 +9450,29 @@ func (ec *executionContext) fieldContext_Case_id(_ context.Context, field graphq
 	return graphql.NewScalarFieldContext("Case", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
+func (ec *executionContext) _Case_workspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Case_workspaceId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Case_workspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Case", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _Case_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -10073,6 +10167,29 @@ func (ec *executionContext) _CaseJob_id(ctx context.Context, field graphql.Colle
 	)
 }
 func (ec *executionContext) fieldContext_CaseJob_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CaseJob", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _CaseJob_workspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.CaseJob) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CaseJob_workspaceId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CaseJob_workspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("CaseJob", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
@@ -21599,6 +21716,11 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "workspaceId":
+			out.Values[i] = ec._Action_workspaceId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
 		case "caseID":
 			out.Values[i] = ec._Action_caseID(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -22422,6 +22544,11 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "workspaceId":
+			out.Values[i] = ec._Case_workspaceId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
 		case "title":
 			out.Values[i] = ec._Case_title(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -22912,6 +23039,11 @@ func (ec *executionContext) _CaseJob(ctx context.Context, sel ast.SelectionSet, 
 			out.Values[i] = graphql.MarshalString("CaseJob")
 		case "id":
 			out.Values[i] = ec._CaseJob_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "workspaceId":
+			out.Values[i] = ec._CaseJob_workspaceId(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

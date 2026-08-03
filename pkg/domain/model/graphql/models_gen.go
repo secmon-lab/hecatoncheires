@@ -88,6 +88,7 @@ type AssistLogConnection struct {
 
 type CaseJob struct {
 	ID          string      `json:"id"`
+	WorkspaceID string      `json:"workspaceId"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Strategy    JobStrategy `json:"strategy"`

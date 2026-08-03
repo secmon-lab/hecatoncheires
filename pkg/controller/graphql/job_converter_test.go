@@ -28,8 +28,9 @@ func TestToGraphQLCaseJob(t *testing.T) {
 					model.CaseLifecycleCreated, model.CaseLifecycleClosed,
 				}},
 			},
-		})
+		}, "ws-jobs")
 		gt.String(t, g.ID).Equal("triage")
+		gt.String(t, g.WorkspaceID).Equal("ws-jobs")
 		gt.String(t, g.Name).Equal("Initial triage")
 		gt.String(t, g.Description).Equal("evaluate on create")
 		gt.String(t, g.Prompt).Equal("do the thing")
@@ -48,7 +49,7 @@ func TestToGraphQLCaseJob(t *testing.T) {
 			Prompt: "p",
 			Quiet:  true,
 			Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: 3600_000_000_000}}, // 1h in ns
-		})
+		}, "ws-jobs")
 		gt.Value(t, g.Strategy).Equal(graphql1.JobStrategySimple)
 		gt.Bool(t, g.Quiet).True()
 		// caseEvents is a non-nil empty slice for a schedule-only Job.
@@ -67,7 +68,7 @@ func TestToGraphQLCaseJob(t *testing.T) {
 			Name:   "Daily summary",
 			Prompt: "p",
 			Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Cron: sched, CronExpr: "0 9 * * *"}},
-		})
+		}, "ws-jobs")
 		gt.Value(t, g.Trigger.Schedule).NotNil()
 		gt.Value(t, g.Trigger.Schedule.Cron).NotNil()
 		gt.String(t, *g.Trigger.Schedule.Cron).Equal("0 9 * * *")
@@ -75,6 +76,6 @@ func TestToGraphQLCaseJob(t *testing.T) {
 	})
 
 	t.Run("nil job maps to nil", func(t *testing.T) {
-		gt.Value(t, graphqlctrl.ToGraphQLCaseJobForTest(nil)).Nil()
+		gt.Value(t, graphqlctrl.ToGraphQLCaseJobForTest(nil, "ws-jobs")).Nil()
 	})
 }

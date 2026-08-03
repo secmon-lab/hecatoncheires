@@ -114,6 +114,32 @@ frontend/src/components/        ← Components consuming GraphQL data
 - For nullable fields (`T` without `!`), handle `null` explicitly in the UI.
 - When constructing mutation inputs with optional list fields (`[T!]`), omit the field entirely instead of sending `null`.
 
+## Identity: `id` alone is NOT unique (NON-NEGOTIABLE)
+
+Case and Action ids come from a per-workspace counter, and Job ids are
+workspace-unique TOML keys — the first Case of every workspace is id 1. GraphQL
+clients normalize by `__typename` + `id` by default, so these types expose
+`workspaceId` and their identity is the pair `(workspaceId, id)`:
+
+`Case`, `Action`, `CaseRef`, `CaseJob`
+
+- **Every selection set fetching one of these MUST also select `workspaceId`.**
+  The frontend keys its Apollo cache on the pair
+  (`frontend/src/graphql/cache.ts`). If the field is missing, Apollo cannot
+  compute the key and silently stops normalizing that object — no error, just a
+  UI that renders another workspace's data later.
+- `frontend/src/graphql/case.test.ts` pins the exact leaf-path set of the Case
+  operations; update it when you add a field.
+- **Before giving any new type an `id`, ask whether that id is globally unique.**
+  If it is scoped to a workspace, add `workspaceId` and key on the pair. If it is
+  a configuration value object whose id is only meaningful inside its enclosing
+  document (`FieldDefinition`, `FieldOption`, `ActionStatusDefinition`), it has no
+  identity at all — register it with `keyFields: false` in the frontend cache
+  rather than inventing a key.
+
+See `docs/develop/architecture.md` § "Workspace-scoped identity on the GraphQL
+wire" for the failure this prevents.
+
 ## Schema Design Conventions
 
 - **Output type lists**: Prefer `[T!]!` as default. Safest for clients.
@@ -129,3 +155,5 @@ frontend/src/components/        ← Components consuming GraphQL data
 5. In dataloaders: no nil elements for `[T!]` types
 6. In resolvers: empty slices for empty data, never nil
 7. In frontend: query field names match schema exactly, handle nullability
+8. If the type has an `id`, settle its identity (see the Identity section above):
+   globally unique, workspace-scoped `(workspaceId, id)`, or not an entity at all

@@ -10,6 +10,7 @@ export const GET_DRAFTS = gql`
   query GetDrafts($workspaceId: String!) {
     drafts(workspaceId: $workspaceId) {
       id
+      workspaceId
       title
       description
       status
@@ -48,6 +49,7 @@ export const GET_DRAFT = gql`
   query GetDraft($workspaceId: String!, $id: Int!) {
     case(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       title
       description
       status
@@ -73,6 +75,7 @@ export const CREATE_DRAFT = gql`
   mutation CreateDraft($workspaceId: String!, $input: CreateDraftInput!) {
     createDraft(workspaceId: $workspaceId, input: $input) {
       id
+      workspaceId
       title
       status
     }
@@ -89,6 +92,7 @@ export const SUBMIT_DRAFT = gql`
   mutation SubmitDraft($workspaceId: String!, $id: Int!, $input: SubmitDraftInput) {
     submitDraft(workspaceId: $workspaceId, id: $id, input: $input) {
       id
+      workspaceId
       title
       status
     }

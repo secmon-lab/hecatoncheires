@@ -156,6 +156,101 @@ func parseGraphQLResponse(t *testing.T, rec *httptest.ResponseRecorder) *graphQL
 	return &resp
 }
 
+// TestGraphQLHandler_WorkspaceScopedIdentity pins the wire contract that makes
+// (workspaceId, id) — not id alone — the identity of a Case and an Action.
+// Both ids come from a per-workspace counter, so the first Case of every
+// workspace is id 1. Without workspaceId on the wire a client that caches by
+// id merges them into one object; that is exactly what the Home dashboard did,
+// rendering one workspace's title and assignees under another's badge.
+func TestGraphQLHandler_WorkspaceScopedIdentity(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	const wsA = "ws-alpha"
+	const wsB = "ws-beta"
+
+	seed := func(workspaceID, caseTitle, actionTitle string) (int64, int64) {
+		c, err := repo.Case().Create(ctx, workspaceID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      caseTitle,
+		})
+		gt.NoError(t, err).Required()
+		a, err := repo.Action().Create(ctx, workspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  actionTitle,
+			Status: "TODO",
+		})
+		gt.NoError(t, err).Required()
+		return c.ID, a.ID
+	}
+
+	caseA, actionA := seed(wsA, "Alpha case", "Alpha action")
+	caseB, actionB := seed(wsB, "Beta case", "Beta action")
+
+	// The premise of the whole fix: the two workspaces really do reuse ids.
+	gt.Value(t, caseA).Equal(caseB)
+	gt.Value(t, actionA).Equal(actionB)
+
+	query := `
+		query($workspaceId: String!, $caseId: Int!, $actionId: Int!) {
+			case(workspaceId: $workspaceId, id: $caseId) {
+				id
+				workspaceId
+				title
+			}
+			action(workspaceId: $workspaceId, id: $actionId) {
+				id
+				workspaceId
+				title
+			}
+		}
+	`
+
+	assertScoped := func(t *testing.T, workspaceID, caseTitle, actionTitle string, caseID, actionID int64) {
+		t.Helper()
+		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": workspaceID,
+			"caseId":      int(caseID),
+			"actionId":    int(actionID),
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Case struct {
+				ID          int    `json:"id"`
+				WorkspaceID string `json:"workspaceId"`
+				Title       string `json:"title"`
+			} `json:"case"`
+			Action struct {
+				ID          int    `json:"id"`
+				WorkspaceID string `json:"workspaceId"`
+				Title       string `json:"title"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Number(t, result.Case.ID).Equal(int(caseID))
+		gt.String(t, result.Case.WorkspaceID).Equal(workspaceID)
+		gt.String(t, result.Case.Title).Equal(caseTitle)
+
+		gt.Number(t, result.Action.ID).Equal(int(actionID))
+		gt.String(t, result.Action.WorkspaceID).Equal(workspaceID)
+		gt.String(t, result.Action.Title).Equal(actionTitle)
+	}
+
+	t.Run("each workspace reports its own id alongside the shared numeric id", func(t *testing.T) {
+		assertScoped(t, wsA, "Alpha case", "Alpha action", caseA, actionA)
+		assertScoped(t, wsB, "Beta case", "Beta action", caseB, actionB)
+	})
+}
+
 func TestGraphQLHandler_CasesQuery(t *testing.T) {
 	repo := memory.New()
 	handler, err := setupGraphQLServer(repo)

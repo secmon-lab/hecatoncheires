@@ -10,13 +10,15 @@ import (
 // toGraphQLCaseJob maps a workspace Job definition to its read-only
 // GraphQL form. The strategy is normalised (empty → SIMPLE) before
 // mapping so a Job that omits the TOML field still renders a concrete
-// enum value.
-func toGraphQLCaseJob(j *model.Job) *graphql1.CaseJob {
+// enum value. workspaceID is carried on the wire because Job ids are
+// workspace-unique, not global.
+func toGraphQLCaseJob(j *model.Job, workspaceID string) *graphql1.CaseJob {
 	if j == nil {
 		return nil
 	}
 	return &graphql1.CaseJob{
 		ID:          j.ID,
+		WorkspaceID: workspaceID,
 		Name:        j.Name,
 		Description: j.Description,
 		Strategy:    jobStrategyToGraphQL(j.Strategy),

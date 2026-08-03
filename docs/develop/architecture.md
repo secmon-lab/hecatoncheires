@@ -112,6 +112,47 @@ because there was no debounce layer, so a 20-case list page issued 20
 Slack API calls for channel names — even with caching on top. The
 graph-gophers loader collapses each of those to one call per request.
 
+## Workspace-scoped identity on the GraphQL wire
+
+Most GraphQL clients — Apollo Client among them — normalize a response into a
+cache keyed by `__typename` plus `id`, which assumes `id` is globally unique.
+In this API it is not. Case and Action ids come from a per-workspace counter
+(`counters/case/workspaces/{workspaceID}`, `pkg/repository/firestore/case.go`),
+and Job ids are workspace-unique kebab-case keys from the workspace's TOML.
+The first Case of every workspace is id 1.
+
+So each of these types carries a `workspaceId` field, and its identity on the
+wire is the pair `(workspaceId, id)`:
+
+- `Case`, `Action`, `CaseRef`, `CaseJob`
+
+**Every selection set that fetches one of these MUST also select
+`workspaceId`.** The frontend keys its cache on the pair
+(`frontend/src/graphql/cache.ts`); when the field is missing Apollo cannot
+compute the key and silently degrades to not normalizing that object, so the
+omission produces no error — only a stale-looking UI later.
+
+### Why some types are deliberately *not* keyed
+
+`FieldDefinition`, `FieldOption` and `ActionStatusDefinition` are configuration
+value objects, not entities. Their `id` is a config key that is only meaningful
+inside the enclosing configuration document, and the same id is reused both
+across workspaces and across the two independent documents that carry them
+(`FieldConfiguration.fields` for Cases vs `MemoConfiguration.fields` for Memos;
+`fieldConfiguration.actionConfig` vs `caseStatusConfig`). No combination of
+their fields identifies one, so adding `workspaceId` would not have been
+enough — the frontend disables normalization for them instead.
+
+### What went wrong before this was explicit
+
+`Case` carried the workspace only as an internal Go field (`json:"-"`) used to
+give sub-resolvers their scope, and never exposed it. The Home dashboard
+aggregates open Cases across every workspace, so a single response could
+contain `Case:12` twice; the second write replaced the first and both rows
+rendered one workspace's title, assignees and `updatedAt` under the other's
+(correct) workspace badge. The same collision made a cache-first return to a
+previously visited workspace's Case list show another workspace's data.
+
 ## Agent thread session (internals)
 
 The agent that responds to `@mention` in Slack threads treats each thread as
