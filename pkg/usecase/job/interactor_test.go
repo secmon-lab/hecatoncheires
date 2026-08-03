@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -92,7 +94,7 @@ func TestJobInteractor_Solicit(t *testing.T) {
 
 		poster := &fakeQuestionPoster{returnTS: "1700000000.000999"}
 		it := job.NewJobInteractorForTest(repo, poster, key, runID, "C42", "1699999999.000001", "U7",
-			newRunningLog(key, runID, now), func() time.Time { return now })
+			newRunningLog(key, runID, now), nil, func() time.Time { return now })
 
 		out, err := it.Solicit(ctx, sampleRequest())
 		gt.NoError(t, err).Required()
@@ -125,6 +127,52 @@ func TestJobInteractor_Solicit(t *testing.T) {
 		gt.Bool(t, run.LeaseUntil.IsZero()).True()
 	})
 
+	// The tokens the pre-question turn burned must be persisted when the run
+	// pauses; otherwise the resumed turn (which builds a fresh handler and adds
+	// to the stored totals) reports only its own half of the run.
+	t.Run("persists this turn's token usage on the suspended log", func(t *testing.T) {
+		repo := memory.New()
+		key := jobKey("tokens")
+		runID := "run-tokens"
+		runningLog := newRunningLog(key, runID, now)
+		gt.NoError(t, repo.JobRunLog().Create(ctx, runningLog)).Required()
+
+		handler := runtrace.NewHandler(repo.JobRunEvent(), runtrace.Routing{
+			WorkspaceID: key.WorkspaceID,
+			CaseID:      key.CaseID,
+			JobID:       key.JobID,
+			RunID:       runID,
+			TraceID:     runningLog.TraceID,
+		}, runtrace.NewSequencer(), func() time.Time { return now })
+		handler.EndLLMCall(handler.StartLLMCall(ctx), &trace.LLMCallData{
+			Model:        "m",
+			InputTokens:  500,
+			OutputTokens: 70,
+			Response:     &trace.LLMResponse{Texts: []string{"I need to ask"}},
+		}, nil)
+
+		poster := &fakeQuestionPoster{returnTS: "1700000000.000123"}
+		it := job.NewJobInteractorForTest(repo, poster, key, runID, "C42", "1699999999.000001", "U7",
+			runningLog, handler, func() time.Time { return now })
+
+		_, err := it.Solicit(ctx, sampleRequest())
+		gt.NoError(t, err).Required()
+
+		log, err := repo.JobRunLog().Get(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, log.Stage).Equal(model.JobRunStageAwaitingInput)
+		gt.Number(t, log.InputTokens).Equal(500)
+		gt.Number(t, log.OutputTokens).Equal(70)
+		gt.Number(t, log.LLMCallCount).Equal(1)
+
+		// The in-memory RUNNING log stays at zero: the resumed turn re-reads the
+		// log from storage, so stamping the shared pointer here would make
+		// finishRun count this turn twice.
+		gt.Number(t, runningLog.InputTokens).Equal(0)
+		gt.Number(t, runningLog.OutputTokens).Equal(0)
+		gt.Number(t, runningLog.LLMCallCount).Equal(0)
+	})
+
 	t.Run("no slack thread is a hard error", func(t *testing.T) {
 		repo := memory.New()
 		key := jobKey("nothread")
@@ -133,7 +181,7 @@ func TestJobInteractor_Solicit(t *testing.T) {
 
 		poster := &fakeQuestionPoster{returnTS: "x"}
 		it := job.NewJobInteractorForTest(repo, poster, key, runID, "", "", "U7",
-			newRunningLog(key, runID, now), func() time.Time { return now })
+			newRunningLog(key, runID, now), nil, func() time.Time { return now })
 
 		_, err := it.Solicit(ctx, sampleRequest())
 		gt.Error(t, err)
@@ -148,7 +196,7 @@ func TestJobInteractor_Solicit(t *testing.T) {
 
 		poster := &fakeQuestionPoster{returnTS: "x"}
 		it := job.NewJobInteractorForTest(repo, poster, key, runID, "C1", "1.1", "U7",
-			newRunningLog(key, runID, now), func() time.Time { return now })
+			newRunningLog(key, runID, now), nil, func() time.Time { return now })
 
 		_, err := it.Solicit(ctx, interaction.Request{Items: nil})
 		gt.Error(t, err)
@@ -227,7 +275,7 @@ func TestJobQuestionRef_RoundTrip(t *testing.T) {
 	gt.NoError(t, repo.JobRunLog().Create(ctx, newRunningLog(key, runID, now))).Required()
 	poster := &fakeQuestionPoster{returnTS: "1.2"}
 	it := job.NewJobInteractorForTest(repo, poster, key, runID, "C1", "1.1", "U7",
-		newRunningLog(key, runID, now), func() time.Time { return now })
+		newRunningLog(key, runID, now), nil, func() time.Time { return now })
 	_, err := it.Solicit(ctx, sampleRequest())
 	gt.NoError(t, err).Required()
 

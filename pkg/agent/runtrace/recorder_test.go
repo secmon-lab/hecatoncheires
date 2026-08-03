@@ -53,10 +53,21 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	h := rec.Handler()
 	llmCtx := h.StartLLMCall(ctx)
 	h.EndLLMCall(llmCtx, &trace.LLMCallData{
-		Model:    "m",
-		Request:  &trace.LLMRequest{},
-		Response: &trace.LLMResponse{Texts: []string{"done"}},
+		Model:        "m",
+		InputTokens:  310,
+		OutputTokens: 44,
+		Request:      &trace.LLMRequest{},
+		Response:     &trace.LLMResponse{Texts: []string{"done"}},
 	}, nil)
+	llmCtx2 := h.StartLLMCall(ctx)
+	h.EndLLMCall(llmCtx2, &trace.LLMCallData{
+		Model:        "m",
+		InputTokens:  90,
+		OutputTokens: 6,
+		Request:      &trace.LLMRequest{},
+		Response:     &trace.LLMResponse{Texts: []string{"and done"}},
+	}, nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", map[string]any{"q": "x"}), map[string]any{"hits": 0}, nil)
 	rec.Finish(ctx, nil)
 
 	// The log is now SUCCESS with an end time and no error.
@@ -65,6 +76,14 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	gt.Value(t, done.Stage).Equal(model.JobRunStageSuccess)
 	gt.Bool(t, done.EndedAt.Equal(started)).True()
 	gt.String(t, done.Error).Equal("")
+
+	// The run's totals are summed over both LLM calls and the tool execution and
+	// persisted on the log, so a consumer gets the run's cost and step count
+	// without reading the event timeline.
+	gt.Number(t, done.InputTokens).Equal(400)
+	gt.Number(t, done.OutputTokens).Equal(50)
+	gt.Number(t, done.LLMCallCount).Equal(2)
+	gt.Number(t, done.ToolCallCount).Equal(1)
 
 	// The JobRun summary doc was materialised so ListByCase (the read path the
 	// case agent page uses) surfaces the run.
@@ -79,10 +98,15 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	// The per-call events the handler emitted are attributed to this run.
 	events, err := repo.JobRunEvent().List(ctx, key, "run-abc")
 	gt.NoError(t, err).Required()
-	gt.Array(t, events).Length(2).Required()
+	gt.Array(t, events).Length(5).Required()
 	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
 	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
 	gt.String(t, events[1].TraceID).Equal("trace-abc")
+	gt.Value(t, events[2].Kind).Equal(model.JobRunEventKindLLMRequest)
+	gt.Value(t, events[3].Kind).Equal(model.JobRunEventKindLLMResponse)
+	gt.Number(t, events[3].LLMResponse.InputTokens).Equal(90)
+	gt.Value(t, events[4].Kind).Equal(model.JobRunEventKindToolCall)
+	gt.String(t, events[4].ToolCall.ToolName).Equal("slack_search")
 }
 
 // A failed run must leave a FAILED JobRunLog carrying the error, append a

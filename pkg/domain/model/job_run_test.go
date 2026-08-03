@@ -210,6 +210,34 @@ func TestJobRunLog_Validate(t *testing.T) {
 		l.ExecutorKind = ""
 		gt.Error(t, l.Validate())
 	})
+	t.Run("ok with run totals", func(t *testing.T) {
+		l := validJobRunLog()
+		l.InputTokens = 1200
+		l.OutputTokens = 340
+		l.LLMCallCount = 7
+		l.ToolCallCount = 11
+		gt.NoError(t, l.Validate())
+	})
+	t.Run("negative input tokens", func(t *testing.T) {
+		l := validJobRunLog()
+		l.InputTokens = -1
+		gt.Error(t, l.Validate())
+	})
+	t.Run("negative output tokens", func(t *testing.T) {
+		l := validJobRunLog()
+		l.OutputTokens = -1
+		gt.Error(t, l.Validate())
+	})
+	t.Run("negative llm call count", func(t *testing.T) {
+		l := validJobRunLog()
+		l.LLMCallCount = -1
+		gt.Error(t, l.Validate())
+	})
+	t.Run("negative tool call count", func(t *testing.T) {
+		l := validJobRunLog()
+		l.ToolCallCount = -1
+		gt.Error(t, l.Validate())
+	})
 	t.Run("running with ended at", func(t *testing.T) {
 		l := validJobRunLog()
 		l.EndedAt = l.StartedAt.Add(time.Second)

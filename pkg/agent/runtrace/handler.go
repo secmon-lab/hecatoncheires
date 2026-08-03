@@ -106,6 +106,23 @@ type Handler struct {
 	phase              string // current phase label; default "execute"
 	agentLabel         string // current sub-agent label
 	lastLLMResponseSeq int64  // most recent LLM_RESPONSE Sequence (for TOOL_CALL parents)
+	totals             runTotals
+}
+
+// runTotals is the running tally across everything a Handler saw: tokens and
+// call counts. planexec wires the SAME handler into the planner and all
+// parallel sub-agents, so one Handler's totals cover the whole turn —
+// including sub-agent calls that happen concurrently, which is why the
+// counters are guarded by the handler mutex.
+type runTotals struct {
+	InputTokens  int64
+	OutputTokens int64
+	// LLMCalls is the number of LLM calls counted. Zero distinguishes "never
+	// reached the model" from "the provider reported no token usage".
+	LLMCalls int64
+	// ToolCalls is the number of tool executions counted. Together with
+	// LLMCalls it gives the turn's step count.
+	ToolCalls int64
 }
 
 var _ trace.Handler = (*Handler)(nil)
@@ -172,8 +189,19 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 		durationMs = max(endedAt.Sub(span.startedAt).Milliseconds(), 0)
 	}
 
+	// Count the attempt before inspecting data. A provider that could not open
+	// the stream calls this with a nil LLMCallData (gollem's openai client does
+	// exactly that when CreateChatCompletionStream fails), and reaching the model
+	// is still a step the run took — the same reason EndToolExec counts a failed
+	// tool execution.
+	h.mu.Lock()
+	h.totals.LLMCalls++
+	h.mu.Unlock()
+
 	if data == nil {
-		// Nothing to record; we still skip rather than fabricate.
+		// No call data means no request / response body to record, and we skip
+		// the events rather than fabricate them. The attempt is already counted,
+		// so LLMCallCount can exceed the number of LLM_RESPONSE events.
 		return
 	}
 
@@ -188,10 +216,41 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	h.append(ctx, respEv)
 
 	// Track the response Sequence so subsequent TOOL_CALL events can point
-	// ParentSequence at it.
+	// ParentSequence at it, and fold this call's tokens into the run total.
 	h.mu.Lock()
 	h.lastLLMResponseSeq = respEv.Sequence
+	h.totals.InputTokens += respEv.LLMResponse.InputTokens
+	h.totals.OutputTokens += respEv.LLMResponse.OutputTokens
 	h.mu.Unlock()
+}
+
+// runTotals returns the tally counted so far by THIS handler. It is a
+// per-handler delta, not the run's lifetime total: a resumed run builds a
+// fresh handler, so the caller adds this to whatever the persisted log
+// already carries (see AddRunTotals).
+func (h *Handler) runTotals() runTotals {
+	if h == nil {
+		return runTotals{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.totals
+}
+
+// AddRunTotals folds the handler's counted tokens and call counts into the run
+// log. Callers invoke it once per handler, immediately before persisting the
+// log (Suspend / Finish), so a suspended turn's totals survive into the resumed
+// turn's. Both arguments may be nil (the resume prepare-failure path has no
+// handler), in which case the log is left untouched.
+func AddRunTotals(log *model.JobRunLog, h *Handler) {
+	if log == nil || h == nil {
+		return
+	}
+	t := h.runTotals()
+	log.InputTokens += t.InputTokens
+	log.OutputTokens += t.OutputTokens
+	log.LLMCallCount += t.LLMCalls
+	log.ToolCallCount += t.ToolCalls
 }
 
 // StartToolExec caches the tool name + args + start timestamp on a
@@ -215,6 +274,9 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
 	h.mu.Lock()
 	ev.ParentSequence = h.lastLLMResponseSeq
+	// Counted here rather than at Start so a tool that never returned (the
+	// process died mid-execution) is not billed as a completed step.
+	h.totals.ToolCalls++
 	h.mu.Unlock()
 
 	var startedAt time.Time

@@ -62,6 +62,21 @@ func findRow(t *export.Table, column string, want any) map[string]any {
 	return nil
 }
 
+// findEventRow returns the job_run_events row for the given case and sequence.
+// Sequence alone is not unique across the table (every run numbers its events
+// from 1), so both keys are needed to address one row.
+func findEventRow(t *export.Table, caseID, sequence int64) map[string]any {
+	if t == nil {
+		return nil
+	}
+	for _, r := range t.Rows {
+		if r["case_id"] == caseID && r["sequence"] == sequence {
+			return r
+		}
+	}
+	return nil
+}
+
 // hasColumn reports whether the table declares a column with the given name.
 func hasColumn(t *export.Table, name string) bool {
 	if t == nil {
@@ -75,10 +90,107 @@ func hasColumn(t *export.Table, name string) bool {
 	return false
 }
 
+// seedJobRun files one finished agent run against the given case: a SUCCESS
+// JobRunLog carrying the run totals, the three-event timeline under it, and the
+// JobRun summary doc that JobRun().ListByCase surfaces (the export reaches the
+// logs through the summary, and the events through the logs).
+func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID int64, jobID string, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: caseID, JobID: jobID}
+	runID := "run-" + jobID
+	traceID := "trace-" + jobID
+	log := &model.JobRunLog{
+		WorkspaceID:    wsID,
+		CaseID:         caseID,
+		JobID:          jobID,
+		RunID:          runID,
+		TraceID:        traceID,
+		Stage:          model.JobRunStageRunning,
+		StartedAt:      now,
+		ExecutorKind:   model.ExecutorKindPlanexec,
+		EventType:      "case",
+		EventTriggerAt: now,
+		SystemPrompt:   "you are the job agent",
+	}
+	gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+
+	// One event of each of the three kinds a successful run produces, so the
+	// export's per-kind column mapping is exercised end to end.
+	baseEvent := func(seq int64, kind model.JobRunEventKind) *model.JobRunEvent {
+		return &model.JobRunEvent{
+			WorkspaceID: wsID, CaseID: caseID, JobID: jobID, RunID: runID, TraceID: traceID,
+			// Real event ids are UUIDv7, i.e. unique across cases; keep that
+			// property so a test can address one row unambiguously.
+			EventID:    fmt.Sprintf("%s-c%d-ev-%d", jobID, caseID, seq),
+			Sequence:   seq,
+			OccurredAt: now.Add(time.Duration(seq) * time.Second),
+			Kind:       kind,
+			Phase:      "execute",
+			AgentLabel: "investigator",
+		}
+	}
+	req := baseEvent(1, model.JobRunEventKindLLMRequest)
+	req.LLMRequest = &model.LLMRequestPayload{
+		Model: "claude-opus-4-7",
+		Messages: []model.LLMMessage{{
+			Role:     "user",
+			Contents: []model.LLMContentBlock{{Type: "text", Text: "investigate the case"}},
+		}},
+		Tools: []model.LLMToolSpec{{Name: "slack_search", Description: "search slack"}},
+	}
+	gt.NoError(t, repo.JobRunEvent().Append(ctx, req)).Required()
+
+	resp := baseEvent(2, model.JobRunEventKindLLMResponse)
+	resp.LLMResponse = &model.LLMResponsePayload{
+		Model:         "claude-opus-4-7",
+		Texts:         []string{"let me search"},
+		FunctionCalls: []model.LLMFunctionCall{{ID: "fc-1", Name: "slack_search", ArgumentsJSON: `{"q":"foo"}`}},
+		InputTokens:   1200,
+		OutputTokens:  180,
+		DurationMs:    1450,
+	}
+	gt.NoError(t, repo.JobRunEvent().Append(ctx, resp)).Required()
+
+	tool := baseEvent(3, model.JobRunEventKindToolCall)
+	tool.ParentSequence = 2
+	tool.ToolCall = &model.ToolCallPayload{
+		ToolName:      "slack_search",
+		ArgumentsJSON: `{"q":"foo"}`,
+		ResultJSON:    `{"hits":2}`,
+		StartedAt:     now.Add(3 * time.Second),
+		EndedAt:       now.Add(4 * time.Second),
+	}
+	gt.NoError(t, repo.JobRunEvent().Append(ctx, tool)).Required()
+
+	// A response that carried no text and requested no tool. Its empty payload
+	// fields must stay distinguishable from "nothing was recorded".
+	empty := baseEvent(4, model.JobRunEventKindLLMResponse)
+	empty.LLMResponse = &model.LLMResponsePayload{
+		Model:         "claude-opus-4-7",
+		Texts:         []string{},
+		FunctionCalls: []model.LLMFunctionCall{},
+		InputTokens:   90,
+	}
+	gt.NoError(t, repo.JobRunEvent().Append(ctx, empty)).Required()
+
+	log.Stage = model.JobRunStageSuccess
+	log.EndedAt = now.Add(time.Minute)
+	log.InputTokens = 1500
+	log.OutputTokens = 210
+	log.LLMCallCount = 4
+	log.ToolCallCount = 6
+	gt.NoError(t, repo.JobRunLog().Finish(ctx, log)).Required()
+	gt.NoError(t, repo.JobRun().RecordRun(ctx, key,
+		model.JobRunStatusSuccess, log.EndedAt, runID, traceID, "")).Required()
+}
+
 // seededWorkspace builds a WorkspaceEntry and seeds a memory repository with a
 // normal case, a private case, a draft case, one action per non-draft case, one
-// memo per non-draft case, one tag, and one knowledge entry.
-func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry, string, int64, int64) {
+// memo per non-draft case, one finished job run per case (the draft included, so
+// the tests can prove its runs are dropped rather than merely absent), one tag,
+// and one knowledge entry. It returns the normal, private and draft case ids.
+func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry, string, int64, int64, int64) {
 	t.Helper()
 	ctx := context.Background()
 	repo := memory.New()
@@ -126,7 +238,7 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 	})
 	gt.NoError(t, err).Required()
 
-	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+	draft, err := repo.Case().Create(ctx, wsID, &model.Case{
 		Title:      "Draft",
 		Status:     types.CaseStatusDraft,
 		ReporterID: "U3",
@@ -155,6 +267,13 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 		gt.NoError(t, err).Required()
 	}
 
+	// One finished job run per case. The draft gets one too: without it, an empty
+	// job_runs row set could mean either "the draft's runs were dropped" or
+	// "the draft never ran".
+	seedJobRun(t, repo, wsID, normal.ID, "triage", now)
+	seedJobRun(t, repo, wsID, private.ID, "triage", now)
+	seedJobRun(t, repo, wsID, draft.ID, "triage", now)
+
 	tag, err := repo.Tag().Create(ctx, wsID, &model.Tag{
 		ID: model.NewTagID(), WorkspaceID: wsID, Name: "urgent",
 		CreatedAt: now, UpdatedAt: now,
@@ -168,12 +287,12 @@ func seededWorkspace(t *testing.T) (interfaces.Repository, *model.WorkspaceEntry
 	})
 	gt.NoError(t, err).Required()
 
-	return repo, entry, wsID, normal.ID, private.ID
+	return repo, entry, wsID, normal.ID, private.ID, draft.ID
 }
 
 func TestExporter_Run_full(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, normalID, privateID := seededWorkspace(t)
+	repo, entry, _, normalID, privateID, draftID := seededWorkspace(t)
 	sink := newFakeSink()
 
 	err := export.New(repo, sink).Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})
@@ -210,6 +329,82 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.True(t, hasColumn(memos, "field_note"))
 	gt.Value(t, memos.Rows[0]["field_note"]).Equal("hello")
 
+	// Job runs: one summary + one log per non-draft case.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Array(t, jobRuns.Rows).Length(2)
+	normalRunRow := findRow(jobRuns, "case_id", normalID)
+	gt.Value(t, normalRunRow).NotNil().Required()
+	gt.Value(t, normalRunRow["job_id"]).Equal("triage")
+	gt.Value(t, normalRunRow["last_status"]).Equal("SUCCESS")
+	gt.Value(t, normalRunRow["last_run_id"]).Equal("run-triage")
+	gt.Value(t, findRow(jobRuns, "case_id", privateID)).NotNil()
+	// The draft case ran a job too, and its run is excluded along with the case.
+	gt.True(t, findRow(jobRuns, "case_id", draftID) == nil)
+
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Array(t, jobRunLogs.Rows).Length(2)
+	gt.True(t, findRow(jobRunLogs, "case_id", draftID) == nil)
+	normalLogRow := findRow(jobRunLogs, "case_id", normalID)
+	gt.Value(t, normalLogRow).NotNil().Required()
+	gt.Value(t, normalLogRow["run_id"]).Equal("run-triage")
+	gt.Value(t, normalLogRow["stage"]).Equal("SUCCESS")
+	gt.Value(t, normalLogRow["executor_kind"]).Equal(model.ExecutorKindPlanexec)
+	gt.Value(t, normalLogRow["event_type"]).Equal("case")
+	gt.Value(t, normalLogRow["system_prompt"]).Equal("you are the job agent")
+	gt.Value(t, normalLogRow["input_tokens"]).Equal(int64(1500))
+	gt.Value(t, normalLogRow["output_tokens"]).Equal(int64(210))
+	gt.Value(t, normalLogRow["llm_call_count"]).Equal(int64(4))
+	gt.Value(t, normalLogRow["tool_call_count"]).Equal(int64(6))
+
+	// Job run events: the full timeline of each exported run (4 events x 2 cases).
+	jobRunEvents := sink.table("ds", "job_run_events")
+	gt.Array(t, jobRunEvents.Rows).Length(8)
+	gt.True(t, findRow(jobRunEvents, "case_id", draftID) == nil)
+
+	// Each kind populates only its own columns; the rest stay absent (NULL).
+	reqRow := findEventRow(jobRunEvents, normalID, 1)
+	gt.Value(t, reqRow).NotNil().Required()
+	gt.Value(t, reqRow["kind"]).Equal("LLM_REQUEST")
+	gt.Value(t, reqRow["run_id"]).Equal("run-triage")
+	gt.Value(t, reqRow["phase"]).Equal("execute")
+	gt.Value(t, reqRow["agent_label"]).Equal("investigator")
+	gt.Value(t, reqRow["model"]).Equal("claude-opus-4-7")
+	gt.String(t, reqRow["messages_json"].(string)).Contains("investigate the case")
+	gt.String(t, reqRow["tools_json"].(string)).Contains("slack_search")
+	gt.True(t, reqRow["tool_name"] == nil)
+
+	respRow := findEventRow(jobRunEvents, normalID, 2)
+	gt.Value(t, respRow).NotNil().Required()
+	gt.Value(t, respRow["kind"]).Equal("LLM_RESPONSE")
+	gt.String(t, respRow["texts_json"].(string)).Contains("let me search")
+	gt.String(t, respRow["function_calls_json"].(string)).Contains("fc-1")
+	gt.Value(t, respRow["input_tokens"]).Equal(int64(1200))
+	gt.Value(t, respRow["output_tokens"]).Equal(int64(180))
+	gt.Value(t, respRow["duration_ms"]).Equal(int64(1450))
+	gt.True(t, respRow["messages_json"] == nil)
+
+	toolRow := findEventRow(jobRunEvents, normalID, 3)
+	gt.Value(t, toolRow).NotNil().Required()
+	gt.Value(t, toolRow["kind"]).Equal("TOOL_CALL")
+	gt.Value(t, toolRow["parent_sequence"]).Equal(int64(2))
+	gt.Value(t, toolRow["tool_name"]).Equal("slack_search")
+	gt.Value(t, toolRow["tool_arguments_json"]).Equal(`{"q":"foo"}`)
+	gt.Value(t, toolRow["tool_result_json"]).Equal(`{"hits":2}`)
+	gt.Value(t, toolRow["tool_is_error"]).Equal(false)
+	gt.True(t, toolRow["model"] == nil)
+
+	// A response whose payload slices were empty exports them as NULL, because
+	// both repository backends decode a stored empty array back into a nil slice
+	// (see "Append + List returns an empty payload slice as nil" in
+	// pkg/repository/job_run_test.go). The row itself and its scalars survive, so
+	// the call is still visible in the timeline.
+	emptyRow := findEventRow(jobRunEvents, normalID, 4)
+	gt.Value(t, emptyRow).NotNil().Required()
+	gt.Value(t, emptyRow["kind"]).Equal("LLM_RESPONSE")
+	gt.True(t, emptyRow["texts_json"] == nil)
+	gt.True(t, emptyRow["function_calls_json"] == nil)
+	gt.Value(t, emptyRow["input_tokens"]).Equal(int64(90))
+
 	// Knowledge / Tag.
 	knowledge := sink.table("ds", "knowledge")
 	gt.Array(t, knowledge.Rows).Length(1)
@@ -222,7 +417,7 @@ func TestExporter_Run_full(t *testing.T) {
 
 func TestExporter_Run_excludePrivate(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, normalID, privateID := seededWorkspace(t)
+	repo, entry, _, normalID, privateID, draftID := seededWorkspace(t)
 	sink := newFakeSink()
 
 	err := export.New(repo, sink).Run(ctx, []export.Target{{Entry: entry, Namespace: "ds", ExcludePrivate: true}})
@@ -244,6 +439,27 @@ func TestExporter_Run_excludePrivate(t *testing.T) {
 	gt.Array(t, memos.Rows).Length(1)
 	gt.Value(t, memos.Rows[0]["case_id"]).Equal(normalID)
 
+	// Job runs / run logs: the private case's run is dropped, so neither its
+	// summary nor its prompts and token counts reach BigQuery.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Array(t, jobRuns.Rows).Length(1)
+	gt.Value(t, jobRuns.Rows[0]["case_id"]).Equal(normalID)
+	gt.True(t, findRow(jobRuns, "case_id", privateID) == nil)
+	gt.True(t, findRow(jobRuns, "case_id", draftID) == nil)
+
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Array(t, jobRunLogs.Rows).Length(1)
+	gt.Value(t, jobRunLogs.Rows[0]["case_id"]).Equal(normalID)
+	gt.True(t, findRow(jobRunLogs, "case_id", privateID) == nil)
+	gt.True(t, findRow(jobRunLogs, "case_id", draftID) == nil)
+
+	// The excluded cases' timelines go too — prompts, tool results and all.
+	jobRunEvents := sink.table("ds", "job_run_events")
+	gt.Array(t, jobRunEvents.Rows).Length(4)
+	gt.Value(t, findEventRow(jobRunEvents, normalID, 1)).NotNil()
+	gt.True(t, findRow(jobRunEvents, "case_id", privateID) == nil)
+	gt.True(t, findRow(jobRunEvents, "case_id", draftID) == nil)
+
 	// Knowledge / Tag are workspace-level and always exported.
 	gt.Array(t, sink.table("ds", "knowledge").Rows).Length(1)
 	gt.Array(t, sink.table("ds", "tags").Rows).Length(1)
@@ -251,7 +467,7 @@ func TestExporter_Run_excludePrivate(t *testing.T) {
 
 func TestExporter_Run_collectsErrorsAndContinues(t *testing.T) {
 	ctx := context.Background()
-	repo, entry, _, _, _ := seededWorkspace(t)
+	repo, entry, _, _, _, _ := seededWorkspace(t)
 	sink := newFakeSink()
 	sink.failOn["cases"] = true
 
@@ -261,6 +477,64 @@ func TestExporter_Run_collectsErrorsAndContinues(t *testing.T) {
 	// Remaining tables are still written despite the cases failure.
 	gt.Value(t, sink.table("ds", "cases")).Nil()
 	gt.Value(t, sink.table("ds", "actions")).NotNil()
+	gt.Value(t, sink.table("ds", "job_runs")).NotNil()
+	gt.Value(t, sink.table("ds", "job_run_logs")).NotNil()
+	gt.Value(t, sink.table("ds", "job_run_events")).NotNil()
+	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
+	gt.Value(t, sink.table("ds", "tags")).NotNil()
+}
+
+// eventReadFailingRepository is a Repository whose event timeline cannot be
+// read. It stands in for a Firestore failure on the heaviest query the export
+// makes; everything else behaves normally.
+type eventReadFailingRepository struct {
+	interfaces.Repository
+}
+
+func (r eventReadFailingRepository) JobRunEvent() interfaces.JobRunEventRepository {
+	return failingJobRunEventRepository{}
+}
+
+type failingJobRunEventRepository struct{}
+
+func (failingJobRunEventRepository) Append(context.Context, *model.JobRunEvent) error { return nil }
+
+func (failingJobRunEventRepository) List(context.Context, model.JobRunKey, string) ([]*model.JobRunEvent, error) {
+	return nil, errors.New("injected job run event read failure")
+}
+
+// TestExporter_Run_eventFailureKeepsJobRunTables pins the failure granularity of
+// the agent-run tables. The event timeline is the largest and most failure-prone
+// read the export makes; when it breaks, the summaries and logs — which were
+// collected in full — must still be refreshed rather than left as a stale
+// snapshot in BigQuery.
+func TestExporter_Run_eventFailureKeepsJobRunTables(t *testing.T) {
+	ctx := context.Background()
+	repo, entry, _, normalID, _, _ := seededWorkspace(t)
+	sink := newFakeSink()
+
+	err := export.New(eventReadFailingRepository{Repository: repo}, sink).
+		Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})
+	// The event failure is surfaced, not swallowed.
+	gt.Error(t, err)
+
+	// The two levels that completed are written.
+	jobRuns := sink.table("ds", "job_runs")
+	gt.Value(t, jobRuns).NotNil().Required()
+	gt.Array(t, jobRuns.Rows).Length(2)
+	jobRunLogs := sink.table("ds", "job_run_logs")
+	gt.Value(t, jobRunLogs).NotNil().Required()
+	gt.Array(t, jobRunLogs.Rows).Length(2)
+	gt.Value(t, findRow(jobRunLogs, "case_id", normalID)).NotNil()
+
+	// The incomplete level is skipped entirely: a partial slice must never be
+	// published, because every write is a full refresh.
+	gt.Value(t, sink.table("ds", "job_run_events")).Nil()
+
+	// The unrelated tables are unaffected.
+	gt.Value(t, sink.table("ds", "cases")).NotNil()
+	gt.Value(t, sink.table("ds", "actions")).NotNil()
+	gt.Value(t, sink.table("ds", "memos")).NotNil()
 	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
 	gt.Value(t, sink.table("ds", "tags")).NotNil()
 }
@@ -317,12 +591,16 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	// Unique per-run table names within the shared, pre-provisioned dataset.
 	prefix := fmt.Sprintf("export_it_%d_", time.Now().UnixNano())
 	tbl := func(name string) string { return prefix + name }
-	for _, name := range []string{"cases", "actions", "memos", "knowledge", "tags"} {
+	for _, name := range []string{
+		"cases", "actions", "memos",
+		"job_runs", "job_run_logs", "job_run_events",
+		"knowledge", "tags",
+	} {
 		table := tbl(name)
 		t.Cleanup(func() { _ = client.Dataset(dataset).Table(table).Delete(ctx) })
 	}
 
-	repo, entry, wsID, normalID, privateID := seededWorkspace(t)
+	repo, entry, wsID, normalID, privateID, _ := seededWorkspace(t)
 	targets := []export.Target{{Entry: entry, Namespace: dataset}}
 	exporter := export.New(repo, sink, export.WithTablePrefix(prefix))
 
@@ -339,6 +617,54 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("memos"))).Length(2)
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("tags"))).Length(1)
 
+	// Job runs: one summary + one log per non-draft case, with the token totals
+	// read back through the real BigQuery INT64 columns.
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_runs"))).Length(2)
+	jobLogRows := readAllRows(t, ctx, client, dataset, tbl("job_run_logs"))
+	gt.Array(t, jobLogRows).Length(2).Required()
+	for _, r := range jobLogRows {
+		gt.Value(t, r["stage"]).Equal("SUCCESS")
+		gt.Value(t, r["run_id"]).Equal("run-triage")
+		gt.Value(t, r["input_tokens"]).Equal(int64(1500))
+		gt.Value(t, r["output_tokens"]).Equal(int64(210))
+		gt.Value(t, r["llm_call_count"]).Equal(int64(4))
+		gt.Value(t, r["tool_call_count"]).Equal(int64(6))
+	}
+
+	// The event timeline round-trips through the real BigQuery schema, including
+	// the JSON payload columns and the per-kind NULLs.
+	jobEventRows := readAllRows(t, ctx, client, dataset, tbl("job_run_events"))
+	gt.Array(t, jobEventRows).Length(8).Required()
+	var sawRequest, sawTool, sawEmptyPayload bool
+	for _, r := range jobEventRows {
+		switch r["kind"] {
+		case "LLM_REQUEST":
+			sawRequest = true
+			gt.Value(t, r["model"]).Equal("claude-opus-4-7")
+			gt.String(t, r["messages_json"].(string)).Contains("investigate the case")
+			gt.Value(t, r["tool_name"]).Nil()
+		case "TOOL_CALL":
+			sawTool = true
+			gt.Value(t, r["tool_name"]).Equal("slack_search")
+			gt.Value(t, r["tool_result_json"]).Equal(`{"hits":2}`)
+			gt.Value(t, r["parent_sequence"]).Equal(int64(2))
+			gt.Value(t, r["messages_json"]).Nil()
+		case "LLM_RESPONSE":
+			// The sequence-4 response carried no text and requested no tool. Its
+			// payload columns are NULL (the repository decodes a stored empty
+			// array as a nil slice) while its scalars still identify the call.
+			if r["sequence"] == int64(4) {
+				sawEmptyPayload = true
+				gt.Value(t, r["texts_json"]).Nil()
+				gt.Value(t, r["function_calls_json"]).Nil()
+				gt.Value(t, r["input_tokens"]).Equal(int64(90))
+			}
+		}
+	}
+	gt.Bool(t, sawRequest).True()
+	gt.Bool(t, sawTool).True()
+	gt.Bool(t, sawEmptyPayload).True()
+
 	// Second run: full refresh — the row count must not double.
 	gt.NoError(t, exporter.Run(ctx, targets)).Required()
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("cases"))).Length(2)
@@ -350,6 +676,9 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, privateFiltered).Length(1)
 	gt.Value(t, findRowByID(privateFiltered, privateID)).Nil()
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("actions"))).Length(1)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_runs"))).Length(1)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_logs"))).Length(1)
+	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_events"))).Length(4)
 
 	// Schema evolution: add a field, set it on the normal case, re-run. The new
 	// column must appear (evolved in place) and carry the value. The append right
