@@ -1,8 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
-import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client'
+import { ApolloClient, ApolloProvider } from '@apollo/client'
 import App from './App.tsx'
+import { createCache } from './graphql/cache.ts'
 import { AuthProvider } from './contexts/auth-context.tsx'
 import { WorkspaceProvider } from './contexts/workspace-context.tsx'
 import { I18nProvider } from './i18n/index.tsx'
@@ -10,7 +11,7 @@ import './styles/global.css'
 
 const client = new ApolloClient({
   uri: '/graphql',
-  cache: new InMemoryCache(),
+  cache: createCache(),
   credentials: 'include', // Include cookies for authentication
 })
 

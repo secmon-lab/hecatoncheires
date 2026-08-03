@@ -24,6 +24,7 @@ export const UPDATE_CASE_STATUS = gql`
   mutation UpdateCaseStatus($workspaceId: String!, $input: UpdateCaseStatusInput!) {
     updateCaseStatus(workspaceId: $workspaceId, input: $input) {
       id
+      workspaceId
       title
       status
       boardStatus

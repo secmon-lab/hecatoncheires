@@ -23,6 +23,7 @@ const CASE_MUTATION_FIELDS = gql`
   ${CASE_USER_FIELDS}
   fragment CaseMutationFields on Case {
     id
+    workspaceId
     title
     description
     status
@@ -96,6 +97,7 @@ export const GET_CASE = gql`
       slackChannelURL
       actions(filter: $actionsFilter) {
         id
+        workspaceId
         title
         status
         assigneeID
@@ -117,6 +119,7 @@ export const GET_CASE_MEMBERS = gql`
   query GetCaseMembers($workspaceId: String!, $id: Int!, $limit: Int, $offset: Int, $filter: String) {
     case(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       channelUserCount
       channelUsers(limit: $limit, offset: $offset, filter: $filter) {
         items {
@@ -175,6 +178,7 @@ export const SYNC_CASE_CHANNEL_USERS = gql`
   mutation SyncCaseChannelUsers($workspaceId: String!, $id: Int!) {
     syncCaseChannelUsers(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       channelUserCount
     }
   }
@@ -190,6 +194,7 @@ export const ASSIGN_CASE = gql`
   mutation AssignCase($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
     assignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
       id
+      workspaceId
       assigneeIDs
       assignees {
         ...CaseUserFields
@@ -204,6 +209,7 @@ export const UNASSIGN_CASE = gql`
   mutation UnassignCase($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
     unassignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
       id
+      workspaceId
       assigneeIDs
       assignees {
         ...CaseUserFields

@@ -7,6 +7,7 @@ export const GET_CASE_AGENT_SETTINGS = gql`
   query GetCaseAgentSettings($workspaceId: String!, $caseId: Int!) {
     case(workspaceId: $workspaceId, id: $caseId) {
       id
+      workspaceId
       title
       status
       isPrivate
@@ -39,6 +40,7 @@ export const UPDATE_CASE_AGENT_SETTINGS = gql`
   ) {
     updateCaseAgentSettings(workspaceId: $workspaceId, input: $input) {
       id
+      workspaceId
       agentAdditionalPrompt
       agentSources {
         id
@@ -104,6 +106,7 @@ export const GET_CASE_JOBS = gql`
   query GetCaseJobs($workspaceId: String!, $caseId: Int!) {
     caseJobs(workspaceId: $workspaceId, caseId: $caseId) {
       id
+      workspaceId
       name
       description
       strategy

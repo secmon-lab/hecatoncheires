@@ -95,12 +95,17 @@ export class ActionListPage extends BasePage {
   }
 
   /**
-   * Get the count displayed for a specific kanban column
+   * The count badge of a specific kanban column.
+   *
+   * Returned as a Locator rather than a resolved number so callers assert with
+   * `expect(locator).toHaveText(...)`, which retries. The search box filters
+   * client-side with no debounce, so a one-shot read taken right after
+   * `searchActions()` can land before React has committed the filtered board.
    */
-  async getColumnCount(columnTitle: string): Promise<number> {
-    const column = this.page.getByTestId(`kanban-column-${this.getColumnSlug(columnTitle)}`);
-    const countText = await column.locator('[class*="count"]').textContent();
-    return parseInt(countText || '0');
+  columnCount(columnTitle: string): Locator {
+    return this.page
+      .getByTestId(`kanban-column-${this.getColumnSlug(columnTitle)}`)
+      .locator('[class*="count"]');
   }
 
   /**

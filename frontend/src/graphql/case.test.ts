@@ -71,6 +71,9 @@ const USER_PATHS = (prefix: string): string[] => [
 // fragment refactor.
 const MUTATION_PATHS = [
   'id',
+  // workspaceId is part of the Case cache key (see graphql/cache.ts), so every
+  // Case selection set must carry it or Apollo silently stops normalizing.
+  'workspaceId',
   'title',
   'description',
   'status',
@@ -100,6 +103,7 @@ const DETAIL_PATHS = [
   'channelUserCount',
   'slackChannelURL',
   'actions.id',
+  'actions.workspaceId',
   'actions.title',
   'actions.status',
   'actions.assigneeID',

@@ -14,6 +14,7 @@ export const GET_ACTION_STEPS = gql`
   query GetActionSteps($workspaceId: String!, $id: Int!) {
     action(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       steps {
         ${ACTION_STEP_FIELDS}
       }

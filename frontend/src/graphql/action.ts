@@ -2,9 +2,11 @@ import { gql } from '@apollo/client'
 
 const ACTION_FIELDS = `
   id
+  workspaceId
   caseID
   case {
     id
+    workspaceId
     title
     slackChannelID
     slackChannelURL
@@ -51,6 +53,7 @@ export const GET_ACTION_MESSAGES = gql`
   query GetActionMessages($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
     action(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       messages(limit: $limit, cursor: $cursor) {
         items {
           id
@@ -82,6 +85,7 @@ export const GET_ACTION_EVENTS = gql`
   query GetActionEvents($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
     action(workspaceId: $workspaceId, id: $id) {
       id
+      workspaceId
       events(limit: $limit, cursor: $cursor) {
         items {
           id

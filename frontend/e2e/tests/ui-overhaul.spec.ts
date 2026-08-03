@@ -99,8 +99,8 @@ test.describe('UI overhaul regressions', () => {
     // Filter the kanban to just the action under test so unrelated seeded
     // actions don't perturb the column counts.
     await actionListPage.searchActions('DnD Action');
-    expect(await actionListPage.getColumnCount('Backlog')).toBe(1);
-    expect(await actionListPage.getColumnCount('In Progress')).toBe(0);
+    await expect(actionListPage.columnCount('Backlog')).toHaveText('1');
+    await expect(actionListPage.columnCount('In Progress')).toHaveText('0');
 
     await actionListPage.dragActionToColumn('DnD Action', 'In Progress');
 
@@ -108,8 +108,8 @@ test.describe('UI overhaul regressions', () => {
     await page.reload();
     await actionListPage.waitForBoardLoad();
     await actionListPage.searchActions('DnD Action');
-    expect(await actionListPage.getColumnCount('Backlog')).toBe(0);
-    expect(await actionListPage.getColumnCount('In Progress')).toBe(1);
+    await expect(actionListPage.columnCount('Backlog')).toHaveText('0');
+    await expect(actionListPage.columnCount('In Progress')).toHaveText('1');
   });
 
   test('react-select dropdowns are not clipped by the modal (use portal)', async ({ page }) => {

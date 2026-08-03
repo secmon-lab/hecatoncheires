@@ -18,6 +18,7 @@ const HOME_CASE_FIELDS = gql`
   ${HOME_USER_FIELDS}
   fragment HomeCaseFields on Case {
     id
+    workspaceId
     title
     status
     assigneeIDs
@@ -31,6 +32,7 @@ const HOME_CASE_FIELDS = gql`
 const HOME_ACTION_FIELDS = gql`
   fragment HomeActionFields on Action {
     id
+    workspaceId
     title
     status
     dueDate

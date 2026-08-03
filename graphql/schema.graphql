@@ -33,6 +33,12 @@ enum FieldType {
   MARKDOWN
 }
 
+# FieldOption and FieldDefinition are configuration value objects, not
+# entities: `id` is a config key that is only meaningful inside the enclosing
+# configuration document. The same id is reused across workspaces AND across
+# the two independent field configurations (FieldConfiguration.fields for
+# Cases, MemoConfiguration.fields for Memos), so no combination of fields
+# here identifies one globally. Clients MUST NOT cache these by identity.
 type FieldOption {
   id: String!
   name: String!
@@ -73,6 +79,11 @@ type FieldConfiguration {
 # operator in whatever language they prefer. `color` is either a semantic
 # preset name or a #RRGGBB hex code. See the user-facing config docs for
 # the accepted preset list.
+# Like FieldDefinition, this is a configuration value object rather than an
+# entity: the same id ("TODO") is defined independently per workspace and,
+# within one workspace, separately for Actions (fieldConfiguration.action-
+# Config) and for thread-mode Cases (caseStatusConfig). Clients MUST NOT
+# cache these by identity.
 type ActionStatusDefinition {
   id: ID!
   name: String!
@@ -155,6 +166,10 @@ type ChannelUserConnection {
 # Entity types
 type Case {
   id: Int!
+  # workspaceId scopes id: Case ids come from a per-workspace counter, so
+  # (workspaceId, id) — not id alone — identifies a Case. Clients that cache
+  # by identity MUST key on both.
+  workspaceId: String!
   title: String!
   description: String
   status: CaseStatus!
@@ -202,6 +217,9 @@ type Case {
 
 type Action {
   id: Int!
+  # workspaceId scopes id, exactly as on Case: Action ids come from a
+  # per-workspace counter, so (workspaceId, id) identifies an Action.
+  workspaceId: String!
   caseID: Int!
   case: Case
   title: String!
@@ -1028,6 +1046,9 @@ type JobTrigger {
 # (see Query.caseJobs).
 type CaseJob {
   id: String!
+  # workspaceId scopes id: Job ids are workspace-unique kebab-case keys from
+  # the workspace's TOML config, not global identifiers.
+  workspaceId: String!
   name: String!
   description: String!
   strategy: JobStrategy!
