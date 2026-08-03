@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	libslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
 
@@ -39,7 +40,7 @@ func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
 			teamID:    ev.TeamID,
 			userID:    evt.User,
 			userName:  evt.User, // Default to user ID, will be updated later if needed
-			text:      evt.Text,
+			text:      MessageBody(evt.Text, evt.Blocks, evt.Attachments),
 			eventTS:   evt.EventTimeStamp,
 			createdAt: now,
 		}
@@ -48,11 +49,20 @@ func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
 		if evt.ThreadTimeStamp != "" && evt.ThreadTimeStamp != evt.TimeStamp {
 			threadTS = evt.ThreadTimeStamp
 		}
-		var files []File
+		// MessageEvent carries `blocks` at the top level but NOT `attachments`;
+		// slack-go's custom unmarshaller re-decodes the whole payload into
+		// evt.Message, which is where the attachments (and the files below)
+		// land. An integration such as the GitHub Slack app puts the entire
+		// notification there and leaves evt.Text empty.
+		var (
+			files       []File
+			attachments []libslack.Attachment
+		)
 		if evt.Message != nil {
 			for _, f := range evt.Message.Files {
 				files = append(files, NewFileFromSlack(f))
 			}
+			attachments = evt.Message.Attachments
 		}
 		return &Message{
 			id:        evt.TimeStamp,
@@ -61,7 +71,7 @@ func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
 			teamID:    ev.TeamID,
 			userID:    evt.User,
 			userName:  evt.User, // Default to user ID
-			text:      evt.Text,
+			text:      MessageBody(evt.Text, evt.Blocks, attachments),
 			eventTS:   evt.EventTimeStamp,
 			files:     files,
 			createdAt: now,

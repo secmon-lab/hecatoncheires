@@ -3,6 +3,7 @@ package slack_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -366,4 +367,170 @@ func TestNewMessageFromData_WithFiles(t *testing.T) {
 	gt.Array(t, msg.Files()).Length(1)
 	gt.Value(t, msg.Files()[0].ID()).Equal("F001")
 	gt.Value(t, msg.Files()[0].Name()).Equal("test.png")
+}
+
+// A GitHub Slack integration notification arrives with an empty top-level
+// "text": the whole body lives in "attachments", which slack-go exposes only
+// through MessageEvent.Message (its custom unmarshaller re-decodes the payload
+// there). Reading evt.Text alone made every such PR notification look like an
+// empty message to the agent.
+func TestNewMessage_MessageEventWithAttachmentsFromJSON(t *testing.T) {
+	ctx := context.Background()
+
+	innerEventJSON := `{
+		"type": "message",
+		"subtype": "bot_message",
+		"text": "",
+		"ts": "1785673711.954009",
+		"channel": "C05CZJVUS5N",
+		"event_ts": "1785673711.954009",
+		"bot_id": "B01234567",
+		"attachments": [
+			{
+				"color": "36a64f",
+				"pretext": "Pull request opened by octocat",
+				"title": "#297 Add a Design Doc for coding agent usage observability",
+				"title_link": "https://github.com/example/design-doc/pull/297",
+				"text": "Adds a Design Doc describing how coding agent usage is observed.",
+				"fields": [
+					{"title": "Reviewers", "value": "@alice, @bob", "short": true},
+					{"title": "Comments", "value": "1", "short": true}
+				],
+				"footer": "example/design-doc"
+			}
+		]
+	}`
+
+	var msgEvent slackevents.MessageEvent
+	gt.NoError(t, json.Unmarshal([]byte(innerEventJSON), &msgEvent)).Required()
+
+	event := &slackevents.EventsAPIEvent{
+		Type:   slackevents.CallbackEvent,
+		TeamID: "T123456",
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &msgEvent,
+		},
+	}
+
+	msg := slack.NewMessage(ctx, event)
+	gt.Value(t, msg).NotNil().Required()
+
+	gt.Value(t, msg.Text()).Equal(strings.Join([]string{
+		"Pull request opened by octocat",
+		"#297 Add a Design Doc for coding agent usage observability",
+		"https://github.com/example/design-doc/pull/297",
+		"Adds a Design Doc describing how coding agent usage is observed.",
+		"Reviewers: @alice, @bob",
+		"Comments: 1",
+		"example/design-doc",
+	}, "\n"))
+}
+
+func TestNewMessage_MessageEventWithBlocksFromJSON(t *testing.T) {
+	ctx := context.Background()
+
+	innerEventJSON := `{
+		"type": "message",
+		"subtype": "bot_message",
+		"text": "",
+		"ts": "1785673711.954010",
+		"channel": "C05CZJVUS5N",
+		"event_ts": "1785673711.954010",
+		"blocks": [
+			{"type": "header", "text": {"type": "plain_text", "text": "Deploy finished"}},
+			{"type": "section", "text": {"type": "mrkdwn", "text": "*service*: api"}},
+			{"type": "divider"},
+			{"type": "context", "elements": [{"type": "mrkdwn", "text": "took 42s"}]}
+		]
+	}`
+
+	var msgEvent slackevents.MessageEvent
+	gt.NoError(t, json.Unmarshal([]byte(innerEventJSON), &msgEvent)).Required()
+
+	event := &slackevents.EventsAPIEvent{
+		Type:   slackevents.CallbackEvent,
+		TeamID: "T123456",
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &msgEvent,
+		},
+	}
+
+	msg := slack.NewMessage(ctx, event)
+	gt.Value(t, msg).NotNil().Required()
+	gt.Value(t, msg.Text()).Equal("Deploy finished\n*service*: api\ntook 42s")
+}
+
+// A human message carries the same content in "text" and in the rich_text
+// blocks Slack derives it from; it must not be doubled.
+func TestNewMessage_MessageEventHumanTextNotDuplicated(t *testing.T) {
+	ctx := context.Background()
+
+	innerEventJSON := `{
+		"type": "message",
+		"user": "U058S2H241M",
+		"text": "<@U023SNFKMB6> please review this",
+		"ts": "1785466360.561719",
+		"channel": "C05CZJVUS5N",
+		"event_ts": "1785466360.561719",
+		"blocks": [
+			{
+				"type": "rich_text",
+				"elements": [
+					{
+						"type": "rich_text_section",
+						"elements": [
+							{"type": "user", "user_id": "U023SNFKMB6"},
+							{"type": "text", "text": " please review this"}
+						]
+					}
+				]
+			}
+		]
+	}`
+
+	var msgEvent slackevents.MessageEvent
+	gt.NoError(t, json.Unmarshal([]byte(innerEventJSON), &msgEvent)).Required()
+
+	event := &slackevents.EventsAPIEvent{
+		Type:   slackevents.CallbackEvent,
+		TeamID: "T123456",
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &msgEvent,
+		},
+	}
+
+	msg := slack.NewMessage(ctx, event)
+	gt.Value(t, msg).NotNil().Required()
+	gt.Value(t, msg.Text()).Equal("<@U023SNFKMB6> please review this")
+}
+
+func TestNewMessage_AppMentionEventWithAttachments(t *testing.T) {
+	ctx := context.Background()
+
+	event := &slackevents.EventsAPIEvent{
+		Type:   slackevents.CallbackEvent,
+		TeamID: "T123456",
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "app_mention",
+			Data: &slackevents.AppMentionEvent{
+				Type:           "app_mention",
+				User:           "U123456",
+				Text:           "",
+				TimeStamp:      "1234567890.123456",
+				Channel:        "C123456",
+				EventTimeStamp: "1234567890.123456",
+				Attachments: []libslack.Attachment{{
+					Title: "Alert fired",
+					Text:  "cpu usage above threshold",
+				}},
+			},
+		},
+	}
+
+	msg := slack.NewMessage(ctx, event)
+	gt.Value(t, msg).NotNil().Required()
+	gt.Value(t, msg.Text()).Equal("Alert fired\ncpu usage above threshold")
 }

@@ -459,3 +459,88 @@ func TestGetConversationHistory(t *testing.T) {
 		gt.Value(t, values["slack_needed_scope"]).Equal("channels:history")
 	})
 }
+
+// The agent reads a case thread through its own User-token client. A GitHub
+// PR notification carries its body in attachments with an empty top-level
+// "text", so this path must render the attachment or the agent sees nothing —
+// the exact reason a Design Doc PR was classified as out of scope.
+func TestGetConversationReplies_AttachmentOnlyBody(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"messages": [
+				{
+					"type": "message",
+					"subtype": "bot_message",
+					"user": "U01UD9VJXQB",
+					"text": "",
+					"ts": "1785673711.954009",
+					"thread_ts": "1785673711.954009",
+					"attachments": [
+						{
+							"pretext": "Pull request opened by octocat",
+							"title": "#297 Add a Design Doc",
+							"title_link": "https://github.com/example/design-doc/pull/297",
+							"text": "Adds a Design Doc.",
+							"fields": [{"title": "Reviewers", "value": "@alice, @bob", "short": true}]
+						}
+					]
+				}
+			],
+			"has_more": false
+		}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+	got, err := svc.GetConversationReplies(context.Background(), "C05CZJVUS5N", "1785673711.954009", 32)
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, got).Length(1).Required()
+	gt.String(t, got[0].Text).Equal(strings.Join([]string{
+		"Pull request opened by octocat",
+		"#297 Add a Design Doc",
+		"https://github.com/example/design-doc/pull/297",
+		"Adds a Design Doc.",
+		"Reviewers: @alice, @bob",
+	}, "\n"))
+}
+
+func TestSearchMessages_AttachmentOnlyBody(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/search.messages", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"messages": {
+				"total": 1,
+				"matches": [
+					{
+						"type": "message",
+						"channel": {"id": "C05CZJVUS5N", "name": "help-tech-review"},
+						"user": "U01UD9VJXQB",
+						"username": "GitHub",
+						"text": "",
+						"ts": "1785673711.954009",
+						"permalink": "https://example.slack.com/archives/C05CZJVUS5N/p1785673711954009",
+						"attachments": [
+							{"title": "#297 Add a Design Doc", "text": "Adds a Design Doc."}
+						]
+					}
+				]
+			}
+		}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc := slacktool.NewSearchClientWithAPIURLForTest("xoxp-test", srv.URL+"/")
+	res, err := svc.SearchMessages(context.Background(), "design doc", slacktool.SearchOptions{})
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, res.Messages).Length(1).Required()
+	gt.String(t, res.Messages[0].Text).Equal("#297 Add a Design Doc\nAdds a Design Doc.")
+}

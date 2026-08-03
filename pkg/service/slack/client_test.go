@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
@@ -461,4 +463,74 @@ func TestBotPostsDisableUnfurl(t *testing.T) {
 		gt.NoError(t, err).Required()
 		assertUnfurlDisabled(t, "/chat.postEphemeral")
 	})
+}
+
+// conversations.replies / conversations.history must surface a message whose
+// body lives entirely in attachments (how the GitHub Slack app posts PR
+// notifications). Reading only the top-level "text" returned "" for those,
+// which is how a Design Doc PR reached the agent as an empty message.
+func TestGetConversationRepliesAndHistory_AttachmentOnlyBody(t *testing.T) {
+	payload := `{
+		"ok": true,
+		"messages": [
+			{
+				"type": "message",
+				"subtype": "bot_message",
+				"user": "U01UD9VJXQB",
+				"text": "",
+				"ts": "1785673711.954009",
+				"thread_ts": "1785673711.954009",
+				"attachments": [
+					{
+						"pretext": "Pull request opened by octocat",
+						"title": "#297 Add a Design Doc",
+						"title_link": "https://github.com/example/design-doc/pull/297",
+						"text": "Adds a Design Doc.",
+						"footer": "example/design-doc"
+					}
+				]
+			},
+			{
+				"type": "message",
+				"user": "U058S2H241M",
+				"text": "already implemented",
+				"ts": "1785673800.000100",
+				"thread_ts": "1785673711.954009"
+			}
+		]
+	}`
+
+	mux := http.NewServeMux()
+	for _, path := range []string{"/conversations.replies", "/conversations.history"} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(payload))
+		})
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, err := slack.NewWithAPIURLForTest("xoxb-test", srv.URL+"/")
+	gt.NoError(t, err).Required()
+
+	wantBody := strings.Join([]string{
+		"Pull request opened by octocat",
+		"#297 Add a Design Doc",
+		"https://github.com/example/design-doc/pull/297",
+		"Adds a Design Doc.",
+		"example/design-doc",
+	}, "\n")
+
+	replies, err := svc.GetConversationReplies(context.Background(), "C05CZJVUS5N", "1785673711.954009", 32)
+	gt.NoError(t, err).Required()
+	gt.Array(t, replies).Length(2).Required()
+	gt.String(t, replies[0].Text).Equal(wantBody)
+	gt.String(t, replies[0].UserID).Equal("U01UD9VJXQB")
+	gt.String(t, replies[1].Text).Equal("already implemented")
+
+	history, err := svc.GetConversationHistory(context.Background(), "C05CZJVUS5N", time.Unix(0, 0), 32)
+	gt.NoError(t, err).Required()
+	gt.Array(t, history).Length(2).Required()
+	gt.String(t, history[0].Text).Equal(wantBody)
+	gt.String(t, history[1].Text).Equal("already implemented")
 }
