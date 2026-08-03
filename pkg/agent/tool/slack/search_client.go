@@ -9,7 +9,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/slack-go/slack"
 
-	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
@@ -172,7 +171,7 @@ func (c *searchClient) SearchMessages(ctx context.Context, query string, opts Se
 			ChannelName: m.Channel.Name,
 			UserID:      m.User,
 			Username:    m.Username,
-			Text:        slackmodel.MessageBody(m.Text, m.Blocks, m.Attachments),
+			Text:        slackservice.MessageBody(m.Text, m.Blocks, m.Attachments),
 			Timestamp:   m.Timestamp,
 			Permalink:   m.Permalink,
 		})

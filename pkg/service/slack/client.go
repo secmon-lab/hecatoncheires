@@ -12,7 +12,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/slack-go/slack"
 
-	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/uierr"
 )
@@ -591,9 +590,9 @@ func (c *client) GetConversationHistory(ctx context.Context, channelID string, o
 }
 
 // ToConversationMessages converts slack-go messages to ConversationMessage.
-// The body goes through slackmodel.MessageBody because an integration such as
-// the GitHub Slack app renders its whole notification into `attachments` and
-// leaves `text` empty — reading msg.Text alone yields "" for those messages.
+// The body goes through MessageBody because an integration such as the GitHub
+// Slack app renders its whole notification into `attachments` and leaves
+// `text` empty — reading msg.Text alone yields "" for those messages.
 //
 // Exported because the agent's User-token client (pkg/agent/tool/slack) reads
 // the same endpoints with its own slack-go client and must not diverge on how
@@ -604,7 +603,7 @@ func ToConversationMessages(msgs []slack.Message) []ConversationMessage {
 		result = append(result, ConversationMessage{
 			UserID:    msg.User,
 			UserName:  msg.Username,
-			Text:      slackmodel.MessageBody(msg.Text, msg.Blocks, msg.Attachments),
+			Text:      MessageBody(msg.Text, msg.Blocks, msg.Attachments),
 			Timestamp: msg.Timestamp,
 			ThreadTS:  msg.ThreadTimestamp,
 		})

@@ -1358,3 +1358,53 @@ func TestBuildPreviewBlocks_Fallback(t *testing.T) {
 		gt.Value(t, fallback).NotEqual("Case draft: Broken auth")
 	})
 }
+
+// An integration that @-mentions the bot renders its payload into attachments
+// and leaves Text empty. The persisted MentionText must carry that body,
+// otherwise the planner is handed a blank mention.
+func TestMentionDraftUseCase_HandleAppMention_AttachmentOnlyMentionText(t *testing.T) {
+	repo := memory.New()
+	schema := &config.FieldSchema{Fields: []config.FieldDefinition{
+		{ID: "severity", Type: types.FieldTypeSelect,
+			Options: []config.FieldOption{{ID: "low"}, {ID: "high"}}},
+	}}
+	registry := newRegistryWithSchema("ws-only", "OnlyWS", schema)
+
+	slackMock := newCollectorOnlyMockSlack()
+	// captured records every prompt handed to the planner, so the test can
+	// assert the mention body actually reached it.
+	var captured []string
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					for _, i := range input {
+						if txt, ok := i.(gollem.Text); ok {
+							captured = append(captured, string(txt))
+						}
+					}
+					return &gollem.Response{Texts: []string{stubMaterializePlannerJSON("ws-only")}}, nil
+				},
+			}, nil
+		},
+	}
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, llm))
+	gt.Value(t, uc).NotNil().Required()
+
+	ev := &slackevents.AppMentionEvent{
+		Channel:   "C-USER",
+		User:      "U-USER",
+		Text:      "",
+		TimeStamp: "1700000010.000000",
+		Attachments: []goslack.Attachment{{
+			Title: "#297 Add a Design Doc",
+			Text:  "Adds a Design Doc describing coding agent usage.",
+		}},
+	}
+
+	gt.NoError(t, uc.HandleAppMention(context.Background(), ev)).Required()
+
+	gt.Array(t, captured).Length(1).Required()
+	gt.String(t, captured[0]).
+		Contains("#297 Add a Design Doc\nAdds a Design Doc describing coding agent usage.")
+}
