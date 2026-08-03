@@ -8,7 +8,7 @@ current state rather than accumulating history.
 - One **BigQuery dataset per workspace** (schemas differ per workspace because
   custom fields differ, and dataset-level IAM keeps access separated).
 - One **table per entity** within each dataset: `cases`, `actions`, `memos`,
-  `job_runs`, `job_run_logs`, `knowledge`, `tags`.
+  `job_runs`, `job_run_logs`, `job_run_events`, `knowledge`, `tags`.
 - Per-workspace **custom fields** are expanded into typed `field_<id>` columns.
 - Schema changes are detected and applied **in place** (columns are added; the
   table is never dropped/recreated), so downstream views and column ACLs
@@ -84,19 +84,23 @@ dataset names must be unique.
 | `actions` | Actions (archived included) | only actions whose parent Case is exported |
 | `memos` | Memos (archived included) | `field_<id>` per workspace memo field; only memos of exported cases |
 | `job_runs` | Latest run state per (case, job) | only runs of exported cases |
-| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt and token totals |
+| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt and its token / step totals |
+| `job_run_events` | One row per LLM call, tool execution or run error | the full timeline of every exported run, payload bodies included |
 | `knowledge` | Knowledge | workspace-level; embedding vector excluded |
 | `tags` | Tags | workspace-level |
 
 ### Agent run tables
 
-`job_runs` and `job_run_logs` are Case-scoped and follow the same privacy rule
-as Actions and Memos: a Case excluded from the export (a draft, or a private Case
-when `include_private` is off) contributes no rows to either table, so its
-prompts, errors and token counts never reach BigQuery.
+The three `job_run*` tables are Case-scoped and follow the same privacy rule as
+Actions and Memos: a Case excluded from the export (a draft, or a private Case
+when `include_private` is off) contributes no rows to any of them, so its
+prompts, tool results, errors and token counts never reach BigQuery.
 
-Join them on `(workspace_id, case_id, job_id)`; `job_run_logs` is keyed by
-`(workspace_id, case_id, job_id, run_id)`.
+The keys nest:
+
+- `job_runs` — `(workspace_id, case_id, job_id)`
+- `job_run_logs` — `(workspace_id, case_id, job_id, run_id)`
+- `job_run_events` — `(workspace_id, case_id, job_id, run_id, event_id)`
 
 `job_run_logs` is not limited to TOML-configured Jobs — every case-scoped agent
 run lands there, including Slack mentions handled by the case agent. The
@@ -104,12 +108,43 @@ run lands there, including Slack mentions handled by the case agent. The
 per-turn `job_id`), while Job runs carry their triggering event domain (`case`,
 `scheduled`, `manual`).
 
-`input_tokens` / `output_tokens` / `llm_call_count` are the run's totals across
-every LLM call it made — planner, sub-agents and the reflection pass included —
-accumulated while the run executes and stored on the run record. Interactive runs
-that paused for a question accumulate across both turns. **Runs that finished
-before these columns existed report zero; there is no backfill.** Per-call token
-figures are not exported (they live on the Firestore event timeline).
+#### Run totals on `job_run_logs`
+
+`input_tokens` / `output_tokens` / `llm_call_count` / `tool_call_count` are the
+run's totals across everything it did — planner, sub-agents and the reflection
+pass included — accumulated while the run executes and stored on the run record,
+so cost and size are available without touching `job_run_events`. A run's step
+count is `llm_call_count + tool_call_count`. Interactive runs that paused for a
+question accumulate across both turns. **Runs that finished before these columns
+existed report zero; there is no backfill.**
+
+#### The `job_run_events` timeline
+
+One flat table holds all four event kinds so a run reads back as a single ordered
+scan. `sequence` is the authoritative order within a run (document ids may
+diverge under clock skew), and `parent_sequence` links a `TOOL_CALL` back to the
+`LLM_RESPONSE` that requested it. Only the columns belonging to a row's `kind`
+are populated; the rest are NULL.
+
+| Columns | Populated for |
+|---------|---------------|
+| `model`, `messages_json`, `tools_json` | `LLM_REQUEST` |
+| `model`, `texts_json`, `function_calls_json`, `input_tokens`, `output_tokens`, `duration_ms` | `LLM_RESPONSE` |
+| `tool_name`, `tool_arguments_json`, `tool_result_json`, `tool_is_error`, `tool_error_message`, `tool_started_at`, `tool_ended_at` | `TOOL_CALL` |
+| `error_stage`, `error_message` | `RUN_ERROR` |
+
+**This table carries the agents' full conversation and tool payloads**, so it is
+by far the largest thing the export writes, and it grows superlinearly per run:
+each `LLM_REQUEST` holds the whole conversation as of that call, so a run with N
+LLM calls stores roughly N²/2 messages. Every export is a full refresh, so all of
+it is re-read from Firestore and re-written each time. Individual payload fields
+are capped at 800 KiB by the trace layer (longer values are truncated from the
+tail before they are persisted).
+
+Reading it costs one Firestore query per run, on top of one subcollection scan
+per case and one log query per (case, job) pair. Mention runs each get their own
+`job_id`, so a busy Case adds one of each per mention turn. The queries run
+serially.
 
 `pending_interaction` (the question form of a run sitting at `AWAITING_INPUT`) is
 deliberately not exported: it is transient state with no scalar representation.

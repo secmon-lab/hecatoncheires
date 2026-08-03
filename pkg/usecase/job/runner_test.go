@@ -629,12 +629,13 @@ func TestJobRunner_GoldenPath(t *testing.T) {
 	gt.String(t, log.EventType).Equal(string(model.JobEventDomainCase))
 	gt.Bool(t, log.EventTriggerAt.Equal(triggeredAt.UTC())).True()
 	gt.String(t, log.SystemPrompt).NotEqual("")
-	// The run's token totals come from the single LLM call the fixture LLM
-	// serves (120 in / 60 out), summed by the trace handler and stamped on the
-	// log before Finish.
+	// The run's totals come from the scripted agent loop below — one LLM call
+	// (120 in / 60 out) and one tool execution — summed by the trace handler and
+	// stamped on the log before Finish.
 	gt.Number(t, log.InputTokens).Equal(120)
 	gt.Number(t, log.OutputTokens).Equal(60)
 	gt.Number(t, log.LLMCallCount).Equal(1)
+	gt.Number(t, log.ToolCallCount).Equal(1)
 
 	// Assert event list: LLM_REQUEST -> LLM_RESPONSE -> TOOL_CALL.
 	events, err := repo.JobRunEvent().List(ctx, key, runID)

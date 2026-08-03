@@ -103,9 +103,9 @@ type JobInteractor struct {
 	// runningLog is the Stage=RUNNING JobRunLog created at run start; Solicit
 	// transitions a copy of it to AWAITING_INPUT.
 	runningLog *model.JobRunLog
-	// handler is this turn's trace handler. Solicit folds its token counts into
-	// the suspended log so the pre-question turn's usage is not lost: the
-	// resumed turn builds a fresh handler and adds to the persisted totals.
+	// handler is this turn's trace handler. Solicit folds its totals into the
+	// suspended log so the pre-question turn's usage is not lost: the resumed
+	// turn builds a fresh handler and adds to the persisted totals.
 	handler *runtrace.Handler
 	now     func() time.Time
 }
@@ -190,10 +190,10 @@ func (i *JobInteractor) Solicit(ctx context.Context, req interaction.Request) (i
 	suspendLog := *i.runningLog
 	suspendLog.Stage = model.JobRunStageAwaitingInput
 	suspendLog.PendingInteraction = pending
-	// Persist the tokens this turn burned before pausing. The totals go on the
-	// copy, not on runningLog: the resumed turn re-reads the log from storage,
-	// so double-counting would follow from mutating the shared pointer here.
-	runtrace.AddTokenUsage(&suspendLog, i.handler)
+	// Persist what this turn spent before pausing. The totals go on the copy,
+	// not on runningLog: the resumed turn re-reads the log from storage, so
+	// double-counting would follow from mutating the shared pointer here.
+	runtrace.AddRunTotals(&suspendLog, i.handler)
 	if err := i.repo.JobRunLog().Suspend(ctx, &suspendLog); err != nil {
 		return interaction.Outcome{}, goerr.Wrap(err, "suspend job run log",
 			goerr.V("job_id", i.key.JobID), goerr.V("run_id", i.runID))

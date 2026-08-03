@@ -346,6 +346,7 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			InputTokens:     4200,
 			OutputTokens:    360,
 			LLMCallCount:    9,
+			ToolCallCount:   14,
 		}
 		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
 
@@ -368,6 +369,7 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.Number(t, got.InputTokens).Equal(4200)
 		gt.Number(t, got.OutputTokens).Equal(360)
 		gt.Number(t, got.LLMCallCount).Equal(9)
+		gt.Number(t, got.ToolCallCount).Equal(14)
 	})
 
 	t.Run("Create rejects duplicate (key, runID)", func(t *testing.T) {

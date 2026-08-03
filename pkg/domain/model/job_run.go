@@ -232,16 +232,16 @@ type JobRunLog struct {
 	// Truncated from the tail to MaxInlineBytes if longer.
 	SystemPrompt string
 
-	// Token usage totals for the whole Run, summed over every LLM call the
-	// run made (planner, sub-agents and reflection alike). The per-call
-	// figures live on JobRunEvent.LLMResponse; these totals are accumulated
-	// by runtrace.Handler and stamped onto the log by the run's owner right
-	// before Suspend / Finish, so a consumer (the BigQuery export, the run
-	// detail UI) gets the run's cost without reading the event timeline.
+	// Totals for the whole Run, summed over everything the run did (planner,
+	// sub-agents and reflection alike). The per-call figures live on the
+	// JobRunEvent timeline; these totals are accumulated by runtrace.Handler
+	// and stamped onto the log by the run's owner right before Suspend /
+	// Finish, so a consumer (the BigQuery export, the run detail UI) gets the
+	// run's cost and size without reading the timeline.
 	//
 	// They accumulate ACROSS turns of an interactive Run: the suspending
 	// turn persists its own totals, and the resumed turn adds to them (see
-	// runtrace.AddTokenUsage). Runs recorded before these fields existed
+	// runtrace.AddRunTotals). Runs recorded before these fields existed
 	// stay at zero — there is no backfill.
 	InputTokens  int64
 	OutputTokens int64
@@ -250,6 +250,10 @@ type JobRunLog struct {
 	// model, whereas calls with zero tokens means the provider reported no
 	// usage.
 	LLMCallCount int64
+	// ToolCallCount is the number of tool executions the run performed.
+	// Together with LLMCallCount it gives the run's step count without
+	// reading the event timeline.
+	ToolCallCount int64
 
 	// PendingInteraction is set ONLY while Stage == AWAITING_INPUT: it holds
 	// the question put to the user and the Slack message coordinates needed
@@ -331,7 +335,7 @@ func (l *JobRunLog) Validate() error {
 		return goerr.New("system prompt exceeds MaxInlineBytes (truncate before save)",
 			goerr.V("len", len(l.SystemPrompt)))
 	}
-	// Token totals are monotonic counters; a negative value means an
+	// The run totals are monotonic counters; a negative value means an
 	// accumulator was mis-wired (e.g. a subtraction, or a provider figure
 	// coerced from an unsigned type that wrapped).
 	if l.InputTokens < 0 {
@@ -342,6 +346,9 @@ func (l *JobRunLog) Validate() error {
 	}
 	if l.LLMCallCount < 0 {
 		return goerr.New("llm call count is negative", goerr.V("llm_call_count", l.LLMCallCount))
+	}
+	if l.ToolCallCount < 0 {
+		return goerr.New("tool call count is negative", goerr.V("tool_call_count", l.ToolCallCount))
 	}
 	return nil
 }

@@ -187,19 +187,23 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 			}
 		}
 
-		// Job runs are Case-scoped and read per Case, so iterating the kept
-		// cases excludes an excluded Case's runs the same way memos are
-		// excluded. Both tables come from one traversal because job_run_logs is
-		// reached through the job_runs summary docs.
-		runs, logs, jobRunErr := e.collectJobRuns(ctx, wsID, cases)
+		// Agent run history is Case-scoped and read per Case, so iterating the
+		// kept cases excludes an excluded Case's runs the same way memos are
+		// excluded. All three tables come from one traversal: the logs are
+		// reached through the job_runs summary docs, and the events through the
+		// logs.
+		history, jobRunErr := e.collectJobRuns(ctx, wsID, cases)
 		if jobRunErr != nil {
 			errs = append(errs, jobRunErr)
 		} else {
-			if err := e.writeTable(ctx, ns, buildJobRunTable(runs)); err != nil {
+			if err := e.writeTable(ctx, ns, buildJobRunTable(history.runs)); err != nil {
 				errs = append(errs, goerr.Wrap(err, "failed to write job runs table"))
 			}
-			if err := e.writeTable(ctx, ns, buildJobRunLogTable(logs)); err != nil {
+			if err := e.writeTable(ctx, ns, buildJobRunLogTable(history.logs)); err != nil {
 				errs = append(errs, goerr.Wrap(err, "failed to write job run logs table"))
+			}
+			if err := e.writeTable(ctx, ns, buildJobRunEventTable(ctx, history.events)); err != nil {
+				errs = append(errs, goerr.Wrap(err, "failed to write job run events table"))
 			}
 		}
 	}
@@ -237,36 +241,57 @@ func (e *Exporter) collectMemos(ctx context.Context, wsID string, cases []*model
 	return memos, nil
 }
 
-// collectJobRuns gathers the per-(case, job) run summaries across the given
-// cases, plus every run log filed under each summary. Both come from the same
-// traversal: JobRunLog is only readable through a JobRunKey, which the summary
-// docs supply.
+// jobRunHistory is the case-scoped agent run history gathered in one traversal:
+// the per-(case, job) summaries, the run logs filed under them, and each run's
+// event timeline.
+type jobRunHistory struct {
+	runs   []*model.JobRun
+	logs   []*model.JobRunLog
+	events []*model.JobRunEvent
+}
+
+// collectJobRuns gathers the run summaries across the given cases, every run log
+// filed under each summary, and every event of each log. They come from one
+// traversal because each level is only readable through the level above it: a
+// JobRunLog needs the summary's JobRunKey, and an event list needs the log's
+// RunID.
 //
-// The read cost is one subcollection scan per case plus one per (case, job)
-// pair. Note that every mention-triggered run carries its own fresh JobID (see
-// model.EventTypeMention), so a busy Case contributes one summary doc — and one
-// log query — per mention turn.
-func (e *Exporter) collectJobRuns(ctx context.Context, wsID string, cases []*model.Case) ([]*model.JobRun, []*model.JobRunLog, error) {
-	var runs []*model.JobRun
-	var logs []*model.JobRunLog
+// This is the export's most read-heavy step: one subcollection scan per case,
+// one log query per (case, job) pair, and one event query per run. Every
+// mention-triggered run carries its own fresh JobID (see
+// model.EventTypeMention), so a busy Case contributes one summary doc, one log
+// query and one event query per mention turn. The queries run serially; if the
+// volume grows enough for the round trips to dominate, bounded concurrency here
+// is the lever.
+func (e *Exporter) collectJobRuns(ctx context.Context, wsID string, cases []*model.Case) (jobRunHistory, error) {
+	var out jobRunHistory
 	for _, c := range cases {
 		rs, err := e.repo.JobRun().ListByCase(ctx, wsID, c.ID)
 		if err != nil {
-			return nil, nil, goerr.Wrap(err, "failed to list job runs", goerr.V("case_id", c.ID))
+			return jobRunHistory{}, goerr.Wrap(err, "failed to list job runs", goerr.V("case_id", c.ID))
 		}
-		runs = append(runs, rs...)
+		out.runs = append(out.runs, rs...)
 		for _, r := range rs {
 			// limit 0 means no limit: the export is a full snapshot, so it must
 			// not silently drop a Job's older runs.
 			ls, err := e.repo.JobRunLog().List(ctx, r.Key(), 0)
 			if err != nil {
-				return nil, nil, goerr.Wrap(err, "failed to list job run logs",
+				return jobRunHistory{}, goerr.Wrap(err, "failed to list job run logs",
 					goerr.V("case_id", c.ID), goerr.V("job_id", r.JobID))
 			}
-			logs = append(logs, ls...)
+			out.logs = append(out.logs, ls...)
+			for _, l := range ls {
+				evs, err := e.repo.JobRunEvent().List(ctx, r.Key(), l.RunID)
+				if err != nil {
+					return jobRunHistory{}, goerr.Wrap(err, "failed to list job run events",
+						goerr.V("case_id", c.ID), goerr.V("job_id", r.JobID),
+						goerr.V("run_id", l.RunID))
+				}
+				out.events = append(out.events, evs...)
+			}
 		}
 	}
-	return runs, logs, nil
+	return out, nil
 }
 
 // filterNonPrivate returns only the cases that are not private.

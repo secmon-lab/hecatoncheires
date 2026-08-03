@@ -171,7 +171,7 @@ func (r *Recorder) Finish(ctx context.Context, execErr error) {
 	r.log.EndedAt = endedAt
 	// A mention run is never suspended, so this handler saw the whole run and
 	// the log's totals start at zero.
-	AddTokenUsage(r.log, r.handler)
+	AddRunTotals(r.log, r.handler)
 
 	status := model.JobRunStatusSuccess
 	if execErr != nil {

@@ -1,10 +1,10 @@
 package runtrace
 
-// TokenUsageForTest is the per-handler token total. Production code reaches it
-// only through AddTokenUsage, so the type stays unexported; tests need the
-// literal to assert the accumulation itself.
-type TokenUsageForTest = tokenUsage
+// RunTotalsForTest is the per-handler tally of tokens and call counts.
+// Production code reaches it only through AddRunTotals, so the type stays
+// unexported; tests need the literal to assert the accumulation itself.
+type RunTotalsForTest = runTotals
 
-// HandlerTokenUsageForTest exposes Handler.tokenUsage so tests can observe the
-// running total without persisting a JobRunLog first.
-func HandlerTokenUsageForTest(h *Handler) tokenUsage { return h.tokenUsage() }
+// HandlerRunTotalsForTest exposes Handler.runTotals so tests can observe the
+// running tally without persisting a JobRunLog first.
+func HandlerRunTotalsForTest(h *Handler) runTotals { return h.runTotals() }

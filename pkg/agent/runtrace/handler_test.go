@@ -158,36 +158,36 @@ func llmCall(input, output int) *trace.LLMCallData {
 	}
 }
 
-func TestHandler_TokenUsage_AccumulatesAcrossCalls(t *testing.T) {
+func TestHandler_RunTotals_AccumulatesTokensAcrossCalls(t *testing.T) {
 	h, _ := newHandlerFixture(t)
 	ctx := context.Background()
 
-	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{})
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{})
 
 	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(120, 60), nil)
 	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(30, 5), nil)
 
-	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{
 		InputTokens:  150,
 		OutputTokens: 65,
-		Calls:        2,
+		LLMCalls:     2,
 	})
 }
 
-func TestHandler_TokenUsage_IgnoresCallsWithNoData(t *testing.T) {
+func TestHandler_RunTotals_IgnoresCallsWithNoData(t *testing.T) {
 	h, _ := newHandlerFixture(t)
 	ctx := context.Background()
 
 	// nil LLMCallData appends no event, so it must not count as a call either.
 	h.EndLLMCall(h.StartLLMCall(ctx), nil, nil)
-	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{})
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{})
 
 	// A failed call still reports whatever tokens the provider billed.
 	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(10, 0), errors.New("upstream refused"))
-	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{InputTokens: 10, Calls: 1})
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{InputTokens: 10, LLMCalls: 1})
 }
 
-func TestHandler_TokenUsage_CountsConcurrentSubAgentCalls(t *testing.T) {
+func TestHandler_RunTotals_CountsConcurrentSubAgentCalls(t *testing.T) {
 	h, _ := newHandlerFixture(t)
 	ctx := context.Background()
 
@@ -204,36 +204,61 @@ func TestHandler_TokenUsage_CountsConcurrentSubAgentCalls(t *testing.T) {
 	}
 	wg.Wait()
 
-	gt.Value(t, runtrace.HandlerTokenUsageForTest(h)).Equal(runtrace.TokenUsageForTest{
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{
 		InputTokens:  2 * N,
 		OutputTokens: 3 * N,
-		Calls:        N,
+		LLMCalls:     N,
 	})
 }
 
-func TestAddTokenUsage(t *testing.T) {
+func TestHandler_RunTotals_CountsToolExecutions(t *testing.T) {
+	h, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	// A TOOL_CALL needs a preceding LLM_RESPONSE for its ParentSequence.
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(10, 2), nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", map[string]any{"q": "a"}), map[string]any{"hits": 1}, nil)
+	h.EndToolExec(h.StartToolExec(ctx, "notion_read", nil), nil, errors.New("page not found"))
+
+	// A failed tool execution is still a step the agent took, so it counts.
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{
+		InputTokens:  10,
+		OutputTokens: 2,
+		LLMCalls:     1,
+		ToolCalls:    2,
+	})
+}
+
+func TestAddRunTotals(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("adds to the totals already on the log", func(t *testing.T) {
 		h, _ := newHandlerFixture(t)
 		h.EndLLMCall(h.StartLLMCall(ctx), llmCall(40, 7), nil)
+		h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), nil, nil)
 
 		// A resumed run's log carries the suspended turn's totals.
-		log := &model.JobRunLog{InputTokens: 100, OutputTokens: 20, LLMCallCount: 3}
-		runtrace.AddTokenUsage(log, h)
+		log := &model.JobRunLog{
+			InputTokens: 100, OutputTokens: 20, LLMCallCount: 3, ToolCallCount: 5,
+		}
+		runtrace.AddRunTotals(log, h)
 
 		gt.Number(t, log.InputTokens).Equal(140)
 		gt.Number(t, log.OutputTokens).Equal(27)
 		gt.Number(t, log.LLMCallCount).Equal(4)
+		gt.Number(t, log.ToolCallCount).Equal(6)
 	})
 
 	t.Run("leaves the log untouched when there is no handler", func(t *testing.T) {
-		log := &model.JobRunLog{InputTokens: 100, OutputTokens: 20, LLMCallCount: 3}
-		runtrace.AddTokenUsage(log, nil)
+		log := &model.JobRunLog{
+			InputTokens: 100, OutputTokens: 20, LLMCallCount: 3, ToolCallCount: 5,
+		}
+		runtrace.AddRunTotals(log, nil)
 
 		gt.Number(t, log.InputTokens).Equal(100)
 		gt.Number(t, log.OutputTokens).Equal(20)
 		gt.Number(t, log.LLMCallCount).Equal(3)
+		gt.Number(t, log.ToolCallCount).Equal(5)
 	})
 }
 
