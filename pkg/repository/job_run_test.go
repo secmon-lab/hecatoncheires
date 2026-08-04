@@ -331,22 +331,24 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		started := time.Now().UTC().Truncate(time.Millisecond)
 		triggered := started.Add(-time.Second)
 		log := &model.JobRunLog{
-			WorkspaceID:     key.WorkspaceID,
-			CaseID:          key.CaseID,
-			JobID:           key.JobID,
-			RunID:           "run-1",
-			TraceID:         "trace-1",
-			Stage:           model.JobRunStageRunning,
-			StartedAt:       started,
-			ExecutorKind:    "single_loop",
-			ExecutorVersion: "v1",
-			EventType:       "CASE_OPENED",
-			EventTriggerAt:  triggered,
-			SystemPrompt:    "you are a careful agent",
-			InputTokens:     4200,
-			OutputTokens:    360,
-			LLMCallCount:    9,
-			ToolCallCount:   14,
+			WorkspaceID:              key.WorkspaceID,
+			CaseID:                   key.CaseID,
+			JobID:                    key.JobID,
+			RunID:                    "run-1",
+			TraceID:                  "trace-1",
+			Stage:                    model.JobRunStageRunning,
+			StartedAt:                started,
+			ExecutorKind:             "single_loop",
+			ExecutorVersion:          "v1",
+			EventType:                "CASE_OPENED",
+			EventTriggerAt:           triggered,
+			SystemPrompt:             "you are a careful agent",
+			InputTokens:              4200,
+			OutputTokens:             360,
+			CacheCreationInputTokens: 1100,
+			CacheReadInputTokens:     2600,
+			LLMCallCount:             9,
+			ToolCallCount:            14,
 		}
 		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
 
@@ -368,6 +370,8 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, got.SystemPrompt).Equal("you are a careful agent")
 		gt.Number(t, got.InputTokens).Equal(4200)
 		gt.Number(t, got.OutputTokens).Equal(360)
+		gt.Number(t, got.CacheCreationInputTokens).Equal(1100)
+		gt.Number(t, got.CacheReadInputTokens).Equal(2600)
 		gt.Number(t, got.LLMCallCount).Equal(9)
 		gt.Number(t, got.ToolCallCount).Equal(14)
 	})
@@ -701,9 +705,11 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 				FunctionCalls: []model.LLMFunctionCall{
 					{ID: "abc", Name: "slack_search", ArgumentsJSON: `{"q":"foo"}`},
 				},
-				InputTokens:  100,
-				OutputTokens: 50,
-				DurationMs:   1234,
+				InputTokens:              100,
+				OutputTokens:             50,
+				CacheCreationInputTokens: 30,
+				CacheReadInputTokens:     60,
+				DurationMs:               1234,
 			},
 		}
 		ev3 := &model.JobRunEvent{
@@ -776,6 +782,8 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.String(t, got[1].LLMResponse.FunctionCalls[0].ArgumentsJSON).Equal(`{"q":"foo"}`)
 		gt.Number(t, got[1].LLMResponse.InputTokens).Equal(100)
 		gt.Number(t, got[1].LLMResponse.OutputTokens).Equal(50)
+		gt.Number(t, got[1].LLMResponse.CacheCreationInputTokens).Equal(30)
+		gt.Number(t, got[1].LLMResponse.CacheReadInputTokens).Equal(60)
 		gt.Number(t, got[1].LLMResponse.DurationMs).Equal(1234)
 
 		// TOOL_CALL

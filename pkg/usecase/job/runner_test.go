@@ -634,6 +634,8 @@ func TestJobRunner_GoldenPath(t *testing.T) {
 	// stamped on the log before Finish.
 	gt.Number(t, log.InputTokens).Equal(120)
 	gt.Number(t, log.OutputTokens).Equal(60)
+	gt.Number(t, log.CacheCreationInputTokens).Equal(45)
+	gt.Number(t, log.CacheReadInputTokens).Equal(30)
 	gt.Number(t, log.LLMCallCount).Equal(1)
 	gt.Number(t, log.ToolCallCount).Equal(1)
 
@@ -662,6 +664,8 @@ func TestJobRunner_GoldenPath(t *testing.T) {
 	gt.String(t, events[1].LLMResponse.FunctionCalls[0].Name).Equal("slack_search")
 	gt.Number(t, events[1].LLMResponse.InputTokens).Equal(120)
 	gt.Number(t, events[1].LLMResponse.OutputTokens).Equal(60)
+	gt.Number(t, events[1].LLMResponse.CacheCreationInputTokens).Equal(45)
+	gt.Number(t, events[1].LLMResponse.CacheReadInputTokens).Equal(30)
 
 	gt.Value(t, events[2].Kind).Equal(model.JobRunEventKindToolCall)
 	gt.Number(t, events[2].Sequence).Equal(3)
@@ -691,6 +695,10 @@ var traceLLMCallDataForTest = trace.LLMCallData{
 	Model:        "claude-opus-4-7",
 	InputTokens:  120,
 	OutputTokens: 60,
+	// InputTokens is the provider's total and already includes these two, so
+	// they do not add up to it.
+	CacheCreationInputTokens: 45,
+	CacheReadInputTokens:     30,
 	Request: &trace.LLMRequest{
 		Messages: []trace.Message{
 			{
@@ -791,8 +799,14 @@ func TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume(t *testing.T) 
 	})
 
 	exec := &interactiveScriptedExecutor{
-		firstTokens:  trace.LLMCallData{Model: "m", InputTokens: 500, OutputTokens: 70},
-		secondTokens: trace.LLMCallData{Model: "m", InputTokens: 300, OutputTokens: 25},
+		firstTokens: trace.LLMCallData{
+			Model: "m", InputTokens: 500, OutputTokens: 70,
+			CacheCreationInputTokens: 400,
+		},
+		secondTokens: trace.LLMCallData{
+			Model: "m", InputTokens: 300, OutputTokens: 25,
+			CacheReadInputTokens: 250,
+		},
 	}
 	poster := &fakeQuestionPoster{returnTS: "FORM-TS-1"}
 	runner := job.NewJobRunner(job.RunnerDeps{
@@ -823,6 +837,8 @@ func TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume(t *testing.T) 
 	// to the terminal write.
 	gt.Number(t, suspended.InputTokens).Equal(500)
 	gt.Number(t, suspended.OutputTokens).Equal(70)
+	gt.Number(t, suspended.CacheCreationInputTokens).Equal(400)
+	gt.Number(t, suspended.CacheReadInputTokens).Equal(0)
 	gt.Number(t, suspended.LLMCallCount).Equal(1)
 
 	// --- Turn 2: the user answers and the run resumes to completion ------
@@ -847,6 +863,11 @@ func TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume(t *testing.T) 
 	// Both halves are billed to the same record: 500+300 in, 70+25 out, 2 calls.
 	gt.Number(t, final.InputTokens).Equal(800)
 	gt.Number(t, final.OutputTokens).Equal(95)
+	// The resumed turn builds a fresh handler and adds to the persisted totals,
+	// so the cache split must accumulate across the suspend boundary too: the
+	// first turn wrote the cache, the second read it back.
+	gt.Number(t, final.CacheCreationInputTokens).Equal(400)
+	gt.Number(t, final.CacheReadInputTokens).Equal(250)
 	gt.Number(t, final.LLMCallCount).Equal(2)
 }
 
@@ -1296,9 +1317,13 @@ func TestJobRunner_Reflection_TokensIncludeReflectionPass(t *testing.T) {
 	j := reflectionJob("summarize", true)
 	repo, c := setupCase(t, wsID)
 
-	fake := &fakeReflector{emitTokens: &trace.LLMCallData{Model: "m", InputTokens: 40, OutputTokens: 9}}
+	fake := &fakeReflector{emitTokens: &trace.LLMCallData{
+		Model: "m", InputTokens: 40, OutputTokens: 9, CacheReadInputTokens: 20,
+	}}
 	histRepo := agentarchive.NewMemoryHistoryRepository()
-	exec := &historyWritingExecutor{emitTokens: &trace.LLMCallData{Model: "m", InputTokens: 200, OutputTokens: 30}}
+	exec := &historyWritingExecutor{emitTokens: &trace.LLMCallData{
+		Model: "m", InputTokens: 200, OutputTokens: 30, CacheCreationInputTokens: 150,
+	}}
 
 	gt.NoError(t, runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)).Required()
 	gt.Array(t, fake.calls).Length(1).Required()
@@ -1310,6 +1335,10 @@ func TestJobRunner_Reflection_TokensIncludeReflectionPass(t *testing.T) {
 	// The executor's call (200/30) plus the reflection call (40/9).
 	gt.Number(t, logs[0].InputTokens).Equal(240)
 	gt.Number(t, logs[0].OutputTokens).Equal(39)
+	// The reflection pass contributes to the cache split as well: 150 written by
+	// the executor's call, 20 read back by the reflection call.
+	gt.Number(t, logs[0].CacheCreationInputTokens).Equal(150)
+	gt.Number(t, logs[0].CacheReadInputTokens).Equal(20)
 	gt.Number(t, logs[0].LLMCallCount).Equal(2)
 }
 

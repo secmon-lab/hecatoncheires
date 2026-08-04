@@ -53,19 +53,21 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	h := rec.Handler()
 	llmCtx := h.StartLLMCall(ctx)
 	h.EndLLMCall(llmCtx, &trace.LLMCallData{
-		Model:        "m",
-		InputTokens:  310,
-		OutputTokens: 44,
-		Request:      &trace.LLMRequest{},
-		Response:     &trace.LLMResponse{Texts: []string{"done"}},
+		Model:                    "m",
+		InputTokens:              310,
+		OutputTokens:             44,
+		CacheCreationInputTokens: 200,
+		Request:                  &trace.LLMRequest{},
+		Response:                 &trace.LLMResponse{Texts: []string{"done"}},
 	}, nil)
 	llmCtx2 := h.StartLLMCall(ctx)
 	h.EndLLMCall(llmCtx2, &trace.LLMCallData{
-		Model:        "m",
-		InputTokens:  90,
-		OutputTokens: 6,
-		Request:      &trace.LLMRequest{},
-		Response:     &trace.LLMResponse{Texts: []string{"and done"}},
+		Model:                "m",
+		InputTokens:          90,
+		OutputTokens:         6,
+		CacheReadInputTokens: 70,
+		Request:              &trace.LLMRequest{},
+		Response:             &trace.LLMResponse{Texts: []string{"and done"}},
 	}, nil)
 	h.EndToolExec(h.StartToolExec(ctx, "slack_search", map[string]any{"q": "x"}), map[string]any{"hits": 0}, nil)
 	rec.Finish(ctx, nil)
@@ -82,6 +84,10 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	// without reading the event timeline.
 	gt.Number(t, done.InputTokens).Equal(400)
 	gt.Number(t, done.OutputTokens).Equal(50)
+	// The prompt-cache split survives the mention path's own Finish, which
+	// materialises the log without going through the Job runner.
+	gt.Number(t, done.CacheCreationInputTokens).Equal(200)
+	gt.Number(t, done.CacheReadInputTokens).Equal(70)
 	gt.Number(t, done.LLMCallCount).Equal(2)
 	gt.Number(t, done.ToolCallCount).Equal(1)
 

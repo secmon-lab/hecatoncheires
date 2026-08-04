@@ -123,6 +123,21 @@ they are one call's figures rather than the run's total. Do not sum the
 `job_run_logs` columns across a run's events, or compare the two without
 qualifying which table you mean.
 
+`cache_creation_input_tokens` / `cache_read_input_tokens` split out the
+prompt-cache share of `input_tokens`, which **already includes both** — do not add
+them to it. `cache_read_input_tokens` is the part served from the provider's prompt
+cache (billed at a fraction of an uncached input token); `cache_creation_input_tokens`
+is the part written to it (billed at a premium). A run's cache hit rate is
+`cache_read_input_tokens / input_tokens`.
+
+Zero is not evidence that caching was off: it is also what a provider reports when
+the cache simply did not hit, and the two cases are indistinguishable here. The
+breakdown is also provider-dependent — **only Claude reports both halves.** OpenAI
+and Gemini report the cached read count alone, so `cache_creation_input_tokens`
+stays zero for them however well the cache is working; do not read it as "nothing
+was cached" on those providers. As with the other totals, **runs that finished
+before these columns existed report zero.**
+
 `llm_call_count` counts every attempt to reach the model, including one that
 failed before any response arrived (a provider that cannot open its stream reports
 no call data). Such an attempt produces no `job_run_events` row, so
@@ -140,7 +155,7 @@ populated; the rest are NULL.
 | Columns | Populated for |
 |---------|---------------|
 | `model`, `messages_json`, `tools_json` | `LLM_REQUEST` |
-| `model`, `texts_json`, `function_calls_json`, `input_tokens`, `output_tokens`, `duration_ms` | `LLM_RESPONSE` |
+| `model`, `texts_json`, `function_calls_json`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `duration_ms` | `LLM_RESPONSE` |
 | `tool_name`, `tool_arguments_json`, `tool_result_json`, `tool_is_error`, `tool_error_message`, `tool_started_at`, `tool_ended_at` | `TOOL_CALL` |
 | `error_stage`, `error_message` | `RUN_ERROR` |
 

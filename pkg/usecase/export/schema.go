@@ -167,30 +167,34 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 		{Name: "system_prompt", Type: TypeString, Nullable: true},
 		{Name: "input_tokens", Type: TypeInt, Nullable: true},
 		{Name: "output_tokens", Type: TypeInt, Nullable: true},
+		{Name: "cache_creation_input_tokens", Type: TypeInt, Nullable: true},
+		{Name: "cache_read_input_tokens", Type: TypeInt, Nullable: true},
 		{Name: "llm_call_count", Type: TypeInt, Nullable: true},
 		{Name: "tool_call_count", Type: TypeInt, Nullable: true},
 	}
 	rows := make([]map[string]any, 0, len(logs))
 	for _, l := range logs {
 		rows = append(rows, map[string]any{
-			"workspace_id":     l.WorkspaceID,
-			"case_id":          l.CaseID,
-			"job_id":           l.JobID,
-			"run_id":           l.RunID,
-			"trace_id":         l.TraceID,
-			"stage":            string(l.Stage),
-			"started_at":       l.StartedAt,
-			"ended_at":         l.EndedAt,
-			"error":            l.Error,
-			"executor_kind":    l.ExecutorKind,
-			"executor_version": l.ExecutorVersion,
-			"event_type":       l.EventType,
-			"event_trigger_at": l.EventTriggerAt,
-			"system_prompt":    l.SystemPrompt,
-			"input_tokens":     l.InputTokens,
-			"output_tokens":    l.OutputTokens,
-			"llm_call_count":   l.LLMCallCount,
-			"tool_call_count":  l.ToolCallCount,
+			"workspace_id":                l.WorkspaceID,
+			"case_id":                     l.CaseID,
+			"job_id":                      l.JobID,
+			"run_id":                      l.RunID,
+			"trace_id":                    l.TraceID,
+			"stage":                       string(l.Stage),
+			"started_at":                  l.StartedAt,
+			"ended_at":                    l.EndedAt,
+			"error":                       l.Error,
+			"executor_kind":               l.ExecutorKind,
+			"executor_version":            l.ExecutorVersion,
+			"event_type":                  l.EventType,
+			"event_trigger_at":            l.EventTriggerAt,
+			"system_prompt":               l.SystemPrompt,
+			"input_tokens":                l.InputTokens,
+			"output_tokens":               l.OutputTokens,
+			"cache_creation_input_tokens": l.CacheCreationInputTokens,
+			"cache_read_input_tokens":     l.CacheReadInputTokens,
+			"llm_call_count":              l.LLMCallCount,
+			"tool_call_count":             l.ToolCallCount,
 		})
 	}
 	return &Table{Name: "job_run_logs", Columns: cols, Rows: rows}
@@ -229,6 +233,8 @@ func buildJobRunEventTable(ctx context.Context, events []*model.JobRunEvent) *Ta
 		{Name: "function_calls_json", Type: TypeString, Nullable: true},
 		{Name: "input_tokens", Type: TypeInt, Nullable: true},
 		{Name: "output_tokens", Type: TypeInt, Nullable: true},
+		{Name: "cache_creation_input_tokens", Type: TypeInt, Nullable: true},
+		{Name: "cache_read_input_tokens", Type: TypeInt, Nullable: true},
 		{Name: "duration_ms", Type: TypeInt, Nullable: true},
 
 		// TOOL_CALL.
@@ -281,6 +287,8 @@ func addEventPayload(ctx context.Context, row map[string]any, e *model.JobRunEve
 		row["function_calls_json"] = encodeEventJSON(ctx, e, "function_calls", p.FunctionCalls)
 		row["input_tokens"] = p.InputTokens
 		row["output_tokens"] = p.OutputTokens
+		row["cache_creation_input_tokens"] = p.CacheCreationInputTokens
+		row["cache_read_input_tokens"] = p.CacheReadInputTokens
 		row["duration_ms"] = p.DurationMs
 	}
 	if p := e.ToolCall; p != nil {

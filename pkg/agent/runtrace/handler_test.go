@@ -84,9 +84,11 @@ func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
 
 	ctxLLM := h.StartLLMCall(ctx)
 	data := &trace.LLMCallData{
-		Model:        "claude-opus-4-7",
-		InputTokens:  120,
-		OutputTokens: 60,
+		Model:                    "claude-opus-4-7",
+		InputTokens:              120,
+		OutputTokens:             60,
+		CacheCreationInputTokens: 70,
+		CacheReadInputTokens:     30,
 		Request: &trace.LLMRequest{
 			Messages: []trace.Message{
 				{
@@ -142,6 +144,8 @@ func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
 	gt.String(t, respEv.LLMResponse.FunctionCalls[0].ArgumentsJSON).Equal(`{"q":"foo"}`)
 	gt.Number(t, respEv.LLMResponse.InputTokens).Equal(120)
 	gt.Number(t, respEv.LLMResponse.OutputTokens).Equal(60)
+	gt.Number(t, respEv.LLMResponse.CacheCreationInputTokens).Equal(70)
+	gt.Number(t, respEv.LLMResponse.CacheReadInputTokens).Equal(30)
 	// DurationMs is computed from the clock; fixedClock returns the same time,
 	// so the difference is 0 ms.
 	gt.Number(t, respEv.LLMResponse.DurationMs).Equal(0)
@@ -150,11 +154,18 @@ func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
 // llmCall is a minimal LLMCallData carrying only the token figures, for tests
 // that care about accumulation rather than payload content.
 func llmCall(input, output int) *trace.LLMCallData {
+	return llmCallWithCache(input, output, 0, 0)
+}
+
+// llmCallWithCache is llmCall plus the prompt-cache split of the input figure.
+func llmCallWithCache(input, output, cacheCreation, cacheRead int) *trace.LLMCallData {
 	return &trace.LLMCallData{
-		Model:        "claude-opus-4-7",
-		InputTokens:  input,
-		OutputTokens: output,
-		Response:     &trace.LLMResponse{Texts: []string{"ok"}},
+		Model:                    "claude-opus-4-7",
+		InputTokens:              input,
+		OutputTokens:             output,
+		CacheCreationInputTokens: cacheCreation,
+		CacheReadInputTokens:     cacheRead,
+		Response:                 &trace.LLMResponse{Texts: []string{"ok"}},
 	}
 }
 
@@ -171,6 +182,28 @@ func TestHandler_RunTotals_AccumulatesTokensAcrossCalls(t *testing.T) {
 		InputTokens:  150,
 		OutputTokens: 65,
 		LLMCalls:     2,
+	})
+}
+
+func TestHandler_RunTotals_AccumulatesPromptCacheTokens(t *testing.T) {
+	h, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	// First call writes the cache, the second reads it back. InputTokens is the
+	// provider's total and already includes the cache figures, so the three
+	// counters accumulate independently rather than one being derived from
+	// the others.
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCallWithCache(1000, 40, 900, 0), nil)
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCallWithCache(1200, 30, 0, 900), nil)
+	// A provider that reports no cache usage leaves the split at zero.
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(100, 10), nil)
+
+	gt.Value(t, runtrace.HandlerRunTotalsForTest(h)).Equal(runtrace.RunTotalsForTest{
+		InputTokens:              2300,
+		OutputTokens:             80,
+		CacheCreationInputTokens: 900,
+		CacheReadInputTokens:     900,
+		LLMCalls:                 3,
 	})
 }
 
@@ -240,29 +273,37 @@ func TestAddRunTotals(t *testing.T) {
 
 	t.Run("adds to the totals already on the log", func(t *testing.T) {
 		h, _ := newHandlerFixture(t)
-		h.EndLLMCall(h.StartLLMCall(ctx), llmCall(40, 7), nil)
+		h.EndLLMCall(h.StartLLMCall(ctx), llmCallWithCache(40, 7, 12, 8), nil)
 		h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), nil, nil)
 
 		// A resumed run's log carries the suspended turn's totals.
 		log := &model.JobRunLog{
-			InputTokens: 100, OutputTokens: 20, LLMCallCount: 3, ToolCallCount: 5,
+			InputTokens: 100, OutputTokens: 20,
+			CacheCreationInputTokens: 30, CacheReadInputTokens: 50,
+			LLMCallCount: 3, ToolCallCount: 5,
 		}
 		runtrace.AddRunTotals(log, h)
 
 		gt.Number(t, log.InputTokens).Equal(140)
 		gt.Number(t, log.OutputTokens).Equal(27)
+		gt.Number(t, log.CacheCreationInputTokens).Equal(42)
+		gt.Number(t, log.CacheReadInputTokens).Equal(58)
 		gt.Number(t, log.LLMCallCount).Equal(4)
 		gt.Number(t, log.ToolCallCount).Equal(6)
 	})
 
 	t.Run("leaves the log untouched when there is no handler", func(t *testing.T) {
 		log := &model.JobRunLog{
-			InputTokens: 100, OutputTokens: 20, LLMCallCount: 3, ToolCallCount: 5,
+			InputTokens: 100, OutputTokens: 20,
+			CacheCreationInputTokens: 30, CacheReadInputTokens: 50,
+			LLMCallCount: 3, ToolCallCount: 5,
 		}
 		runtrace.AddRunTotals(log, nil)
 
 		gt.Number(t, log.InputTokens).Equal(100)
 		gt.Number(t, log.OutputTokens).Equal(20)
+		gt.Number(t, log.CacheCreationInputTokens).Equal(30)
+		gt.Number(t, log.CacheReadInputTokens).Equal(50)
 		gt.Number(t, log.LLMCallCount).Equal(3)
 		gt.Number(t, log.ToolCallCount).Equal(5)
 	})
