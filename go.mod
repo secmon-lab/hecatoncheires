@@ -3,6 +3,7 @@ module github.com/secmon-lab/hecatoncheires
 go 1.26.4
 
 require (
+	cloud.google.com/go/bigquery v1.79.0
 	cloud.google.com/go/firestore v1.24.0
 	cloud.google.com/go/storage v1.63.1
 	github.com/99designs/gqlgen v0.17.94
@@ -39,7 +40,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/bigquery v1.79.0 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
@@ -52,7 +52,6 @@ require (
 	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect
 	github.com/lestrrat-go/httprc/v3 v3.0.6 // indirect
 	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
-	github.com/m-mizutani/bqs v0.1.0 // indirect
 	github.com/open-policy-agent/opa v1.18.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
@@ -200,7 +199,7 @@ require (
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260715232425-e75dac1f907d // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20251109230715-65adef8e2c5b // indirect
 	mvdan.cc/sh/v3 v3.12.0 // indirect

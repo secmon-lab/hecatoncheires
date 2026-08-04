@@ -114,11 +114,12 @@ func (e *Exporter) writeTable(ctx context.Context, namespace string, t *Table) e
 // caller (and its error reporter) sees every one.
 //
 // Single-instance assumption: Run is designed to be invoked by ONE process at a
-// time. The per-table refresh (TRUNCATE then append via the sink) is not atomic
-// and takes no distributed lock, so two overlapping exports of the same
-// destination can interleave and duplicate rows. This is a deliberate,
-// documented constraint (the export is a singly-run batch job, e.g. a scheduled
-// task with no overlap), not an oversight — see docs/export.md.
+// time and takes no distributed lock. Each table's refresh is staged in full
+// before it replaces the destination, so overlapping runs cannot interleave
+// into a half-written table — every snapshot is complete, and the destination
+// ends up holding whichever run swapped last. This is a deliberate, documented
+// constraint (the export is a singly-run batch job, e.g. a scheduled task with
+// no overlap), not an oversight — see docs/export.md.
 func (e *Exporter) Run(ctx context.Context, targets []Target) error {
 	logger := logging.From(ctx)
 	var errs []error

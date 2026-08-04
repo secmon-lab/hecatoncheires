@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -326,7 +327,33 @@ func encodeEventJSON(ctx context.Context, e *model.JobRunEvent, field string, v 
 	if string(b) == "null" {
 		return nil
 	}
+	if len(b) > maxEventJSONBytes {
+		errutil.Handle(ctx, goerr.New("job run event payload field exceeds the export cell limit",
+			goerr.V("field", field),
+			goerr.V("run_id", e.RunID),
+			goerr.V("sequence", e.Sequence),
+			goerr.V("bytes", len(b)),
+			goerr.V("limit_bytes", maxEventJSONBytes)),
+			"export job run event payload")
+		return oversizedJSONPlaceholder(len(b))
+	}
 	return string(b)
+}
+
+// maxEventJSONBytes caps one job_run_events JSON cell. Each individual payload
+// string is already truncated to model.MaxInlineBytes when it is recorded, but
+// the arrays holding them are unbounded — an LLM_REQUEST carries the whole
+// conversation as of that call — so the marshalled column needs its own cap.
+// Without it a single row can outgrow the Storage Write API's per-request
+// limit, which no batching can split.
+const maxEventJSONBytes = model.MaxInlineBytes
+
+// oversizedJSONPlaceholder is written in place of a JSON cell over the cap.
+// Cutting the JSON at a byte offset would produce a value every consumer fails
+// to parse, so the payload is replaced wholesale by a valid document that
+// records how large the original was.
+func oversizedJSONPlaceholder(originalBytes int) string {
+	return fmt.Sprintf(`{"oversized":true,"original_bytes":%d}`, originalBytes)
 }
 
 // buildKnowledgeTable builds the "knowledge" table (Embedding is intentionally

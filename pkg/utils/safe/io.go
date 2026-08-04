@@ -2,6 +2,7 @@ package safe
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -12,12 +13,30 @@ import (
 // Close safely closes an io.Closer and reports any error via errutil.Handle.
 // It handles nil closers gracefully.
 func Close(ctx context.Context, closer io.Closer) {
+	CloseExcept(ctx, closer)
+}
+
+// CloseExcept closes an io.Closer and reports the error via errutil.Handle
+// unless it matches one of the given sentinels. It exists because some Close
+// implementations use a sentinel to signal a normal shutdown — BigQuery's
+// managedwriter returns io.EOF from Close on a healthy stream — and reporting
+// that as an error buries real failures under per-call noise. Pass no
+// sentinels to get the plain Close behaviour. It handles nil closers
+// gracefully.
+func CloseExcept(ctx context.Context, closer io.Closer, ignore ...error) {
 	if closer == nil {
 		return
 	}
-	if err := closer.Close(); err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "failed to close"), "failed to close")
+	err := closer.Close()
+	if err == nil {
+		return
 	}
+	for _, ig := range ignore {
+		if errors.Is(err, ig) {
+			return
+		}
+	}
+	errutil.Handle(ctx, goerr.Wrap(err, "failed to close"), "failed to close")
 }
 
 // Write safely writes data to an io.Writer and reports any error via errutil.Handle.

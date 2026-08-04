@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/bqexport"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/export"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 )
 
@@ -539,6 +541,26 @@ func TestExporter_Run_eventFailureKeepsJobRunTables(t *testing.T) {
 	gt.Value(t, sink.table("ds", "tags")).NotNil()
 }
 
+// deleteTableOnCleanup registers dataset.table for deletion and fails the test
+// if the delete does not go through — a live test that quietly leaves tables
+// behind in the shared test dataset would keep passing while it litters. A 404
+// is the one tolerated outcome: the run can fail before a given table is ever
+// created, and turning that into a cleanup failure would bury the real one.
+func deleteTableOnCleanup(t *testing.T, ctx context.Context, client *bq.Client, dataset, table string) {
+	t.Helper()
+	t.Cleanup(func() {
+		err := client.Dataset(dataset).Table(table).Delete(ctx)
+		if err == nil {
+			return
+		}
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && gerr.Code == 404 {
+			return
+		}
+		gt.NoError(t, err)
+	})
+}
+
 // readAllRows reads every row of dataset.table back from BigQuery.
 func readAllRows(t *testing.T, ctx context.Context, client *bq.Client, dataset, table string) []map[string]bq.Value {
 	t.Helper()
@@ -596,8 +618,7 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 		"job_runs", "job_run_logs", "job_run_events",
 		"knowledge", "tags",
 	} {
-		table := tbl(name)
-		t.Cleanup(func() { _ = client.Dataset(dataset).Table(table).Delete(ctx) })
+		deleteTableOnCleanup(t, ctx, client, dataset, tbl(name))
 	}
 
 	repo, entry, wsID, normalID, privateID, _ := seededWorkspace(t)
@@ -681,8 +702,7 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	gt.Array(t, readAllRows(t, ctx, client, dataset, tbl("job_run_events"))).Length(4)
 
 	// Schema evolution: add a field, set it on the normal case, re-run. The new
-	// column must appear (evolved in place) and carry the value. The append right
-	// after Table.Update may hit SCHEMA_MISMATCH and is retried internally.
+	// column must appear and carry the value.
 	entry.FieldSchema.Fields = append(entry.FieldSchema.Fields,
 		domainconfig.FieldDefinition{ID: "newfield", Type: types.FieldTypeText})
 	normalCase, err := repo.Case().Get(ctx, wsID, normalID)
@@ -706,4 +726,68 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 	evolved := findRowByID(readAllRows(t, ctx, client, dataset, tbl("cases")), normalID)
 	gt.Value(t, evolved).NotNil().Required()
 	gt.Value(t, evolved["field_newfield"]).Equal("evolved")
+
+	// Field retyped from single-value to multi-select. This is the shape of the
+	// production outage: the live column is STRING NULLABLE and the export now
+	// wants ARRAY<STRING>. The run must complete and the column must end up
+	// REPEATED, with no operator step in between.
+	for i := range entry.FieldSchema.Fields {
+		if entry.FieldSchema.Fields[i].ID == "severity" {
+			entry.FieldSchema.Fields[i].Type = types.FieldTypeMultiSelect
+		}
+	}
+	retyped, err := repo.Case().Get(ctx, wsID, normalID)
+	gt.NoError(t, err).Required()
+	retyped.FieldValues["severity"] = model.FieldValue{
+		FieldID: "severity", Type: types.FieldTypeMultiSelect, Value: []string{"high", "urgent"},
+	}
+	_, err = repo.Case().Update(ctx, wsID, retyped)
+	gt.NoError(t, err).Required()
+
+	gt.NoError(t, export.New(repo, sink, export.WithTablePrefix(prefix)).Run(ctx, targets)).Required()
+
+	mdRetyped, err := client.Dataset(dataset).Table(tbl("cases")).Metadata(ctx)
+	gt.NoError(t, err).Required()
+	var severityField *bq.FieldSchema
+	for _, f := range mdRetyped.Schema {
+		if f.Name == "field_severity" {
+			severityField = f
+		}
+	}
+	gt.Value(t, severityField).NotNil().Required()
+	gt.Bool(t, severityField.Repeated).True()
+	gt.Value(t, severityField.Type).Equal(bq.StringFieldType)
+
+	multi := findRowByID(readAllRows(t, ctx, client, dataset, tbl("cases")), normalID)
+	gt.Value(t, multi).NotNil().Required()
+	gt.Value(t, multi["field_severity"]).Equal([]bq.Value{"high", "urgent"})
+
+	// A field removed from the workspace schema must disappear from the table:
+	// the destination carries exactly the columns the export produces.
+	remaining := make([]domainconfig.FieldDefinition, 0, len(entry.FieldSchema.Fields))
+	for _, f := range entry.FieldSchema.Fields {
+		if f.ID != "newfield" {
+			remaining = append(remaining, f)
+		}
+	}
+	entry.FieldSchema.Fields = remaining
+
+	gt.NoError(t, export.New(repo, sink, export.WithTablePrefix(prefix)).Run(ctx, targets)).Required()
+
+	mdDropped, err := client.Dataset(dataset).Table(tbl("cases")).Metadata(ctx)
+	gt.NoError(t, err).Required()
+	for _, f := range mdDropped.Schema {
+		gt.Value(t, f.Name).NotEqual("field_newfield")
+	}
+
+	// The staging tables are throwaway: none may outlive the run that made them.
+	stagingIt := client.Dataset(dataset).Tables(ctx)
+	for {
+		tb, err := stagingIt.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		gt.NoError(t, err).Required()
+		gt.Bool(t, strings.HasPrefix(tb.TableID, prefix) && strings.Contains(tb.TableID, "_stg_")).False()
+	}
 }
