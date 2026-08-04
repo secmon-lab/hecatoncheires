@@ -20,11 +20,13 @@ func cmdTick() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var llmCfg config.LLM
+	var jobCfg config.JobConcurrency
 
 	var flags []cli.Flag
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, jobCfg.Flags()...)
 
 	return &cli.Command{
 		Name:  "tick",
@@ -33,7 +35,11 @@ func cmdTick() *cli.Command {
 		Action: func(ctx context.Context, c *cli.Command) error {
 			logger := logging.From(ctx)
 
-			deps, err := buildTickRuntime(ctx, &appCfg, &repoCfg, &llmCfg, c)
+			if err := jobCfg.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid job concurrency configuration")
+			}
+
+			deps, err := buildTickRuntime(ctx, &appCfg, &repoCfg, &llmCfg, &jobCfg, c)
 			if err != nil {
 				return goerr.Wrap(err, "failed to build tick runtime")
 			}

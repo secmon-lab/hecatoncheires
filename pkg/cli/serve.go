@@ -170,6 +170,7 @@ func cmdServe() *cli.Command {
 	var storageCfg config.Storage
 	var sentryCfg config.Sentry
 	var mcpCfg config.MCP
+	var jobCfg config.JobConcurrency
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -234,6 +235,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, storageCfg.Flags()...)
 	flags = append(flags, sentryCfg.Flags()...)
 	flags = append(flags, mcpCfg.Flags()...)
+	flags = append(flags, jobCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -247,6 +249,10 @@ func cmdServe() *cli.Command {
 			// strictly better than refusing to serve.
 			sentryCfg.Configure(ctx)
 			defer errutil.FlushSentry(2 * time.Second)
+
+			if err := jobCfg.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid job concurrency configuration")
+			}
 
 			// Load workspace configurations and build registry
 			workspaceConfigs, registry, err := appCfg.Configure(c)
@@ -515,7 +521,7 @@ func cmdServe() *cli.Command {
 			if llmErr != nil {
 				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
 			}
-			jobUC, jobRunner := buildJobRuntime(jobRuntimeDeps{
+			jobUC, jobRunner, jobErr := buildJobRuntime(jobRuntimeDeps{
 				Repo:           repo,
 				Registry:       registry,
 				LLMClient:      llmClient,
@@ -528,7 +534,12 @@ func cmdServe() *cli.Command {
 				JiraTools:      jiraTools,
 				HistoryRepo:    agentHistoryRepo,
 				TraceRepo:      agentTraceRepo,
+				SlotLimit:      jobCfg.Limit(),
 			})
+			if jobErr != nil {
+				return goerr.Wrap(jobErr, "failed to build job runtime")
+			}
+			logging.Default().Info("Agent Job runtime configured", logAttrsToArgs(jobCfg.LogAttrs())...)
 			uc.Case.SetEventPublisher(jobUC)
 			// The web UI's manual Run button drives the same runner through
 			// JobRunUseCase.TriggerJob.

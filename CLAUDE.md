@@ -230,6 +230,7 @@ The application is configured via CLI flags or environment variables:
 - `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
 - `HECATONCHEIRES_DASHBOARD_STALE_THRESHOLD` - Age after which an open Case with no update is flagged as "stalled" on the home dashboard (default: `336h` = 14 days; `0` disables). See `docs/cli.md`.
 - `HECATONCHEIRES_HOME_MESSAGE_LLM_*` - Optional dedicated LLM for the home dashboard greeting (`_PROVIDER`, `_MODEL`, `_OPENAI_API_KEY`, `_CLAUDE_API_KEY`, `_GEMINI_PROJECT_ID`, `_GEMINI_LOCATION`). Falls back to the main LLM (`HECATONCHEIRES_LLM_*`) when unset; greeting is disabled if neither is configured. See `docs/cli.md`.
+- `HECATONCHEIRES_JOB_MAX_CONCURRENCY` - Maximum number of **scheduled** Agent Job runs executing concurrently across the whole deployment (default: `1`; `0` disables the limit). Enforced via Firestore execution slots (`jobSlots/{index}`), so it holds across instances; set the same value on `serve` and `tick`. A run that finds no free slot is skipped and retried on the next tick. See `docs/operations.md` § Deployment-wide concurrency limit.
 - `HECATONCHEIRES_MCP` - Enable the read-only MCP endpoint at `/mcp` (default: `false`). Requires `HECATONCHEIRES_POLICY`. See `docs/mcp.md`.
 - `HECATONCHEIRES_POLICY` - Rego policy file/directory path(s) authorizing MCP requests (`data.auth.mcp`). Required when MCP is enabled.
 - `HECATONCHEIRES_MCP_ENV` - Allow-list of environment variable names exposed to the Rego policy as `input.env`.
