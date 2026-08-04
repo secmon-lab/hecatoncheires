@@ -245,6 +245,15 @@ type JobRunLog struct {
 	// stay at zero — there is no backfill.
 	InputTokens  int64
 	OutputTokens int64
+	// CacheCreationInputTokens / CacheReadInputTokens split out the prompt-cache
+	// share of InputTokens, which already includes both. They exist because the
+	// hit rate is not derivable from InputTokens alone, and because the two
+	// halves are billed at different rates than an uncached input token — a
+	// cache read costs a fraction of it, a cache write a premium over it.
+	// Providers that report no cache usage leave both at zero, which is
+	// indistinguishable from "the cache never hit".
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
 	// LLMCallCount is the number of LLM calls the run made. It makes a zero
 	// token total interpretable: zero calls means the run never reached the
 	// model, whereas calls with zero tokens means the provider reported no
@@ -343,6 +352,14 @@ func (l *JobRunLog) Validate() error {
 	}
 	if l.OutputTokens < 0 {
 		return goerr.New("output tokens is negative", goerr.V("output_tokens", l.OutputTokens))
+	}
+	if l.CacheCreationInputTokens < 0 {
+		return goerr.New("cache creation input tokens is negative",
+			goerr.V("cache_creation_input_tokens", l.CacheCreationInputTokens))
+	}
+	if l.CacheReadInputTokens < 0 {
+		return goerr.New("cache read input tokens is negative",
+			goerr.V("cache_read_input_tokens", l.CacheReadInputTokens))
 	}
 	if l.LLMCallCount < 0 {
 		return goerr.New("llm call count is negative", goerr.V("llm_call_count", l.LLMCallCount))
@@ -628,9 +645,14 @@ type LLMResponsePayload struct {
 	Model         string            // echoed back (LLMCallData.Model)
 	Texts         []string          // LLMResponse.Texts
 	FunctionCalls []LLMFunctionCall // LLMResponse.FunctionCalls
-	InputTokens   int64             // LLMCallData.InputTokens
+	InputTokens   int64             // LLMCallData.InputTokens (total, cache included)
 	OutputTokens  int64             // LLMCallData.OutputTokens
-	DurationMs    int64             // wall-clock time between Start/End hook
+	// Prompt-cache share of InputTokens for this one call. Zero when the
+	// provider reported no cache usage. See JobRunLog for why the split is
+	// kept rather than derived.
+	CacheCreationInputTokens int64 // LLMCallData.CacheCreationInputTokens
+	CacheReadInputTokens     int64 // LLMCallData.CacheReadInputTokens
+	DurationMs               int64 // wall-clock time between Start/End hook
 }
 
 // LLMFunctionCall mirrors gollem trace.FunctionCall.

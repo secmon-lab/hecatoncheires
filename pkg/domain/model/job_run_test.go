@@ -214,6 +214,8 @@ func TestJobRunLog_Validate(t *testing.T) {
 		l := validJobRunLog()
 		l.InputTokens = 1200
 		l.OutputTokens = 340
+		l.CacheCreationInputTokens = 500
+		l.CacheReadInputTokens = 600
 		l.LLMCallCount = 7
 		l.ToolCallCount = 11
 		gt.NoError(t, l.Validate())
@@ -226,6 +228,16 @@ func TestJobRunLog_Validate(t *testing.T) {
 	t.Run("negative output tokens", func(t *testing.T) {
 		l := validJobRunLog()
 		l.OutputTokens = -1
+		gt.Error(t, l.Validate())
+	})
+	t.Run("negative cache creation input tokens", func(t *testing.T) {
+		l := validJobRunLog()
+		l.CacheCreationInputTokens = -1
+		gt.Error(t, l.Validate())
+	})
+	t.Run("negative cache read input tokens", func(t *testing.T) {
+		l := validJobRunLog()
+		l.CacheReadInputTokens = -1
 		gt.Error(t, l.Validate())
 	})
 	t.Run("negative llm call count", func(t *testing.T) {

@@ -145,12 +145,14 @@ func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID in
 
 	resp := baseEvent(2, model.JobRunEventKindLLMResponse)
 	resp.LLMResponse = &model.LLMResponsePayload{
-		Model:         "claude-opus-4-7",
-		Texts:         []string{"let me search"},
-		FunctionCalls: []model.LLMFunctionCall{{ID: "fc-1", Name: "slack_search", ArgumentsJSON: `{"q":"foo"}`}},
-		InputTokens:   1200,
-		OutputTokens:  180,
-		DurationMs:    1450,
+		Model:                    "claude-opus-4-7",
+		Texts:                    []string{"let me search"},
+		FunctionCalls:            []model.LLMFunctionCall{{ID: "fc-1", Name: "slack_search", ArgumentsJSON: `{"q":"foo"}`}},
+		InputTokens:              1200,
+		OutputTokens:             180,
+		CacheCreationInputTokens: 400,
+		CacheReadInputTokens:     700,
+		DurationMs:               1450,
 	}
 	gt.NoError(t, repo.JobRunEvent().Append(ctx, resp)).Required()
 
@@ -180,6 +182,8 @@ func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID in
 	log.EndedAt = now.Add(time.Minute)
 	log.InputTokens = 1500
 	log.OutputTokens = 210
+	log.CacheCreationInputTokens = 400
+	log.CacheReadInputTokens = 700
 	log.LLMCallCount = 4
 	log.ToolCallCount = 6
 	gt.NoError(t, repo.JobRunLog().Finish(ctx, log)).Required()
@@ -355,6 +359,8 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.Value(t, normalLogRow["system_prompt"]).Equal("you are the job agent")
 	gt.Value(t, normalLogRow["input_tokens"]).Equal(int64(1500))
 	gt.Value(t, normalLogRow["output_tokens"]).Equal(int64(210))
+	gt.Value(t, normalLogRow["cache_creation_input_tokens"]).Equal(int64(400))
+	gt.Value(t, normalLogRow["cache_read_input_tokens"]).Equal(int64(700))
 	gt.Value(t, normalLogRow["llm_call_count"]).Equal(int64(4))
 	gt.Value(t, normalLogRow["tool_call_count"]).Equal(int64(6))
 
@@ -382,6 +388,8 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.String(t, respRow["function_calls_json"].(string)).Contains("fc-1")
 	gt.Value(t, respRow["input_tokens"]).Equal(int64(1200))
 	gt.Value(t, respRow["output_tokens"]).Equal(int64(180))
+	gt.Value(t, respRow["cache_creation_input_tokens"]).Equal(int64(400))
+	gt.Value(t, respRow["cache_read_input_tokens"]).Equal(int64(700))
 	gt.Value(t, respRow["duration_ms"]).Equal(int64(1450))
 	gt.True(t, respRow["messages_json"] == nil)
 
@@ -406,6 +414,10 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.True(t, emptyRow["texts_json"] == nil)
 	gt.True(t, emptyRow["function_calls_json"] == nil)
 	gt.Value(t, emptyRow["input_tokens"]).Equal(int64(90))
+	// A provider that reported no prompt-cache usage exports zeros, not NULL:
+	// the call did happen and its cache share was nil.
+	gt.Value(t, emptyRow["cache_creation_input_tokens"]).Equal(int64(0))
+	gt.Value(t, emptyRow["cache_read_input_tokens"]).Equal(int64(0))
 
 	// Knowledge / Tag.
 	knowledge := sink.table("ds", "knowledge")
@@ -648,6 +660,8 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 		gt.Value(t, r["run_id"]).Equal("run-triage")
 		gt.Value(t, r["input_tokens"]).Equal(int64(1500))
 		gt.Value(t, r["output_tokens"]).Equal(int64(210))
+		gt.Value(t, r["cache_creation_input_tokens"]).Equal(int64(400))
+		gt.Value(t, r["cache_read_input_tokens"]).Equal(int64(700))
 		gt.Value(t, r["llm_call_count"]).Equal(int64(4))
 		gt.Value(t, r["tool_call_count"]).Equal(int64(6))
 	}
@@ -679,6 +693,7 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 				gt.Value(t, r["texts_json"]).Nil()
 				gt.Value(t, r["function_calls_json"]).Nil()
 				gt.Value(t, r["input_tokens"]).Equal(int64(90))
+				gt.Value(t, r["cache_read_input_tokens"]).Equal(int64(0))
 			}
 		}
 	}

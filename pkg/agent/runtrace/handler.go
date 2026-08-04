@@ -117,6 +117,11 @@ type Handler struct {
 type runTotals struct {
 	InputTokens  int64
 	OutputTokens int64
+	// CacheCreationInputTokens / CacheReadInputTokens are the prompt-cache
+	// share of InputTokens (which already includes them), tallied so a run's
+	// cache hit rate is readable off the log without scanning the timeline.
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
 	// LLMCalls is the number of LLM calls counted. Zero distinguishes "never
 	// reached the model" from "the provider reported no token usage".
 	LLMCalls int64
@@ -221,6 +226,8 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	h.lastLLMResponseSeq = respEv.Sequence
 	h.totals.InputTokens += respEv.LLMResponse.InputTokens
 	h.totals.OutputTokens += respEv.LLMResponse.OutputTokens
+	h.totals.CacheCreationInputTokens += respEv.LLMResponse.CacheCreationInputTokens
+	h.totals.CacheReadInputTokens += respEv.LLMResponse.CacheReadInputTokens
 	h.mu.Unlock()
 }
 
@@ -249,6 +256,8 @@ func AddRunTotals(log *model.JobRunLog, h *Handler) {
 	t := h.runTotals()
 	log.InputTokens += t.InputTokens
 	log.OutputTokens += t.OutputTokens
+	log.CacheCreationInputTokens += t.CacheCreationInputTokens
+	log.CacheReadInputTokens += t.CacheReadInputTokens
 	log.LLMCallCount += t.LLMCalls
 	log.ToolCallCount += t.ToolCalls
 }
@@ -448,10 +457,12 @@ func (defaultPayloadTruncator) LLMResponseFromTrace(data *trace.LLMCallData, dur
 		return &model.LLMResponsePayload{DurationMs: durationMs}
 	}
 	p := &model.LLMResponsePayload{
-		Model:        data.Model,
-		InputTokens:  int64(data.InputTokens),
-		OutputTokens: int64(data.OutputTokens),
-		DurationMs:   durationMs,
+		Model:                    data.Model,
+		InputTokens:              int64(data.InputTokens),
+		OutputTokens:             int64(data.OutputTokens),
+		CacheCreationInputTokens: int64(data.CacheCreationInputTokens),
+		CacheReadInputTokens:     int64(data.CacheReadInputTokens),
+		DurationMs:               durationMs,
 	}
 	if data.Response != nil {
 		p.Texts = make([]string, 0, len(data.Response.Texts))
