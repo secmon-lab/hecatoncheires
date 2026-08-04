@@ -2,17 +2,18 @@
 
 The `export` subcommand writes the current data of every configured workspace to
 BigQuery for analysis. Each run is a **full refresh** ("洗替"): every table is
-truncated and reloaded with the latest snapshot, so BigQuery always mirrors the
-current state rather than accumulating history.
+replaced with the latest snapshot, so BigQuery always mirrors the current state
+rather than accumulating history.
 
 - One **BigQuery dataset per workspace** (schemas differ per workspace because
   custom fields differ, and dataset-level IAM keeps access separated).
 - One **table per entity** within each dataset: `cases`, `actions`, `memos`,
   `job_runs`, `job_run_logs`, `job_run_events`, `knowledge`, `tags`.
 - Per-workspace **custom fields** are expanded into typed `field_<id>` columns.
-- Schema changes are detected and applied **in place** (columns are added; the
-  table is never dropped/recreated), so downstream views and column ACLs
-  survive.
+- **The destination's schema is whatever the export produces, every run.** The
+  previous schema is not consulted, so a column whose type or mode changed is
+  replaced rather than rejected, and a column no longer produced disappears. No
+  operator step is ever required to reconcile a schema.
 
 Writes use the BigQuery **Storage Write API** (`managedwriter`, pending stream).
 
@@ -152,6 +153,14 @@ it is re-read from Firestore and re-written each time. Individual payload fields
 are capped at 800 KiB by the trace layer (longer values are truncated from the
 tail before they are persisted).
 
+A single JSON column is capped at the same 800 KiB. Individual payload strings
+are already truncated when recorded, but the arrays holding them are not bounded
+— an `LLM_REQUEST` carries the whole conversation as of that call — so a long run
+can produce a `messages_json` past the cap. Such a cell is replaced by
+`{"oversized":true,"original_bytes":<n>}` rather than cut at a byte offset,
+which would leave a value no consumer can parse. The cap is what keeps one row
+inside the Storage Write API's per-request limit, which no batching can split.
+
 Reading it costs one Firestore query per run, on top of one subcollection scan
 per case and one log query per (case, job) pair. Mention runs each get their own
 `job_id`, so a busy Case adds one of each per mention turn. The queries run
@@ -192,36 +201,75 @@ Custom field column types: `text` / `markdown` / `url` / `select` / `user` /
 
 ## Full-refresh semantics (important)
 
-The Storage Write API is append-only and has no truncate mode, so each table is
-refreshed as `TRUNCATE TABLE` followed by an append. These are two separate
-operations, so during a refresh there is a brief window where the table is empty
-or partially written — **the refresh is not atomic**. If the append fails after
-the truncate, the table can be left empty until the next run. For a periodic
-analytics export this is an accepted trade-off (chosen for simplicity over a
-staging-table swap).
+The Storage Write API is append-only and has no truncate mode, so a refresh
+cannot write over a table in place. Each table is instead refreshed in three
+steps:
 
-**Run `export` as a single instance at a time.** Because the refresh is not
-atomic, two overlapping `export` runs against the same dataset can interleave
-their truncate/append and leave duplicated rows (both snapshots committed). The
-command is intended to be run singly (a manual invocation or a scheduled job with
-no overlap); it does **not** take a distributed lock. If you schedule it, ensure
-the schedule interval exceeds the run time, or gate it so a new run does not start
-while the previous one is still going.
+1. Create a throwaway **staging table** — `<table>_stg_<random>` in the same
+   dataset — carrying the schema this run produces.
+2. Append every row into the staging table through the Storage Write API.
+3. Replace the destination with it:
+   `CREATE OR REPLACE TABLE <dest> (<columns>) AS SELECT <columns> FROM <staging>`.
+   The staging table is then dropped.
 
-Schema evolution note: after a schema change (a new custom field), the Storage
-Write backend can take several minutes to accept the new columns; the export
-retries the append under a bounded backoff (up to 15 minutes) to absorb that
-delay.
+The swap reads the staging table with a `SELECT` rather than copying it. A table
+copy (`CREATE OR REPLACE TABLE ... COPY`) operates on committed storage and does
+**not** see rows still in the write-optimized storage the Storage Write API
+lands them in, so a copy immediately after the append yields an empty
+destination without reporting an error. The column list is spelled out because a
+bare `AS SELECT *` makes every output column `NULLABLE`, which would drop the
+`REQUIRED` mode from the exported schema.
+
+Because the swap is a query, each run scans the data it just wrote — the export
+now costs one full scan of the exported volume per run on top of the write.
+
+Two consequences matter to consumers:
+
+- **The destination is only touched by step 3.** If anything fails before it,
+  the destination keeps the previous snapshot; it is never left empty or
+  half-written. The swap itself is a single statement.
+- **A run interrupted during step 3 leaves the outcome unknown.** The swap is a
+  BigQuery query job: if the process is cancelled or times out while waiting for
+  it, the job keeps running server-side. The export asks BigQuery to cancel it
+  and drops the staging table (both on a context detached from the cancelled
+  one, so they still run), but `jobs.cancel` is asynchronous and a swap that
+  already committed cannot be undone. The error says so; treat the destination
+  as "either the previous snapshot or this run's" until the next run settles it.
+- **The destination's schema is replaced wholesale.** Column descriptions,
+  policy tags, table labels and table-level IAM do not survive a run. Grant
+  access at the dataset level, and keep any column metadata in a view rather
+  than on the exported table.
+
+The Storage Write destination is always a brand-new table name. Deleting a table
+and recreating it under the same name leaves the write backend's metadata stale
+for a while, and appends can then be routed to the deleted table and the rows
+lost without an error; writing only to fresh names avoids that entirely.
+
+**Run `export` as a single instance at a time.** The command does **not** take a
+distributed lock. Two overlapping runs each write their own staging table, so no
+rows are duplicated, but the destination ends up holding whichever snapshot
+swapped last. If you schedule it, ensure the schedule interval exceeds the run
+time.
+
+A staging table left behind by a crashed run is not an operator problem: every
+staging table is created with an expiration a few hours out, so BigQuery
+reclaims it.
+
+Rows are appended in batches bounded by both row count and encoded size, because
+the Storage Write API rejects an `AppendRows` request larger than 10 MB and that
+limit cannot be raised.
 
 ## Required IAM
 
 The identity running `export` needs, on the destination project/datasets, roughly
 `roles/bigquery.dataEditor` plus `roles/bigquery.jobUser`:
 
-- create datasets / tables (`bigquery.datasets.create`, `bigquery.tables.create`)
-- update table schemas (`bigquery.tables.update`)
+- create datasets / tables, including the per-run staging tables
+  (`bigquery.datasets.create`, `bigquery.tables.create`)
+- delete the staging tables (`bigquery.tables.delete`)
 - run jobs and read/write table data — including the Storage Write API and the
-  `TRUNCATE` query (`bigquery.jobs.create`, `bigquery.tables.getData`,
+  `CREATE OR REPLACE TABLE ... AS SELECT` swap (`bigquery.jobs.create`,
+  `bigquery.tables.get`, `bigquery.tables.getData`,
   `bigquery.tables.updateData`)
 
 ## Live tests
