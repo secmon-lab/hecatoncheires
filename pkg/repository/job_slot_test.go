@@ -243,8 +243,14 @@ func runJobSlotRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.NoError(t, err).Required()
 		gt.Bool(t, acquired).True()
 
+		// A minute in the past, not exactly AcquiredAt: Firestore stores
+		// timestamps at microsecond precision, so a stored AcquiredAt is
+		// slightly *below* the nanosecond-precision `now` and an expiry of
+		// exactly `now` would pass the After() check on that backend only.
+		// The equality boundary itself is covered by model.JobSlot's own test,
+		// where no storage rounding is involved.
 		// Not ErrJobSlotNotHeld: the holder owns the slot, the value is invalid.
-		err = repo.JobSlot().Renew(ctx, index, holder, now)
+		err = repo.JobSlot().Renew(ctx, index, holder, now.Add(-time.Minute))
 		gt.Error(t, err)
 		gt.Bool(t, errors.Is(err, interfaces.ErrJobSlotNotHeld)).False()
 
