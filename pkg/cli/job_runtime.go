@@ -6,6 +6,7 @@ package cli
 
 import (
 	"context"
+	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
@@ -38,6 +39,22 @@ import (
 // stays configurable from the caller per project convention.
 const jobReflectionLoopMax = 20
 
+// Timing of the deployment-wide Job concurrency slots. Fixed here at the
+// wiring layer (only the limit itself is operator-configurable) so no default
+// hides inside pkg/usecase/job.
+const (
+	// jobSlotTTL is the delay between a holder's last heartbeat and its slot
+	// becoming reusable — i.e. how long a crashed instance blocks a slot. Kept
+	// short because at a limit of 1 that delay is lost throughput.
+	jobSlotTTL = 30 * time.Second
+	// jobSlotRenewInterval is TTL/3, so two consecutive renew failures still
+	// leave a third attempt before a live run's slot expires.
+	jobSlotRenewInterval = 10 * time.Second
+	// jobSlotMaxHold stops a leaked hold from renewing itself forever. It is
+	// not a run timeout: only the renewal stops, the run continues.
+	jobSlotMaxHold = 2 * time.Hour
+)
+
 // tickRuntime bundles the dependencies the tick CLI / HTTP endpoint
 // need to fire a sweep.
 type tickRuntime struct {
@@ -55,6 +72,7 @@ func buildTickRuntime(
 	appCfg *config.AppConfig,
 	repoCfg *config.Repository,
 	llmCfg *config.LLM,
+	jobCfg *config.JobConcurrency,
 	c *cli.Command,
 ) (*tickRuntime, error) {
 	_, registry, err := appCfg.Configure(c)
@@ -73,12 +91,16 @@ func buildTickRuntime(
 
 	uc := usecase.New(repo, registry)
 
-	jobUC, _ := buildJobRuntime(jobRuntimeDeps{
+	jobUC, _, err := buildJobRuntime(jobRuntimeDeps{
 		Repo:      repo,
 		Registry:  registry,
 		LLMClient: llmClient,
 		UC:        uc,
 		WebFetch:  uc.WebFetchClient(),
+		// The tick CLI dispatches Job runs itself, so it must enforce the same
+		// deployment-wide limit as serve — a sweep that skipped the gate would
+		// defeat it entirely.
+		SlotLimit: jobCfg.Limit(),
 		// Mirror the read-tool wiring done in serve.go so every Job host
 		// resolves the same tool set. The tick CLI builds `uc` without the
 		// Slack / Notion options, so these accessors return nil today and the
@@ -89,6 +111,9 @@ func buildTickRuntime(
 		SlackRetriever: uc.SlackMessageRetriever(),
 		NotionTool:     uc.NotionToolClient(),
 	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "build job runtime")
+	}
 	uc.Case.SetEventPublisher(jobUC)
 
 	scanner := job.NewScheduledScanner(job.ScannerDeps{
@@ -131,6 +156,11 @@ type jobRuntimeDeps struct {
 	// Jira is not configured.
 	JiraTools []gollem.Tool
 
+	// SlotLimit caps how many scheduled Job runs execute concurrently across
+	// the whole deployment (see config.JobConcurrency). 0 means no limit and
+	// builds no limiter at all.
+	SlotLimit int
+
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
 	// reasoning). Nil falls back to in-memory implementations so the
@@ -164,7 +194,11 @@ func registryHasInteractiveJob(registry *model.WorkspaceRegistry) bool {
 // buildJobRuntime constructs the JobRunner + JobUseCase pair, with a
 // ToolBuilder that binds every read-only and writer tool the spec calls
 // for to each invocation.
-func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
+//
+// It returns an error when the concurrency limiter cannot be built: a
+// deployment that asked for a limit must fail to start rather than silently
+// dispatch Job runs unbounded.
+func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) {
 	adapters := jobToolAdapters{
 		action:            usecase.NewActionToolAdapter(deps.UC.Action),
 		step:              usecase.NewActionStepToolAdapter(deps.UC.ActionStep),
@@ -256,9 +290,25 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 	if deps.SlackService != nil {
 		deps2.InteractionPoster = deps.SlackService
 	}
+	// Deployment-wide concurrency gate on scheduled runs. Built only when an
+	// operator asked for a limit; 0 leaves SlotLimiter nil (ungated).
+	if deps.SlotLimit > 0 {
+		limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
+			Repo:          deps.Repo.JobSlot(),
+			Limit:         deps.SlotLimit,
+			TTL:           jobSlotTTL,
+			RenewInterval: jobSlotRenewInterval,
+			MaxHold:       jobSlotMaxHold,
+		})
+		if err != nil {
+			return nil, nil, goerr.Wrap(err, "build job concurrency limiter",
+				goerr.V("job_max_concurrency", deps.SlotLimit))
+		}
+		deps2.SlotLimiter = limiter
+	}
 	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)
-	return jobUC, runner
+	return jobUC, runner, nil
 }
 
 // jobToolAdapters groups the usecase-to-tool adapters once so buildJobTools

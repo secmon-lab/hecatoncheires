@@ -105,7 +105,9 @@ flowchart LR
   DISP --> RUN[JobRunner.Run]
   RUN --> LEASE[Lease via JobRunRepository]
   LEASE -->|busy| SKIP[silent skip]
-  LEASE --> EXEC[SingleLoopJobExecutor]
+  LEASE --> SLOT[Concurrency slot\nscheduled runs only]
+  SLOT -->|slots full| SKIP
+  SLOT --> EXEC[SingleLoopJobExecutor]
   EXEC --> LLM[gollem agent]
   LLM <-->|tool calls| TOOLS[(read-only + writer tools)]
   EXEC --> REC[RecordRun]
@@ -120,6 +122,61 @@ or two scheduler ticks landing close together are absorbed safely.
 
 The default lease is 10 minutes. `RecordRun` clears the lease on
 completion; if the runner crashes the lease times out on its own.
+
+#### Deployment-wide concurrency limit
+
+The lease above serialises one `(workspace, case, job)` tuple; it does
+**not** bound how many Jobs run at once. A tick can make hundreds of
+`(job, case)` pairs due simultaneously, and every one of them would
+otherwise start its own LLM run — enough to exceed the provider's rate
+limit. `--job-max-concurrency` (`HECATONCHEIRES_JOB_MAX_CONCURRENCY`,
+**default `1`**) caps the number of concurrently executing **scheduled**
+Job runs across every instance of the deployment.
+
+How it works:
+
+- The limit `N` is stored as `N` slot documents (`jobSlots/{index}`, a
+  top-level Firestore collection — the limit spans every workspace
+  because it protects one shared LLM quota). An occupied slot is a
+  document whose `ExpiresAt` is in the future; a free slot has no
+  document at all, so the number of stored documents *is* the number of
+  in-flight runs. No counter, nothing to drift.
+- `JobRunner.Run` takes a slot after the lease and suspension checks and
+  before it builds any prompt, then releases it in a defer. While the run
+  executes, a heartbeat pushes `ExpiresAt` forward every 10 seconds
+  (TTL 30 seconds), so a crashed instance's slot frees itself within
+  ~30 seconds without any cleanup sweep. A hold stops renewing after
+  2 hours as a backstop against a leaked slot; the run itself continues.
+- **When no slot is free the run is skipped, not queued.** It records
+  nothing, so `LastRunAt` is untouched and the next tick finds the Job
+  due again — the effect is a postponement to a later tick, not a lost
+  run. The skip is logged at `INFO`
+  (`job run skipped: concurrency slots full`) and is not reported to
+  Sentry.
+- If the slot state cannot be read (Firestore error) the run is
+  **refused**, not started: with the state unknown, starting anyway
+  invites the very rate-limit blowout the gate prevents. The error is
+  reported via `errutil.Handle`, and the next tick retries.
+- An interactive Job that suspends to ask the user releases its slot
+  immediately — a human wait never pins the limit. The resume is not
+  gated.
+
+Scope and operational notes:
+
+- **Only the scheduled domain is gated.** Case lifecycle events, the web
+  UI's manual Run button, and interactive resumes are single
+  user-visible actions with no retry path, so they run regardless of how
+  many slots are occupied.
+- **Set the same value on every instance**, including the `tick`
+  entry point (`serve` and `tick` both dispatch Job runs). An instance
+  configured with a larger value will admit up to that larger number.
+- **`0` disables the limit** (the pre-1.x behaviour: unbounded fan-out).
+- During a rolling deploy, instances still running the older build do
+  not consult the gate, so the effective concurrency can exceed the
+  limit until the rollout completes.
+- With `--repository-backend=memory` the slots live in process memory,
+  so the limit binds only within a single instance. Production uses
+  Firestore.
 
 #### Loop suppression
 
@@ -217,6 +274,8 @@ workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}                     ← 
 workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}/logs/{RunID}        ← JobRunLog (one per Run)
 workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}/logs/{RunID}/events/{Sequence}
                                                                             ← JobRunEvent (one per LLM call or tool call)
+jobSlots/{index}                                                            ← execution slot of the deployment-wide
+                                                                              concurrency limit (deleted when released)
 ```
 
 `Sequence` is a 20-digit zero-padded `uint64` so doc IDs sort

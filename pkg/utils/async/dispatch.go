@@ -38,6 +38,33 @@ func Dispatch(ctx context.Context, handler func(ctx context.Context) error) {
 	}()
 }
 
+// DispatchCancelable runs handler in a goroutine that dies with ctx. It is
+// Dispatch minus the context.WithoutCancel: the handler receives the caller's
+// context verbatim, so cancelling it terminates the goroutine.
+//
+// Use it for a helper goroutine bound to the caller's lifetime — a heartbeat
+// that must stop when the work it guards stops, a ticker owned by one
+// processing flow. Use Dispatch instead for the async tail of a request that
+// has already returned, where the request's cancellation must NOT abort the
+// remaining work. Both are tracked by the same WaitGroup, so Wait() covers
+// either; a handler that never returns therefore blocks Wait() forever, so
+// every loop needs an exit (ctx, a stop channel, or a deadline).
+func DispatchCancelable(ctx context.Context, handler func(ctx context.Context) error) {
+	inflight.Add(1)
+	go func() {
+		defer inflight.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				errutil.Handle(ctx, goerr.New("panic in async handler", goerr.V("panic", r)), "async handler panicked")
+			}
+		}()
+
+		if err := handler(ctx); err != nil {
+			errutil.Handle(ctx, err, "async handler failed")
+		}
+	}()
+}
+
 // Wait blocks until all in-flight dispatches launched via Dispatch have
 // returned. Intended for use in tests that need to assert on side effects of
 // the async tail; production code must not call this.

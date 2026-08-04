@@ -8,26 +8,27 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo      *caseRepository
-	action        *actionRepository
-	memo          *memoRepository
-	knowledge     *knowledgeRepository
-	tag           *tagRepository
-	tokens        *tokenStore
-	slack         *slackRepository
-	slackUser     *slackUserRepository
-	source        *sourceRepository
-	caseMessage   *caseMessageRepository
-	actionMessage *actionMessageRepository
-	actionEvent   *actionEventRepository
-	actionStep    *actionStepRepository
-	assistLog     *assistLogRepository
-	caseProposal  *caseProposalRepository
-	session       *sessionRepository
-	notifySlot    *notificationSlotRepository
-	jobRun        *jobRunRepository
-	jobRunLog     *jobRunLogRepository
-	jobRunEvent   *jobRunEventRepository
+	caseRepo       *caseRepository
+	action         *actionRepository
+	memo           *memoRepository
+	knowledge      *knowledgeRepository
+	tag            *tagRepository
+	tokens         *tokenStore
+	slack          *slackRepository
+	slackUser      *slackUserRepository
+	source         *sourceRepository
+	caseMessage    *caseMessageRepository
+	actionMessage  *actionMessageRepository
+	actionEvent    *actionEventRepository
+	actionStep     *actionStepRepository
+	assistLog      *assistLogRepository
+	caseProposal   *caseProposalRepository
+	session        *sessionRepository
+	notifySlot     *notificationSlotRepository
+	jobRun         *jobRunRepository
+	jobRunLog      *jobRunLogRepository
+	jobRunEvent    *jobRunEventRepository
+	jobSlot        *jobSlotRepository
 	importRepo     *importRepository
 	reactionClaim  *reactionClaimRepository
 	userPreference *userPreferenceRepository
@@ -38,26 +39,27 @@ var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
 	return &Memory{
-		caseRepo:      newCaseRepository(),
-		action:        newActionRepository(),
-		memo:          newMemoRepository(),
-		knowledge:     newKnowledgeRepository(),
-		tag:           newTagRepository(),
-		tokens:        newTokenStore(),
-		slack:         newSlackRepository(),
-		slackUser:     newSlackUserRepository(),
-		source:        newSourceRepository(),
-		caseMessage:   newCaseMessageRepository(),
-		actionMessage: newActionMessageRepository(),
-		actionEvent:   newActionEventRepository(),
-		actionStep:    newActionStepRepository(),
-		assistLog:     newAssistLogRepository(),
-		caseProposal:  newCaseProposalRepository(),
-		session:       newSessionRepository(),
-		notifySlot:    newNotificationSlotRepository(),
-		jobRun:        newJobRunRepository(),
-		jobRunLog:     newJobRunLogRepository(),
-		jobRunEvent:   newJobRunEventRepository(),
+		caseRepo:       newCaseRepository(),
+		action:         newActionRepository(),
+		memo:           newMemoRepository(),
+		knowledge:      newKnowledgeRepository(),
+		tag:            newTagRepository(),
+		tokens:         newTokenStore(),
+		slack:          newSlackRepository(),
+		slackUser:      newSlackUserRepository(),
+		source:         newSourceRepository(),
+		caseMessage:    newCaseMessageRepository(),
+		actionMessage:  newActionMessageRepository(),
+		actionEvent:    newActionEventRepository(),
+		actionStep:     newActionStepRepository(),
+		assistLog:      newAssistLogRepository(),
+		caseProposal:   newCaseProposalRepository(),
+		session:        newSessionRepository(),
+		notifySlot:     newNotificationSlotRepository(),
+		jobRun:         newJobRunRepository(),
+		jobRunLog:      newJobRunLogRepository(),
+		jobRunEvent:    newJobRunEventRepository(),
+		jobSlot:        newJobSlotRepository(),
 		importRepo:     newImportRepository(),
 		reactionClaim:  newReactionClaimRepository(),
 		userPreference: newUserPreferenceRepository(),
@@ -139,6 +141,10 @@ func (m *Memory) JobRunLog() interfaces.JobRunLogRepository {
 
 func (m *Memory) JobRunEvent() interfaces.JobRunEventRepository {
 	return m.jobRunEvent
+}
+
+func (m *Memory) JobSlot() interfaces.JobSlotRepository {
+	return m.jobSlot
 }
 
 func (m *Memory) Import() interfaces.ImportRepository {

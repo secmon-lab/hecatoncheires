@@ -86,6 +86,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--mcp` | `HECATONCHEIRES_MCP` | `false` | No | Enable the MCP (Model Context Protocol) endpoint at `/mcp`. Requires `--policy`. See [mcp.md](./mcp.md) |
 | `--policy` | `HECATONCHEIRES_POLICY` | - | Cond. | Path(s) to Rego policy files or directories used to authorize MCP requests (`data.auth.mcp`). Repeatable. **Required** when `--mcp` is set |
 | `--mcp-env` | `HECATONCHEIRES_MCP_ENV` | - | No | Names of environment variables to expose to the Rego policy as `input.env` (allow-list). Repeatable |
+| `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of **scheduled** Agent Job runs executing concurrently across the whole deployment. Set the same value on every instance (including `tick`). `0` disables the limit. See [operations.md](./operations.md) |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -234,8 +235,10 @@ The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches 
 | `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (used when `--llm-provider=claude` with direct Anthropic access) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI (e.g. `global`, `us-central1`) |
+| `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of scheduled Agent Job runs executing concurrently across the whole deployment. Must match the value given to `serve`. `0` disables the limit |
 
-Operational depth (scheduling cadence, relationship to `POST /hooks/tick`) lives in [operations.md](./operations.md).
+Operational depth (scheduling cadence, relationship to `POST /hooks/tick`, the
+concurrency limit) lives in [operations.md](./operations.md).
 
 ---
 

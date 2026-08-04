@@ -80,6 +80,68 @@ func TestDispatch_HandlerNilErrorDoesNotReachSentry(t *testing.T) {
 	gt.Array(t, tr.snapshot()).Length(0)
 }
 
+func TestDispatchCancelable_ContextCancelStopsHandler(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	started := make(chan struct{})
+	var observedCancel bool
+	async.DispatchCancelable(ctx, func(ctx context.Context) error {
+		close(started)
+		ticker := time.NewTicker(time.Hour) // never fires; ctx is the only exit
+		defer ticker.Stop()
+		select {
+		case <-ctx.Done():
+			observedCancel = true
+			return nil
+		case <-ticker.C:
+			return nil
+		}
+	})
+
+	<-started
+	cancel()
+	// Wait returns only once the handler returned, and the WaitGroup gives
+	// the happens-before edge for reading observedCancel. Dispatch would
+	// hang here instead: it severs cancellation, so ctx.Done() never fires.
+	async.Wait()
+	gt.Bool(t, observedCancel).True()
+}
+
+func TestDispatchCancelable_HandlerErrorReachesSentry(t *testing.T) {
+	tr := withSentry(t)
+
+	bug := goerr.New("synthetic cancelable failure", goerr.V("step", "cancelable"))
+	async.DispatchCancelable(context.Background(), func(_ context.Context) error {
+		return bug
+	})
+	async.Wait()
+
+	events := tr.snapshot()
+	gt.Array(t, events).Length(1).Required()
+	gt.Array(t, events[0].Exception).Length(1).Required()
+	gt.String(t, events[0].Exception[0].Value).Contains("synthetic cancelable failure")
+	gv, ok := events[0].Contexts["goerr_values"]
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, gv["step"]).Equal("cancelable")
+}
+
+func TestDispatchCancelable_HandlerPanicReachesSentry(t *testing.T) {
+	tr := withSentry(t)
+
+	async.DispatchCancelable(context.Background(), func(_ context.Context) error {
+		panic("cancelable boom")
+	})
+	async.Wait()
+
+	events := tr.snapshot()
+	gt.Array(t, events).Length(1).Required()
+	gt.Array(t, events[0].Exception).Length(1).Required()
+	gt.String(t, events[0].Exception[0].Value).Contains("panic in async handler")
+	gv, ok := events[0].Contexts["goerr_values"]
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, gv["panic"]).Equal("cancelable boom")
+}
+
 func TestDispatch_HandlerPanicReachesSentry(t *testing.T) {
 	tr := withSentry(t)
 

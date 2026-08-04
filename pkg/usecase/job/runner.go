@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/gollem-dev/gollem"
@@ -17,6 +18,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // DefaultLeaseDuration is the default lease length acquired by JobRunner
@@ -100,6 +102,12 @@ type RunnerDeps struct {
 
 	ToolBuilder   ToolBuilder
 	LeaseDuration time.Duration // 0 → DefaultLeaseDuration
+
+	// SlotLimiter bounds how many scheduled-domain runs execute concurrently
+	// across the whole deployment (the lease above only serialises a single
+	// (workspace, case, job) tuple). Nil disables the gate entirely, which is
+	// how an operator opts out of the limit.
+	SlotLimiter *ConcurrencyLimiter
 
 	// Reflector runs the optional post-execution reflection pass (curating
 	// workspace Knowledge from a successful run's history). Nil disables
@@ -276,6 +284,36 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			return nil
 		}
 		r.finalizeOrphanedSuspension(ctx, existing)
+	}
+
+	// Admission gate for the deployment-wide concurrency limit. Only the
+	// scheduled domain is gated: one tick can make hundreds of (job, case)
+	// pairs due at once, and a skipped scheduled run costs nothing because
+	// LastRunAt is left untouched and the next tick finds it due again. A
+	// lifecycle event, a manual Run, or an interactive resume is a single
+	// user-visible action with no such retry, so those run regardless.
+	if ev.Domain == model.JobEventDomainScheduled && r.deps.SlotLimiter != nil {
+		hold, slotErr := r.deps.SlotLimiter.acquire(ctx, key)
+		if slotErr != nil {
+			// Fail closed: with the slot state unreadable we cannot tell how
+			// many runs are already in flight, and starting anyway would
+			// invite the rate-limit blowout this gate exists to prevent.
+			// Deliberately NOT RecordRun — nothing ran, and stamping
+			// LastRunAt would suppress the next tick's retry.
+			return goerr.Wrap(slotErr, "acquire job concurrency slot",
+				goerr.V("job_id", j.ID), goerr.V("case_id", ev.CaseID))
+		}
+		if hold == nil {
+			logging.From(ctx).Info("job run skipped: concurrency slots full",
+				slog.String("workspace_id", ev.WorkspaceID),
+				slog.Int64("case_id", ev.CaseID),
+				slog.String("job_id", j.ID),
+				slog.Int("limit", r.deps.SlotLimiter.limit))
+			return nil
+		}
+		// context.Background() for the same reason as ReleaseLease above: the
+		// release must not depend on the run context's state.
+		defer hold.release(context.Background())
 	}
 
 	// Mark the context so any mutations the executor performs do not

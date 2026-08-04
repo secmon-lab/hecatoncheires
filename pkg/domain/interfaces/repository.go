@@ -27,6 +27,7 @@ type Repository interface {
 	JobRun() JobRunRepository
 	JobRunLog() JobRunLogRepository
 	JobRunEvent() JobRunEventRepository
+	JobSlot() JobSlotRepository
 	Import() ImportRepository
 	ReactionClaim() ReactionClaimRepository
 	UserPreference() UserPreferenceRepository

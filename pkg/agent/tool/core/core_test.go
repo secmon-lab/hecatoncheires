@@ -226,6 +226,9 @@ func (m *mockRepo) JobRunLog() interfaces.JobRunLogRepository {
 func (m *mockRepo) JobRunEvent() interfaces.JobRunEventRepository {
 	panic("unexpected call: JobRunEvent()")
 }
+func (m *mockRepo) JobSlot() interfaces.JobSlotRepository {
+	panic("unexpected call: JobSlot()")
+}
 func (m *mockRepo) Import() interfaces.ImportRepository {
 	panic("unexpected call: Import()")
 }

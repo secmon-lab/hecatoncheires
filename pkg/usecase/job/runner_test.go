@@ -28,6 +28,7 @@ import (
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
 func newRunner(t *testing.T, wsID string, jobs []*model.Job, exec jobagent.JobExecutor) (*job.JobRunner, *model.WorkspaceRegistry, *model.Case) {
@@ -1958,4 +1959,264 @@ func TestJobRunner_FailsClosedWhenSuspensionCheckErrors(t *testing.T) {
 	err := runner.Run(ctx, j, interactiveCreatedEvent(c.ID, now))
 	gt.Error(t, err)
 	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+}
+
+// --- deployment-wide concurrency gate ---------------------------------
+
+// scheduledSlotJob is a scheduled Job used by the concurrency-gate tests.
+func scheduledSlotJob() *model.Job {
+	return &model.Job{
+		ID:     "daily_sweep",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+			Case:      &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+}
+
+// newSlotGatedRunner wires a runner whose scheduled runs go through limiter.
+func newSlotGatedRunner(
+	repo interfaces.Repository,
+	j *model.Job,
+	exec jobagent.JobExecutor,
+	limiter *job.ConcurrencyLimiter,
+	wsID string,
+) *job.JobRunner {
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      []*model.Job{j},
+	})
+	return job.NewJobRunner(job.RunnerDeps{
+		Repo:        repo,
+		Registry:    registry,
+		LLMClient:   inertLLM(),
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		SlotLimiter: limiter,
+	})
+}
+
+// occupyAllSlots takes every slot in [0, limit) on behalf of another instance.
+func occupyAllSlots(t *testing.T, repo interfaces.Repository, limit int, now time.Time) {
+	t.Helper()
+	for i := 0; i < limit; i++ {
+		acquired, err := repo.JobSlot().TryAcquire(context.Background(), &model.JobSlot{
+			Index:       i,
+			HolderID:    fmt.Sprintf("other-instance-%d", i),
+			WorkspaceID: "ws-other",
+			CaseID:      int64(1000 + i),
+			JobID:       "daily_sweep",
+			AcquiredAt:  now,
+			ExpiresAt:   now.Add(testSlotTTL),
+		}, now)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, acquired).True().Required()
+	}
+}
+
+func scheduledSlotEvent(wsID string, caseID int64, now time.Time) job.Event {
+	return job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: wsID,
+		CaseID:      caseID,
+		Timestamp:   now,
+		ActorUserID: model.SystemActorID,
+	}
+}
+
+func TestJobRunner_ScheduledRunSkippedWhenSlotsFull(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-full"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+	occupyAllSlots(t, repo, 2, clock.Now())
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, repo.JobSlot(), 2, clock), wsID)
+
+	// Skipping is not a failure: Run returns nil so the dispatcher stays quiet.
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, clock.Now())))
+	async.Wait()
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+	// No outcome is recorded, so LastRunAt stays zero and the next tick still
+	// finds the Job due — the skip is a postponement, not a lost run.
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, run.LastRunAt.IsZero()).True()
+	gt.Value(t, string(run.LastStatus)).Equal("")
+
+	// No run log either: the run never reached the execute stage.
+	logs, err := repo.JobRunLog().List(ctx, key, 0)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(0)
+
+	// The other instance's slots are untouched.
+	stored, err := repo.JobSlot().List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(2).Required()
+	gt.Value(t, stored[0].HolderID).Equal("other-instance-0")
+	gt.Value(t, stored[1].HolderID).Equal("other-instance-1")
+}
+
+func TestJobRunner_ScheduledRunTakesAndReleasesSlot(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-free"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, repo.JobSlot(), 1, clock), wsID)
+
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, clock.Now())))
+	async.Wait()
+
+	gt.Value(t, exec.firedJobIDs()).Equal([]string{j.ID})
+
+	// The slot is handed back, so the next tick can use it.
+	stored, err := repo.JobSlot().List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(0)
+
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+	gt.Bool(t, run.LastRunAt.IsZero()).False()
+}
+
+func TestJobRunner_NonScheduledRunIgnoresSlotLimit(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-lifecycle"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+	occupyAllSlots(t, repo, 1, clock.Now())
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, repo.JobSlot(), 1, clock), wsID)
+
+	// A lifecycle event is a single user-visible action with no retry, so the
+	// gate does not apply even with every slot occupied.
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		CaseLifecycle: model.CaseLifecycleCreated,
+		Timestamp:     clock.Now(),
+	}))
+	async.Wait()
+	gt.Value(t, exec.firedJobIDs()).Equal([]string{j.ID})
+
+	// The occupied slot was neither taken nor released by this run.
+	stored, err := repo.JobSlot().List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(1).Required()
+	gt.Value(t, stored[0].HolderID).Equal("other-instance-0")
+}
+
+func TestJobRunner_ScheduledRunWithoutLimiterIsUngated(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-nil-limiter"
+	repo, c := setupCase(t, wsID)
+	now := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, nil, wsID)
+
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, now)))
+	async.Wait()
+	gt.Value(t, exec.firedJobIDs()).Equal([]string{j.ID})
+
+	// Nothing was written to the slot store at all.
+	stored, err := repo.JobSlot().List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(0)
+}
+
+func TestJobRunner_ScheduledRunFailsClosedWhenSlotStateUnreadable(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-unreadable"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+
+	slotRepo := newFakeSlotRepo()
+	slotRepo.listErr = goerr.New("firestore unavailable")
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, slotRepo, 2, clock), wsID)
+
+	// With the slot state unreadable we cannot tell how many runs are in
+	// flight, so the run is refused rather than started unbounded.
+	gt.Error(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, clock.Now())))
+	async.Wait()
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+	// No outcome recorded: the next tick retries.
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, run.LastRunAt.IsZero()).True()
+	logs, err := repo.JobRunLog().List(ctx, key, 0)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(0)
+}
+
+func TestJobRunner_ScheduledInteractiveRunReleasesSlotOnSuspend(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-slot-suspend"
+	now := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+	clock := newTestClock()
+
+	j := &model.Job{
+		ID:          "interactive_sweep",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		},
+	}
+	gt.NoError(t, j.Validate()).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      []*model.Job{j},
+	})
+	exec := &interactiveScriptedExecutor{
+		firstTokens: trace.LLMCallData{Model: "m", InputTokens: 10, OutputTokens: 2},
+	}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:              repo,
+		Registry:          registry,
+		LLMClient:         inertLLM(),
+		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+		InteractionPoster: &fakeQuestionPoster{returnTS: "FORM-TS-1"},
+		NewRunID:          func() string { return "RUN-SLOT-1" },
+		NewTraceID:        func() string { return "TRACE-SLOT-1" },
+		Clock:             func() time.Time { return now },
+		SlotLimiter:       newLimiter(t, repo.JobSlot(), 1, clock),
+	})
+
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, now)))
+	async.Wait()
+
+	// The run is parked awaiting the user's answer...
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	logRec, err := repo.JobRunLog().Get(ctx, key, "RUN-SLOT-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, logRec.Stage).Equal(model.JobRunStageAwaitingInput)
+
+	// ...but its slot is already free: a human wait must not pin the limit.
+	stored, err := repo.JobSlot().List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(0)
 }
