@@ -2,9 +2,16 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
+
+// ErrMemoListOptions is returned when MemoListOptions carries a filter that can
+// never match, e.g. a creation-time window whose lower bound is not before its
+// upper bound.
+var ErrMemoListOptions = goerr.New("invalid memo list options")
 
 // MemoArchiveScope selects which slice of a memo list to return.
 type MemoArchiveScope int
@@ -37,6 +44,43 @@ func (s MemoArchiveScope) Allows(isArchived bool) bool {
 type MemoListOptions struct {
 	// ArchiveScope selects active / archived / both. Defaults to active only.
 	ArchiveScope MemoArchiveScope
+	// CreatedAfter, when non-nil, keeps only memos created at or after this
+	// instant (inclusive lower bound). nil means unbounded.
+	CreatedAfter *time.Time
+	// CreatedBefore, when non-nil, keeps only memos created strictly before
+	// this instant (exclusive upper bound). nil means unbounded. The interval
+	// is half-open so consecutive windows never report the same memo twice.
+	CreatedBefore *time.Time
+}
+
+// Validate reports whether the options describe a window that can match at all.
+// Repositories call it at the top of List so a contradictory filter fails
+// loudly instead of silently returning an empty list.
+func (o MemoListOptions) Validate() error {
+	if o.CreatedAfter != nil && o.CreatedBefore != nil && !o.CreatedAfter.Before(*o.CreatedBefore) {
+		return goerr.Wrap(ErrMemoListOptions, "created_after must be before created_before",
+			goerr.V("created_after", *o.CreatedAfter),
+			goerr.V("created_before", *o.CreatedBefore))
+	}
+	return nil
+}
+
+// Allows reports whether a memo passes every filter in these options. Both
+// repository backends run this single predicate so their results cannot drift.
+func (o MemoListOptions) Allows(m *model.Memo) bool {
+	if m == nil {
+		return false
+	}
+	if !o.ArchiveScope.Allows(m.IsArchived()) {
+		return false
+	}
+	if o.CreatedAfter != nil && m.CreatedAt.Before(*o.CreatedAfter) {
+		return false
+	}
+	if o.CreatedBefore != nil && !m.CreatedAt.Before(*o.CreatedBefore) {
+		return false
+	}
+	return true
 }
 
 // MemoRepository defines the interface for Memo data access. Every method is
@@ -57,7 +101,9 @@ type MemoRepository interface {
 	// missing IDs are silently absent. Used by the GraphQL dataloader.
 	GetByIDs(ctx context.Context, workspaceID string, caseID int64, ids []model.MemoID) (map[model.MemoID]*model.Memo, error)
 
-	// List retrieves the memos of a Case, filtered by opts.ArchiveScope.
+	// List retrieves the memos of a Case, filtered by opts (archive scope and
+	// the optional creation-time window). Returns ErrMemoListOptions when opts
+	// describe a window that can never match.
 	List(ctx context.Context, workspaceID string, caseID int64, opts MemoListOptions) ([]*model.Memo, error)
 
 	// Update persists changes to an existing memo (including archive/unarchive,

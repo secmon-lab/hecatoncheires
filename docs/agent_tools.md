@@ -127,7 +127,7 @@ at least one memo field.
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
-| `memo__list_memos` | R | List the case's memos (optional archive scope, default ACTIVE). |
+| `memo__list_memos` | R | List the case's memos (optional archive scope, default ACTIVE; optional creation-time window `created_after` / `created_before`, RFC3339). |
 | `memo__get_memo` | R | Fetch a memo by id. |
 | `memo__create_memo` | W | Create a memo (title + field values). |
 | `memo__update_memo` | W | Update a memo's title / fields (omit to preserve). |

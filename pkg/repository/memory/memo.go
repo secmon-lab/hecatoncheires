@@ -124,6 +124,13 @@ func (r *memoRepository) GetByIDs(ctx context.Context, workspaceID string, caseI
 }
 
 func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID int64, opts interfaces.MemoListOptions) ([]*model.Memo, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid memo list options",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("case_id", caseID),
+		)
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -138,7 +145,7 @@ func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID in
 
 	memos := make([]*model.Memo, 0, len(cases))
 	for _, m := range cases {
-		if !opts.ArchiveScope.Allows(m.IsArchived()) {
+		if !opts.Allows(m) {
 			continue
 		}
 		memos = append(memos, copyMemo(m))

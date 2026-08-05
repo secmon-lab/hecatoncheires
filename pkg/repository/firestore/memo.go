@@ -109,6 +109,13 @@ func (r *memoRepository) GetByIDs(ctx context.Context, workspaceID string, caseI
 }
 
 func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID int64, opts interfaces.MemoListOptions) ([]*model.Memo, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid memo list options",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("case_id", caseID),
+		)
+	}
+
 	iter := r.memosCollection(workspaceID, caseID).Documents(ctx)
 	defer iter.Stop()
 
@@ -130,7 +137,10 @@ func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID in
 			return nil, goerr.Wrap(err, "failed to decode memo", goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
-		if !opts.ArchiveScope.Allows(m.IsArchived()) {
+		// Filtering stays in memory (the query is an unconstrained subcollection
+		// scan) so no Firestore index is involved and both backends share the
+		// single MemoListOptions predicate.
+		if !opts.Allows(&m) {
 			continue
 		}
 

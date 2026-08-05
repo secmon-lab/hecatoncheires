@@ -175,6 +175,139 @@ func TestListMemosTool_ExcludesArchivedByDefault(t *testing.T) {
 	gt.Array(t, resAll["memos"].([]map[string]any)).Length(2)
 }
 
+// listToolWithMemos seeds a memory repository with the given memos and returns
+// the memo__list_memos tool bound to it.
+func listToolWithMemos(t *testing.T, memos ...*model.Memo) gollem.Tool {
+	t.Helper()
+	repo := memory.New()
+	ctx := context.Background()
+	for _, m := range memos {
+		_, err := repo.Memo().Create(ctx, testWS, m)
+		gt.NoError(t, err).Required()
+	}
+	tools := memotool.New(memotool.Deps{Repo: repo, WorkspaceID: testWS, CaseID: testCaseID, MemoUC: &fakeMutator{}, Schema: memoSchema()})
+	return findTool(t, tools, "memo__list_memos")
+}
+
+func memoCreatedAt(title string, createdAt time.Time) *model.Memo {
+	return &model.Memo{
+		ID: model.NewMemoID(), WorkspaceID: testWS, CaseID: testCaseID,
+		Title: title, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+}
+
+func TestListMemosTool_FiltersByCreatedAt(t *testing.T) {
+	now := time.Now().UTC()
+	old := memoCreatedAt("ten days ago", now.Add(-10*24*time.Hour))
+	recent := memoCreatedAt("three days ago", now.Add(-3*24*time.Hour))
+	newest := memoCreatedAt("one hour ago", now.Add(-time.Hour))
+	list := listToolWithMemos(t, old, recent, newest)
+	ctx := context.Background()
+
+	sevenDaysAgo := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
+	res, err := list.Run(ctx, map[string]any{"created_after": sevenDaysAgo})
+	gt.NoError(t, err).Required()
+	items := res["memos"].([]map[string]any)
+	gt.Array(t, items).Length(2).Required()
+	gt.Value(t, items[0]["title"]).Equal("three days ago")
+	gt.Value(t, items[1]["title"]).Equal("one hour ago")
+
+	twoDaysAgo := now.Add(-2 * 24 * time.Hour).Format(time.RFC3339)
+	windowed, err := list.Run(ctx, map[string]any{
+		"created_after":  sevenDaysAgo,
+		"created_before": twoDaysAgo,
+	})
+	gt.NoError(t, err).Required()
+	windowedItems := windowed["memos"].([]map[string]any)
+	gt.Array(t, windowedItems).Length(1).Required()
+	gt.Value(t, windowedItems[0]["title"]).Equal("three days ago")
+
+	onlyBefore, err := list.Run(ctx, map[string]any{"created_before": sevenDaysAgo})
+	gt.NoError(t, err).Required()
+	beforeItems := onlyBefore["memos"].([]map[string]any)
+	gt.Array(t, beforeItems).Length(1).Required()
+	gt.Value(t, beforeItems[0]["title"]).Equal("ten days ago")
+}
+
+func TestListMemosTool_CreatedAtBoundaries(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	onBoundary := memoCreatedAt("on boundary", base)
+	later := memoCreatedAt("one hour later", base.Add(time.Hour))
+	list := listToolWithMemos(t, onBoundary, later)
+	ctx := context.Background()
+
+	// created_after includes a memo created exactly at the bound.
+	after, err := list.Run(ctx, map[string]any{"created_after": base.Format(time.RFC3339)})
+	gt.NoError(t, err).Required()
+	afterItems := after["memos"].([]map[string]any)
+	gt.Array(t, afterItems).Length(2).Required()
+	gt.Value(t, afterItems[0]["title"]).Equal("on boundary")
+	gt.Value(t, afterItems[1]["title"]).Equal("one hour later")
+
+	// created_before excludes a memo created exactly at the bound.
+	before, err := list.Run(ctx, map[string]any{"created_before": base.Add(time.Hour).Format(time.RFC3339)})
+	gt.NoError(t, err).Required()
+	beforeItems := before["memos"].([]map[string]any)
+	gt.Array(t, beforeItems).Length(1).Required()
+	gt.Value(t, beforeItems[0]["title"]).Equal("on boundary")
+}
+
+func TestListMemosTool_CreatedAtEmptyStringIsUnset(t *testing.T) {
+	now := time.Now().UTC()
+	list := listToolWithMemos(t,
+		memoCreatedAt("older", now.Add(-48*time.Hour)),
+		memoCreatedAt("newer", now.Add(-time.Hour)),
+	)
+
+	res, err := list.Run(context.Background(), map[string]any{"created_after": "", "created_before": ""})
+	gt.NoError(t, err).Required()
+	items := res["memos"].([]map[string]any)
+	gt.Array(t, items).Length(2).Required()
+	gt.Value(t, items[0]["title"]).Equal("older")
+	gt.Value(t, items[1]["title"]).Equal("newer")
+}
+
+func TestListMemosTool_RejectsInvalidCreatedAt(t *testing.T) {
+	now := time.Now().UTC()
+	list := listToolWithMemos(t, memoCreatedAt("only memo", now))
+	ctx := context.Background()
+
+	res, err := list.Run(ctx, map[string]any{"created_after": "7 days ago"})
+	gt.Value(t, err).NotNil()
+	gt.Value(t, res).Nil()
+
+	res, err = list.Run(ctx, map[string]any{"created_before": "2026-08-04"})
+	gt.Value(t, err).NotNil()
+	gt.Value(t, res).Nil()
+
+	res, err = list.Run(ctx, map[string]any{"created_after": float64(7)})
+	gt.Value(t, err).NotNil()
+	gt.Value(t, res).Nil()
+}
+
+func TestListMemosTool_RejectsInvertedWindow(t *testing.T) {
+	now := time.Now().UTC()
+	list := listToolWithMemos(t, memoCreatedAt("only memo", now))
+
+	res, err := list.Run(context.Background(), map[string]any{
+		"created_after":  now.Format(time.RFC3339),
+		"created_before": now.Add(-time.Hour).Format(time.RFC3339),
+	})
+	gt.Error(t, err).Is(interfaces.ErrMemoListOptions)
+	gt.Value(t, res).Nil()
+}
+
+func TestListMemosTool_SpecAdvertisesCreatedAtWindow(t *testing.T) {
+	list := listToolWithMemos(t)
+	spec := list.Spec()
+	gt.Map(t, spec.Parameters).HasKey("created_after")
+	gt.Map(t, spec.Parameters).HasKey("created_before")
+	gt.Value(t, spec.Parameters["created_after"].Type).Equal(gollem.TypeString)
+	gt.Value(t, spec.Parameters["created_before"].Type).Equal(gollem.TypeString)
+	gt.String(t, spec.Parameters["created_after"].Description).Contains("inclusive")
+	gt.String(t, spec.Parameters["created_before"].Description).Contains("exclusive")
+}
+
 func TestGetMemoTool(t *testing.T) {
 	repo := memory.New()
 	ctx := context.Background()

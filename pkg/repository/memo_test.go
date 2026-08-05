@@ -278,6 +278,128 @@ func runMemoRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, all[2].ID).Equal(m3.ID)
 	})
 
+	t.Run("List filters by the created-at window", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-REPORTER",
+			Title:      "Case for List created-at window test",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		base := time.Now().UTC().Truncate(time.Millisecond)
+		mid := base.Add(time.Hour)
+		late := base.Add(2 * time.Hour)
+
+		create := func(title string, createdAt time.Time) *model.Memo {
+			m, err := repo.Memo().Create(ctx, wsID, &model.Memo{
+				ID: model.NewMemoID(), WorkspaceID: wsID, CaseID: c.ID,
+				Title:     title,
+				CreatedAt: createdAt,
+				UpdatedAt: createdAt,
+			})
+			gt.NoError(t, err).Required()
+			return m
+		}
+
+		mBase := create("Memo at base", base)
+		mMid := create("Memo at mid", mid)
+		mLate := create("Memo at late", late)
+
+		// CreatedAfter is inclusive: the memo created exactly at mid is kept.
+		afterMid, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &mid,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, afterMid).Length(2).Required()
+		gt.Value(t, afterMid[0].ID).Equal(mMid.ID)
+		gt.Value(t, afterMid[1].ID).Equal(mLate.ID)
+
+		// CreatedBefore is exclusive: the memo created exactly at mid is dropped.
+		beforeMid, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedBefore: &mid,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, beforeMid).Length(1).Required()
+		gt.Value(t, beforeMid[0].ID).Equal(mBase.ID)
+
+		// Both bounds select the half-open interval [mid, late).
+		window, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &mid, CreatedBefore: &late,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, window).Length(1).Required()
+		gt.Value(t, window[0].ID).Equal(mMid.ID)
+
+		// A window matching nothing is not an error.
+		future := late.Add(time.Hour)
+		empty, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &future,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, empty).Length(0)
+
+		// The window is combined with the archive scope.
+		archivedAt := mid
+		mArchived, err := repo.Memo().Create(ctx, wsID, &model.Memo{
+			ID: model.NewMemoID(), WorkspaceID: wsID, CaseID: c.ID,
+			Title:      "Archived memo at mid",
+			ArchivedAt: &archivedAt,
+			CreatedAt:  mid,
+			UpdatedAt:  mid,
+		})
+		gt.NoError(t, err).Required()
+
+		activeInWindow, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &mid, CreatedBefore: &late,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, activeInWindow).Length(1).Required()
+		gt.Value(t, activeInWindow[0].ID).Equal(mMid.ID)
+
+		allInWindow, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			ArchiveScope: interfaces.MemoArchiveScopeAll,
+			CreatedAfter: &mid, CreatedBefore: &late,
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, allInWindow).Length(2).Required()
+		gt.Value(t, allInWindow[0].ID).Equal(mMid.ID)
+		gt.Value(t, allInWindow[1].ID).Equal(mArchived.ID)
+	})
+
+	t.Run("List rejects a window that can never match", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-REPORTER",
+			Title:      "Case for List invalid window test",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		base := time.Now().UTC()
+		earlier := base.Add(-time.Hour)
+
+		equal, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &base, CreatedBefore: &base,
+		})
+		gt.Error(t, err).Is(interfaces.ErrMemoListOptions)
+		gt.Value(t, equal).Nil()
+
+		inverted, err := repo.Memo().List(ctx, wsID, c.ID, interfaces.MemoListOptions{
+			CreatedAfter: &base, CreatedBefore: &earlier,
+		})
+		gt.Error(t, err).Is(interfaces.ErrMemoListOptions)
+		gt.Value(t, inverted).Nil()
+	})
+
 	t.Run("Update persists mutations and is read back correctly", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
