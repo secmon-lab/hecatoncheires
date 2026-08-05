@@ -453,7 +453,12 @@ description = "Link to the primary source (log, dashboard, PR)."
   `memo__update_memo`, `memo__archive_memo`), scoped to that Case. Create and
   update are validated against the memo field schema exactly like the WebUI
   path (required fields enforced, unknown field ids rejected). `memo__list_memos`
-  excludes archived memos by default.
+  excludes archived memos by default, and accepts an optional creation-time
+  window: `created_after` (RFC3339, inclusive) and `created_before` (RFC3339,
+  exclusive). Omitting a bound — or passing an empty string, which agents do in
+  place of omitting it — leaves that side unbounded; any other value that is not
+  RFC3339 is rejected. The agent combines the bounds with the current time given
+  in its system prompt to ask for e.g. the memos of the last 7 days.
 - **System prompt**: the `description` and the memo field schema are injected
   into the agent's system prompt, along with the id + title of up to 20 of the
   Case's active memos (and the total count when there are more). Full content is

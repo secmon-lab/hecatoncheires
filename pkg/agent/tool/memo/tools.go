@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/m-mizutani/goerr/v2"
 	"github.com/gollem-dev/gollem"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -87,11 +87,23 @@ func (t *listMemosTool) Spec() gollem.ToolSpec {
 		Name: "memo__list_memos",
 		Description: "List the memos of the current case. By default archived memos are " +
 			"excluded (an archived memo is a soft-deleted memory). Pass include_archived=true " +
-			"to include them. Returns id, title and field values for each memo.",
+			"to include them. Narrow the result to a creation-time window with created_after / " +
+			"created_before. Returns id, title and field values for each memo.",
 		Parameters: map[string]*gollem.Parameter{
 			"include_archived": {
 				Type:        gollem.TypeBoolean,
 				Description: "When true, include archived memos. Default false.",
+			},
+			"created_after": {
+				Type: gollem.TypeString,
+				Description: "RFC3339 lower bound (inclusive) on the memo creation time. Subtract " +
+					"from the current time given in the system prompt to ask for a recent window, " +
+					"e.g. the last 7 days. Omit for no lower bound.",
+			},
+			"created_before": {
+				Type: gollem.TypeString,
+				Description: "RFC3339 upper bound (exclusive) on the memo creation time. Omit for " +
+					"no upper bound.",
 			},
 		},
 	}
@@ -105,7 +117,23 @@ func (t *listMemosTool) Run(ctx context.Context, args map[string]any) (map[strin
 			scope = interfaces.MemoArchiveScopeAll
 		}
 	}
-	memos, err := t.deps.Repo.Memo().List(ctx, t.deps.WorkspaceID, t.deps.CaseID, interfaces.MemoListOptions{ArchiveScope: scope})
+	createdAfter, err := optionalTime(args, "created_after")
+	if err != nil {
+		return nil, err
+	}
+	createdBefore, err := optionalTime(args, "created_before")
+	if err != nil {
+		return nil, err
+	}
+	// The window's own consistency (after < before) is checked by the
+	// repository's List, so a contradictory window surfaces as
+	// interfaces.ErrMemoListOptions through the wrap below.
+	opts := interfaces.MemoListOptions{
+		ArchiveScope:  scope,
+		CreatedAfter:  createdAfter,
+		CreatedBefore: createdBefore,
+	}
+	memos, err := t.deps.Repo.Memo().List(ctx, t.deps.WorkspaceID, t.deps.CaseID, opts)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list memos",
 			goerr.V("workspace_id", t.deps.WorkspaceID), goerr.V("case_id", t.deps.CaseID))
@@ -339,6 +367,29 @@ func extractMemoID(args map[string]any) (model.MemoID, error) {
 		return "", goerr.New("memo_id must be a non-empty string", goerr.V("type", typeOf(v)))
 	}
 	return model.MemoID(s), nil
+}
+
+// optionalTime parses an optional RFC3339 timestamp argument. An absent key, a
+// nil value, and an empty string all mean "unset" — models routinely pass ""
+// instead of omitting a parameter, and the same tolerance is applied to the
+// github__list_commits `since` argument.
+func optionalTime(args map[string]any, key string) (*time.Time, error) {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return nil, goerr.New(key+" must be an RFC3339 string", goerr.V("type", typeOf(v)))
+	}
+	if s == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid "+key+" (must be RFC3339)", goerr.V(key, s))
+	}
+	return &parsed, nil
 }
 
 func requireString(args map[string]any, key string) (string, error) {
