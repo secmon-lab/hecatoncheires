@@ -8,6 +8,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -26,8 +28,43 @@ type Event struct {
 	CaseLifecycle model.CaseLifecycle
 
 	// Domain == scheduled
+	//
+	// JobID names the single Job whose schedule came due. LastRunAt and
+	// ScheduledFor are that Job's own values, so dispatching this event to
+	// any other Job would hand it another Job's schedule.
+	JobID        string
 	LastRunAt    time.Time
 	ScheduledFor time.Time
+}
+
+// validate enforces the per-domain invariants the dispatcher relies on. It is
+// called at the dispatch entry point (UseCase.Publish); an event that fails is
+// reported and dropped rather than broadcast. There are no sentinel errors
+// because no caller discriminates — the only handling is report-and-drop.
+func (e Event) validate() error {
+	switch e.Domain {
+	case model.JobEventDomainCase, model.JobEventDomainScheduled, model.JobEventDomainManual:
+	default:
+		return goerr.New("unknown job event domain",
+			goerr.V("domain", string(e.Domain)))
+	}
+	if e.WorkspaceID == "" {
+		return goerr.New("job event has no workspace id")
+	}
+	if e.CaseID <= 0 {
+		return goerr.New("job event has no case id",
+			goerr.V("case_id", e.CaseID))
+	}
+	if e.Domain == model.JobEventDomainCase && !e.CaseLifecycle.IsValid() {
+		return goerr.New("job event has invalid case lifecycle",
+			goerr.V("lifecycle", string(e.CaseLifecycle)))
+	}
+	// A scheduled event that names no Job would otherwise be matched against
+	// every scheduled Job in the workspace, multiplying runs (issue #245).
+	if e.Domain == model.JobEventDomainScheduled && e.JobID == "" {
+		return goerr.New("scheduled job event has no job id")
+	}
+	return nil
 }
 
 // EventPublisher is the dispatch entry point exposed to upstream callers

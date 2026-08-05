@@ -113,6 +113,35 @@ flowchart LR
   EXEC --> REC[RecordRun]
 ```
 
+#### Event matching
+
+Matching depends on the event's domain, and the two domains behave
+differently on purpose:
+
+- **`case`** — a fan-out. Every Job whose `events.case.on` contains the
+  published lifecycle fires, so several Jobs can react to one
+  transition.
+- **`scheduled`** — not a fan-out. The sweep decides due-ness per Job
+  (each Job has its own `every` / `cron`), so the event names the Job it
+  was raised for and dispatch runs that Job only. An event reaching
+  `Publish` without a Job id — which no current publisher produces — is
+  reported through `errutil.Handle` and dropped rather than broadcast to
+  every scheduled Job in the workspace.
+
+These log lines make the matching auditable without reading run history:
+
+| Message | Fields | Read it as |
+|---------|--------|------------|
+| `scheduled sweep completed` (INFO, one per workspace per sweep) | `workspace_id`, `scheduled_jobs`, `open_cases`, `due_published` | How many `(job, case)` pairs this sweep found due. `due_published` is normally far below `scheduled_jobs × open_cases`. |
+| `job event dispatched` (INFO, one per published event) | `domain`, `workspace_id`, `case_id`, `event_job_id`, `dispatched_job_ids`, `dispatched` | Which Jobs the event was dispatched to. For `domain=scheduled`, `dispatched_job_ids` must be exactly `[event_job_id]`; more than that means the event fanned out to Jobs that were not due. |
+| `job: invalid event dropped` (ERROR) | `error`, `values` | An event failed validation and fired nothing — e.g. a scheduled event carrying no `job_id`. |
+
+The dispatch line is written when the run is handed to `async.Dispatch`, before
+the run takes its lease — so it reports what the event was addressed to, not
+that a run executed. A dispatched run can still be skipped by the lease (see
+Concurrency below); confirm actual executions in the run history on the Case
+agent page.
+
 #### Concurrency
 
 The `JobRunRepository` provides a per-(workspace, case, job) lease. A

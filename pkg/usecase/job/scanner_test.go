@@ -112,6 +112,63 @@ func TestScheduledScanner_PublishesDueJobs(t *testing.T) {
 	gt.Value(t, events[0].WorkspaceID).Equal("ws")
 	gt.Value(t, events[0].CaseID).Equal(caseA.ID)
 	gt.Value(t, events[0].ActorUserID).Equal(model.SystemActorID)
+	gt.Value(t, events[0].JobID).Equal(dueJob.ID)
+}
+
+// TestScheduledScanner_PublishesOnlyDueJob pins the per-Job addressing: a
+// workspace with several scheduled Jobs publishes one event for the Job that
+// came due, carrying that Job's own last-run / next-fire times. Due-ness is
+// built from `every` plus a seeded last-run time because Scan reads the wall
+// clock directly, which makes cron-based fixtures depend on the time of day.
+func TestScheduledScanner_PublishesOnlyDueJob(t *testing.T) {
+	ctx, out := jsonLogContext(context.Background())
+	repo, caseA := setupCase(t, "ws")
+
+	registry := model.NewWorkspaceRegistry()
+	hourly := &model.Job{
+		ID:     "hourly",
+		Prompt: "x",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	daily := &model.Job{
+		ID:     "daily",
+		Prompt: "x",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: 24 * time.Hour}},
+	}
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{hourly, daily},
+	})
+
+	hourlyLast := time.Now().UTC().Add(-2 * time.Hour) // due: every=1h
+	dailyLast := time.Now().UTC().Add(-time.Hour)      // not due: every=24h
+	gt.NoError(t, repo.JobRun().RecordRun(ctx, model.JobRunKey{
+		WorkspaceID: "ws", CaseID: caseA.ID, JobID: hourly.ID,
+	}, model.JobRunStatusSuccess, hourlyLast, "", "", "")).Required()
+	gt.NoError(t, repo.JobRun().RecordRun(ctx, model.JobRunKey{
+		WorkspaceID: "ws", CaseID: caseA.ID, JobID: daily.ID,
+	}, model.JobRunStatusSuccess, dailyLast, "", "", "")).Required()
+
+	pub := &recordingPublisher{}
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo: repo, Registry: registry, Publisher: pub,
+	})
+	gt.NoError(t, scanner.Scan(ctx)).Required()
+
+	events := pub.snapshot()
+	gt.Array(t, events).Length(1).Required()
+	gt.Value(t, events[0].JobID).Equal(hourly.ID)
+	gt.Bool(t, events[0].LastRunAt.Sub(hourlyLast).Abs() < time.Second).True()
+	gt.Bool(t, events[0].ScheduledFor.Sub(hourlyLast.Add(time.Hour)).Abs() < time.Second).True()
+
+	// The sweep summary makes the same fact readable from the log: 2 scheduled
+	// Jobs over 1 OPEN case produced exactly 1 due event.
+	rec, ok := findLogRecord(out.lines(), "scheduled sweep completed")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["workspace_id"]).Equal("ws")
+	gt.Value(t, rec["scheduled_jobs"]).Equal(float64(2))
+	gt.Value(t, rec["open_cases"]).Equal(float64(1))
+	gt.Value(t, rec["due_published"]).Equal(float64(1))
 }
 
 func TestScheduledScanner_SkipsNotYetDue(t *testing.T) {

@@ -84,3 +84,7 @@ var WithQuietForTest = withQuiet
 
 // IsQuietForTest exposes isQuiet for tests in other packages.
 var IsQuietForTest = isQuiet
+
+// ValidateEventForTest exposes Event.validate so the per-domain invariants can
+// be table-tested directly instead of through eight Publish scenarios.
+var ValidateEventForTest = Event.validate
