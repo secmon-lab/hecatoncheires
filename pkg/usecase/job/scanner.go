@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -10,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // DefaultUnansweredTimeout is how long an interactive Job run may stay
@@ -92,6 +94,7 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 				goerr.V("workspace_id", ws.Workspace.ID))
 		}
 
+		duePublished := 0
 		for _, c := range cases {
 			// One subcollection query per OPEN case: returns this case's
 			// existing JobRuns (typically <= number of scheduled jobs
@@ -142,12 +145,24 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 					CaseID:       c.ID,
 					Timestamp:    now,
 					ActorUserID:  model.SystemActorID,
+					JobID:        j.ID,
 					LastRunAt:    last.LastRunAt,
 					ScheduledFor: NextFireTime(j.Events.Scheduled, last.LastRunAt, now),
 				}
 				s.deps.Publisher.Publish(ctx, ev)
+				duePublished++
 			}
 		}
+
+		// Sweep summary per workspace: due_published counts the (job, case)
+		// pairs this sweep actually raised an event for, so it can be read
+		// against scheduled_jobs x open_cases to see that only the Jobs whose
+		// schedule elapsed were triggered.
+		logging.From(ctx).Info("scheduled sweep completed",
+			slog.String("workspace_id", ws.Workspace.ID),
+			slog.Int("scheduled_jobs", len(scheduledJobs)),
+			slog.Int("open_cases", len(cases)),
+			slog.Int("due_published", duePublished))
 	}
 	return nil
 }

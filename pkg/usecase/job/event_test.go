@@ -1,7 +1,11 @@
 package job_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +22,7 @@ import (
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // setupCase creates a workspace-scoped in-memory repo with a single OPEN
@@ -286,4 +291,269 @@ func TestPublish_IgnoresUnknownWorkspace(t *testing.T) {
 	})
 	async.Wait()
 	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+}
+
+// scheduledJobsFixture registers a workspace holding one scheduled Job per
+// given id and returns the dispatcher, the executor recording which Jobs
+// actually ran, and the id of the OPEN Case they run against.
+func scheduledJobsFixture(t *testing.T, jobIDs ...string) (*job.UseCase, *recordingExecutor, int64) {
+	t.Helper()
+	jobs := make([]*model.Job, 0, len(jobIDs))
+	for _, id := range jobIDs {
+		jobs = append(jobs, &model.Job{
+			ID:     id,
+			Prompt: "x",
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+			},
+		})
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      jobs,
+	})
+
+	repo, c := setupCase(t, "ws")
+	exec := &recordingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:      repo,
+		Registry:  registry,
+		LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+	})
+	return job.NewUseCase(registry, runner), exec, c.ID
+}
+
+func TestPublish_ScheduledEventFiresOnlyNamedJob(t *testing.T) {
+	// The sweep decides due-ness per Job, so a scheduled event addresses one
+	// Job. The other scheduled Jobs in the workspace must stay untouched.
+	uc, exec, caseID := scheduledJobsFixture(t, "a", "b", "c")
+
+	uc.Publish(context.Background(), job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      caseID,
+		Timestamp:   time.Now().UTC(),
+		ActorUserID: model.SystemActorID,
+		JobID:       "b",
+	})
+	async.Wait()
+	gt.Array(t, exec.firedJobIDs()).Equal([]string{"b"})
+}
+
+func TestPublish_DropsScheduledEventWithoutJobID(t *testing.T) {
+	// Fail closed: an unnamed scheduled event fires nothing rather than
+	// falling back to every scheduled Job in the workspace.
+	uc, exec, caseID := scheduledJobsFixture(t, "a", "b")
+
+	uc.Publish(context.Background(), job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      caseID,
+		Timestamp:   time.Now().UTC(),
+		ActorUserID: model.SystemActorID,
+	})
+	async.Wait()
+	gt.Array(t, exec.firedJobIDs()).Length(0)
+}
+
+func TestPublish_ScheduledEventForUnknownJobID(t *testing.T) {
+	uc, exec, caseID := scheduledJobsFixture(t, "a", "b")
+
+	uc.Publish(context.Background(), job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      caseID,
+		Timestamp:   time.Now().UTC(),
+		ActorUserID: model.SystemActorID,
+		JobID:       "nope",
+	})
+	async.Wait()
+	gt.Array(t, exec.firedJobIDs()).Length(0)
+}
+
+// syncBuffer collects log output written from the dispatch goroutines as well
+// as the caller's, so a test can read it back after async.Wait().
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) lines() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Split(strings.TrimSpace(s.buf.String()), "\n")
+}
+
+// jsonLogContext returns a context carrying a JSON logger writing into out,
+// plus the buffer to read the emitted records from.
+func jsonLogContext(ctx context.Context) (context.Context, *syncBuffer) {
+	out := &syncBuffer{}
+	return logging.With(ctx, slog.New(slog.NewJSONHandler(out, nil))), out
+}
+
+// findLogRecord returns the first JSON log record whose message matches.
+func findLogRecord(lines []string, msg string) (map[string]any, bool) {
+	for _, line := range lines {
+		rec := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec["msg"] == msg {
+			return rec, true
+		}
+	}
+	return nil, false
+}
+
+func TestPublish_ScheduledDispatchIsObservableInLogs(t *testing.T) {
+	// Operators verify the per-Job addressing from the log alone: the
+	// scheduled dispatch line must show the event's Job id and the exact set
+	// of Jobs that were started.
+	uc, _, caseID := scheduledJobsFixture(t, "a", "b", "c")
+	ctx, out := jsonLogContext(context.Background())
+
+	uc.Publish(ctx, job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      caseID,
+		Timestamp:   time.Now().UTC(),
+		ActorUserID: model.SystemActorID,
+		JobID:       "b",
+	})
+	async.Wait()
+
+	rec, ok := findLogRecord(out.lines(), "job event dispatched")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["domain"]).Equal("scheduled")
+	gt.Value(t, rec["workspace_id"]).Equal("ws")
+	gt.Value(t, rec["event_job_id"]).Equal("b")
+	gt.Value(t, rec["dispatched_job_ids"]).Equal([]any{"b"})
+	gt.Value(t, rec["dispatched"]).Equal(float64(1))
+}
+
+func TestPublish_DroppedScheduledEventIsObservableInLogs(t *testing.T) {
+	uc, _, caseID := scheduledJobsFixture(t, "a", "b")
+	ctx, out := jsonLogContext(context.Background())
+
+	uc.Publish(ctx, job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      caseID,
+		Timestamp:   time.Now().UTC(),
+		ActorUserID: model.SystemActorID,
+	})
+	async.Wait()
+
+	// The drop is reported at ERROR, and no dispatch line follows it. The
+	// error text and the goerr values are the log contract documented in
+	// docs/operations.md: without them a dropped event cannot be traced back
+	// to its workspace / case / job in production.
+	rec, ok := findLogRecord(out.lines(), "job: invalid event dropped")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["level"]).Equal("ERROR")
+
+	errMsg, ok := rec["error"].(string)
+	gt.Bool(t, ok).True().Required()
+	gt.String(t, errMsg).Contains("scheduled job event has no job id")
+
+	values, ok := rec["values"].(map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, values["domain"]).Equal("scheduled")
+	gt.Value(t, values["workspace_id"]).Equal("ws")
+	gt.Value(t, values["case_id"]).Equal(float64(caseID))
+	gt.Value(t, values["job_id"]).Equal("")
+
+	_, dispatchLogged := findLogRecord(out.lines(), "job event dispatched")
+	gt.Bool(t, dispatchLogged).False()
+}
+
+func TestEvent_Validate(t *testing.T) {
+	testCases := map[string]struct {
+		ev      job.Event
+		wantErr bool
+	}{
+		"case event": {
+			ev: job.Event{
+				Domain:        model.JobEventDomainCase,
+				WorkspaceID:   "ws",
+				CaseID:        1,
+				CaseLifecycle: model.CaseLifecycleCreated,
+			},
+		},
+		"scheduled event naming its job": {
+			ev: job.Event{
+				Domain:      model.JobEventDomainScheduled,
+				WorkspaceID: "ws",
+				CaseID:      1,
+				JobID:       "daily",
+			},
+		},
+		"manual event": {
+			ev: job.Event{
+				Domain:      model.JobEventDomainManual,
+				WorkspaceID: "ws",
+				CaseID:      1,
+				ActorUserID: "U1",
+			},
+		},
+		"unknown domain": {
+			ev: job.Event{
+				WorkspaceID: "ws",
+				CaseID:      1,
+			},
+			wantErr: true,
+		},
+		"no workspace id": {
+			ev: job.Event{
+				Domain:        model.JobEventDomainCase,
+				CaseID:        1,
+				CaseLifecycle: model.CaseLifecycleCreated,
+			},
+			wantErr: true,
+		},
+		"no case id": {
+			ev: job.Event{
+				Domain:        model.JobEventDomainCase,
+				WorkspaceID:   "ws",
+				CaseLifecycle: model.CaseLifecycleCreated,
+			},
+			wantErr: true,
+		},
+		"invalid case lifecycle": {
+			ev: job.Event{
+				Domain:        model.JobEventDomainCase,
+				WorkspaceID:   "ws",
+				CaseID:        1,
+				CaseLifecycle: model.CaseLifecycle("archived"),
+			},
+			wantErr: true,
+		},
+		"scheduled event without job id": {
+			ev: job.Event{
+				Domain:      model.JobEventDomainScheduled,
+				WorkspaceID: "ws",
+				CaseID:      1,
+			},
+			wantErr: true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			err := job.ValidateEventForTest(tc.ev)
+			if tc.wantErr {
+				gt.Value(t, err).NotNil()
+				return
+			}
+			gt.NoError(t, err)
+		})
+	}
 }

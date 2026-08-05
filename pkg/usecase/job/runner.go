@@ -821,10 +821,14 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 
 	// Reconstruct the triggering Event from the run log's provenance so the
 	// prompts render with the same framing as the original turn.
+	// JobID is set even though this path never goes through Publish/matchJobs
+	// (the Job is already resolved), so the "a scheduled event always names its
+	// Job" invariant holds however the Event was built.
 	ev := Event{
 		Domain:      model.JobEventDomain(logRec.EventType),
 		WorkspaceID: key.WorkspaceID,
 		CaseID:      key.CaseID,
+		JobID:       key.JobID,
 		Timestamp:   logRec.EventTriggerAt,
 	}
 	prep, prepErr := r.prepareRun(ctx, j, ev)
