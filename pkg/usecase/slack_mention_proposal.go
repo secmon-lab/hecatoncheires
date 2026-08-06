@@ -518,8 +518,8 @@ func buildPreviewBlocks(
 
 	// 1. Title + description rendered as a single Slack `markdown` block.
 	//    `# heading` gives the title heading-level styling, and the
-	//    description follows underneath as italicised body text. Using one
-	//    markdown block also dodges the per-section "Show more" cutoff.
+	//    description follows underneath as body text. Using one markdown
+	//    block also dodges the per-section "Show more" cutoff.
 	blocks := []goslack.Block{
 		buildTitleAndDescriptionMarkdown("mention_draft_body", mat.Title, mat.Description),
 	}
@@ -815,9 +815,23 @@ func buildFieldPairSections(fields []config.FieldDefinition, values map[string]m
 }
 
 // buildTitleAndDescriptionMarkdown renders the title as a level-1 markdown
-// heading followed by the description as italic body text inside a single
-// Slack `markdown` block. The markdown block reliably renders headings and
-// is not subject to the per-section "Show more" collapse.
+// heading followed by the description as body text inside a single Slack
+// `markdown` block. The markdown block reliably renders headings and is not
+// subject to the per-section "Show more" collapse.
+//
+// Both title and description are model-generated and quote whatever the source
+// Slack thread contained, so both are rendered as literal text.
+//
+// Slack expands one `markdown` block into several blocks on its side, and one
+// such expansion was rejected with invalid_blocks, which failed the whole turn
+// and left the user with no draft at all. The input construct that produced the
+// rejection was never identified, so rather than target it, every construct
+// Slack could interpret is neutralised.
+//
+// The description is no longer wrapped in per-line `_…_`. Escaping alone would
+// make the wrapper safe again, but the wrapper only ever supplied italic
+// styling, and dropping it removes a pair of emphasis delimiters that has to
+// stay balanced against arbitrary text.
 func buildTitleAndDescriptionMarkdown(blockID, title, description string) goslack.Block {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -827,23 +841,91 @@ func buildTitleAndDescriptionMarkdown(blockID, title, description string) goslac
 
 	var sb strings.Builder
 	sb.WriteString("# 🎫 ")
-	sb.WriteString(escapeMarkdownInline(title))
+	// A newline inside the title would end the heading and turn the rest into
+	// body text, so collapse it before escaping the remaining characters.
+	sb.WriteString(escapeMarkdownBlockText(strings.ReplaceAll(title, "\n", " ")))
 	sb.WriteString("\n")
 	if desc != "" {
 		sb.WriteString("\n")
-		// One italic span per line so blank lines remain blank.
 		for line := range strings.SplitSeq(desc, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				sb.WriteString("\n")
 				continue
 			}
-			sb.WriteString("_")
-			sb.WriteString(trimmed)
-			sb.WriteString("_\n")
+			sb.WriteString(escapeLineLeadingListMarker(escapeMarkdownBlockText(trimmed)))
+			sb.WriteString("\n")
 		}
 	}
 	return goslack.NewMarkdownBlock(blockID, sb.String())
+}
+
+// markdownBlockEscaper neutralises the constructs Slack interprets inside a
+// `markdown` block. Two mechanisms are needed because neither covers the
+// other's characters: `&`, `<`, `>` are Slack's parsing control characters and
+// are documented to require HTML-entity encoding, while the rest are the
+// characters Slack documents as backslash-escapable in a markdown block.
+//
+// `-` and `.` are documented as escapable too but are deliberately absent here:
+// they carry meaning only at the start of a line, and escaping every occurrence
+// would put a backslash inside every URL in the text. Their line-leading forms
+// are handled by escapeLineLeadingListMarker instead.
+//
+// One Replacer pass is deliberate. Replacer never rescans its own output, so
+// the `&` that `&lt;` introduces is not encoded again into `&amp;lt;`.
+var markdownBlockEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	`\`, `\\`,
+	"`", "\\`",
+	"*", `\*`,
+	"_", `\_`,
+	"{", `\{`,
+	"}", `\}`,
+	"[", `\[`,
+	"]", `\]`,
+	"(", `\(`,
+	")", `\)`,
+	"#", `\#`,
+	"+", `\+`,
+	"!", `\!`,
+)
+
+// escapeMarkdownBlockText neutralises every construct a Slack `markdown` block
+// interprets from a character alone — links, mentions, emphasis, code spans,
+// headings. Constructs that depend on a character's position in the line are
+// escapeLineLeadingListMarker's job, so a caller rendering whole lines must
+// apply both.
+func escapeMarkdownBlockText(s string) string {
+	return markdownBlockEscaper.Replace(s)
+}
+
+// escapeLineLeadingListMarker escapes the markers that turn a line into a list
+// item or a thematic break: a leading `-`, and the `.` of a leading `1.`. Both
+// characters are left untouched by markdownBlockEscaper because escaping every
+// occurrence would put a backslash inside every URL in the text, so their
+// line-leading forms are handled here, on already-escaped text.
+//
+// The input is the output of escapeMarkdownBlockText, which leaves `-`, digits
+// and `.` unchanged, so a marker is still recognisable at this point and the
+// backslash this adds is not doubled by a later pass.
+func escapeLineLeadingListMarker(line string) string {
+	if strings.HasPrefix(line, "-") {
+		return `\` + line
+	}
+	for i, r := range line {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		// A `.` reached with i == 0 has no digits in front of it, so it is
+		// not an ordered-list marker.
+		if r == '.' && i > 0 {
+			return line[:i] + `\.` + line[i+1:]
+		}
+		return line
+	}
+	return line
 }
 
 // escapeMarkdownInline neutralises markdown characters that would otherwise

@@ -1359,6 +1359,105 @@ func TestBuildPreviewBlocks_Fallback(t *testing.T) {
 	})
 }
 
+// previewMarkdownText renders the preview and returns the body `markdown`
+// block's text, which is where the draft title and description land.
+func previewMarkdownText(t *testing.T, title, description string) string {
+	t.Helper()
+	draft := &model.CaseProposal{
+		ID: "draft-preview-escape",
+		Materialization: &model.WorkspaceMaterialization{
+			Title:       title,
+			Description: description,
+		},
+	}
+	selected := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-1", Name: "Risk"},
+	}
+	blocks, _ := usecase.BuildPreviewBlocksForTest(context.Background(), draft, selected, nil)
+	gt.Number(t, len(blocks)).GreaterOrEqual(1).Required()
+	md, ok := blocks[0].(*goslack.MarkdownBlock)
+	gt.Bool(t, ok).True().Required()
+	return md.Text
+}
+
+// TestBuildPreviewBlocks_BodyRendersAsLiteralText pins the preview body to
+// literal rendering. Title and description are model-generated and quote the
+// source Slack thread, whose raw text carries link markup, mentions and
+// markdown syntax. Slack expands the `markdown` block into further blocks on
+// its side and rejects the entire message with invalid_blocks when that
+// expansion yields something it does not accept, which loses the whole draft.
+func TestBuildPreviewBlocks_BodyRendersAsLiteralText(t *testing.T) {
+	t.Run("angle-bracket constructs cannot be parsed as links or mentions", func(t *testing.T) {
+		const permalink = "https://example.slack.com/archives/C09MX7ZN1BM/p1784796610087359"
+		// A <url|label> whose label is itself a URL, plus user and subteam
+		// mentions: all three appear verbatim in the raw text Slack returns
+		// for a thread the agent reads.
+		text := previewMarkdownText(t,
+			"<@U06AA194TK5|alice> cannot log in",
+			"Reference: <"+permalink+"|"+permalink+">\nOwner is <!subteam^S0AP0U0QLF5>",
+		)
+
+		gt.Bool(t, strings.ContainsAny(text, "<>")).False()
+		gt.String(t, text).Contains("&lt;").Contains("&gt;")
+		// The reader still sees the words the model wrote.
+		gt.String(t, text).Contains("alice").Contains("cannot log in").Contains("example.slack.com")
+	})
+
+	t.Run("markdown syntax is escaped rather than interpreted", func(t *testing.T) {
+		text := previewMarkdownText(t, "plain title",
+			"See [the doc](https://example.com/a_b) for *important* _details_ and `code`",
+		)
+
+		gt.Bool(t, strings.Contains(text, "[the doc]")).False()
+		gt.Bool(t, strings.Contains(text, "*important*")).False()
+		gt.Bool(t, strings.Contains(text, "_details_")).False()
+		gt.Bool(t, strings.Contains(text, "`code`")).False()
+		gt.String(t, text).Contains("the doc").Contains("important").Contains("details").Contains("code")
+	})
+
+	t.Run("ampersand is entity-encoded exactly once", func(t *testing.T) {
+		text := previewMarkdownText(t, "plain title", "A & B <c>")
+
+		gt.String(t, text).Contains("&amp;").Contains("&lt;c&gt;")
+		// Encoding the replacement's own `&` again would render the raw
+		// entity text to the user instead of the character.
+		gt.Bool(t, strings.Contains(text, "&amp;lt;")).False()
+		gt.Bool(t, strings.Contains(text, "&amp;amp;")).False()
+	})
+
+	t.Run("line-leading list markers do not start a list or a thematic break", func(t *testing.T) {
+		text := previewMarkdownText(t, "plain title",
+			"- first bullet\n1. first step\n---",
+		)
+
+		gt.String(t, text).Contains(`\- first bullet`)
+		gt.String(t, text).Contains(`1\. first step`)
+		gt.String(t, text).Contains(`\---`)
+	})
+
+	t.Run("a hyphen or dot inside a URL is left untouched", func(t *testing.T) {
+		const url = "https://example.com/a-b.c"
+		text := previewMarkdownText(t, "plain title", "See "+url+" for details")
+
+		gt.String(t, text).Contains(url)
+	})
+
+	t.Run("description is not wrapped in italic delimiters", func(t *testing.T) {
+		text := previewMarkdownText(t, "plain title", "first line\nsecond line")
+
+		// The prior implementation emitted `_first line_`, which required the
+		// delimiters to stay balanced against arbitrary text.
+		gt.Bool(t, strings.Contains(text, "_first line_")).False()
+		gt.String(t, text).Contains("first line").Contains("second line")
+	})
+
+	t.Run("a newline in the title cannot end the heading early", func(t *testing.T) {
+		text := previewMarkdownText(t, "first half\nsecond half", "")
+
+		gt.String(t, text).Contains("first half second half")
+	})
+}
+
 // An integration that @-mentions the bot renders its payload into attachments
 // and leaves Text empty. The persisted MentionText must carry that body,
 // otherwise the planner is handed a blank mention.
