@@ -70,6 +70,13 @@ func (uc *UseCase) Publish(ctx context.Context, ev Event) {
 	}
 	originator, isActor := jobActorFromContext(ctx)
 
+	// A sweep in progress collects the outcomes of the runs it dispatched, so
+	// it can close with one reconcilable summary. Only scheduled runs belong
+	// to it: a Job agent's own write publishes a lifecycle event from inside
+	// the run and would otherwise be counted against the sweep's due total.
+	stats := tickStatsFrom(ctx)
+	tracked := stats != nil && ev.Domain == model.JobEventDomainScheduled
+
 	dispatched := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		if isActor && j.ID == originator.JobID {
@@ -77,7 +84,13 @@ func (uc *UseCase) Publish(ctx context.Context, ev Event) {
 			continue
 		}
 		event := ev
+		if tracked {
+			stats.beginRun()
+		}
 		async.Dispatch(ctx, func(bgCtx context.Context) error {
+			if tracked {
+				defer stats.endRun()
+			}
 			return uc.runner.Run(bgCtx, j, event)
 		})
 		dispatched = append(dispatched, j.ID)

@@ -265,6 +265,101 @@ Scheduler / Eventarc / your preferred scheduler. The endpoint:
   pick up. No `JobRunLog` is written for these *prepare-stage* failures
   because no RunID has been allocated yet.
 
+### Measuring runs from the logs
+
+The Firestore records below reconstruct *one* run in detail. To answer
+"is a single run slow, or is capacity going unused?" across a whole
+sweep, three aggregate log lines are emitted at INFO. They are designed
+to be read together and contain no prompt, model output, tool argument
+or tool result — only identifiers, counters and durations.
+
+#### `job run finished` — one line per run attempt
+
+Emitted by `JobRunner.Run` and `Resume` on **every** exit, including the
+skips that perform no work. `outcome` is the discriminator, so there is
+no need to match message strings:
+
+| `outcome` | Meaning |
+|-----------|---------|
+| `completed` | Reached the executor and finished without error. |
+| `failed` | Any failure, including a prepare-stage one that never reached the executor. |
+| `suspended` | An interactive run asked the user and paused. |
+| `skipped_lease` | Another runner held the `(workspace, case, job)` lease. |
+| `skipped_suspended` | Stepped aside for a genuinely open question. |
+| `skipped_slots_full` | Refused by the deployment-wide concurrency gate. |
+| `skipped_stale` | A resume whose run was no longer awaiting input. |
+
+Fields: `workspace_id`, `case_id`, `job_id`, `run_id` (empty when the
+attempt never reached the executor — that absence is what keeps it out
+of `started` below), `domain` (`scheduled` / `case` / `manual`),
+`strategy`, `resumed`, `outcome`, `elapsed_ms`, and the stage split
+`admit_ms` (lease + suspension check + slot admission) / `prepare_ms`
+(entity loads, prompt build, run log, tools) / `execute_ms` (the agent
+loop) / `finish_ms` (terminal record + notifications + reflection) /
+`reflect_ms` (reflection's share of `finish_ms`, broken out because it
+is a whole extra agent pass).
+
+Call aggregates: `llm_calls`, `llm_ms`, `tool_calls`, `tool_ms`, and
+`tool_ms_by_name` (per-tool `Calls` / `DurationMs`). **`llm_ms` and
+`tool_ms` are sums of per-call spans, so they can exceed `execute_ms`**
+— `planexec` runs sub-agents in parallel and they share one trace
+handler. Keys in `tool_ms_by_name` are restricted to the tool names the
+model was actually offered; anything else (including a name from a lost
+span) is bucketed under `unregistered`, so model output can never become
+a log field name.
+
+When the concurrency gate applies, the line also carries
+`slot_observed` (slots held at the admission attempt), `slot_limit` and
+`slot_hold_ms`. With the gate disabled the three are omitted rather than
+reported as zero.
+
+#### `job concurrency slot released` — one line per held slot
+
+`slot_index`, `slot_limit`, `slot_hold_ms`. Emitted at release so a run
+that dies before its own summary still records how long it occupied
+capacity.
+
+#### `job tick summary` — one line per sweep
+
+Emitted by `ScheduledScanner.Scan` after it waits for the runs it
+dispatched (15 minutes by default; a sweep that fails before finishing
+its walk returns without a summary instead of waiting).
+
+`due_total` counts the `(job, case)` pairs the sweep raised an event
+for. `started` counts the attempts that reached the executor.
+`completed` / `failed` / `suspended` / `skipped_slots_full` /
+`skipped_lease` / `skipped_suspended` are always present, zero
+included. `elapsed_ms` covers the whole sweep; `settled` is `false`
+when the wait was given up on, which marks the counts as partial.
+
+With the gate enabled the line adds `slot_limit`, `slot_busy_ms` (the
+holds this instance took during this sweep) and `slot_idle_ms`
+(`slot_limit × elapsed_ms − slot_busy_ms`, floored at zero).
+**`slot_idle_ms` is an upper bound on the real idle time**: a hold left
+over from an earlier sweep, or one taken by another instance, is not
+subtracted. Capacity going unused shows up as a large `slot_idle_ms`
+*together with* a large `skipped_slots_full` — a sweep that refused
+almost everything while its slots sat free.
+
+Only scheduled runs are counted. A Job agent that mutates its case
+publishes a lifecycle event from inside the run; counting that run would
+push the outcome totals past `due_total`.
+
+#### Startup lines
+
+`Agent Job runtime configured` reports `job_max_concurrency` from both
+`serve` and `tick`. `job concurrency limiter enabled` reports the
+compiled-in slot timings (`slot_ttl`, `slot_renew_interval`,
+`slot_max_hold`) so a `slot_hold_ms` can be read against the TTL that
+would have expired it; with the limit set to `0` the line is
+`job concurrency limiter disabled` instead.
+
+#### Per-call detail
+
+`appended job run event` (DEBUG) carries `duration_ms` per LLM response
+and tool call, plus `tool_name`. There is deliberately no INFO line per
+call: one run makes tens to hundreds of them.
+
 ### Run logs and event trail
 
 Each invocation of a Job (= one *Run*) writes a structured log so the
@@ -332,6 +427,14 @@ Each event is one of:
 | `LLM_RESPONSE`  | Paired with `LLM_REQUEST`. Captures `Texts`, `FunctionCalls`, `InputTokens`, `OutputTokens`, `CacheCreationInputTokens`, `CacheReadInputTokens`, `DurationMs`. `InputTokens` is the provider's total and already includes the two prompt-cache figures. |
 | `TOOL_CALL`     | One per tool execution. `ParentSequence` points at the LLM_RESPONSE whose tool_use spawned it. Captures `ToolName`, `ArgumentsJSON`, `ResultJSON`, `IsError`, `ErrorMessage`, `StartedAt`, `EndedAt`. |
 | `RUN_ERROR`     | Emitted by `JobRunner.Run` when the agent loop fails. Captures `Stage` (`prepare` / `execute` / `finish`) and `Message`. |
+
+**`OccurredAt` is a completion timestamp, not a call start.** Both the
+`LLM_REQUEST` and the `LLM_RESPONSE` of one call carry the same value —
+the moment the handler observed the call finish — so the gap between the
+two rows measures only how long the two writes took. The measured
+latency is `LLM_RESPONSE.DurationMs`, and for a tool the difference
+between `TOOL_CALL.StartedAt` and `EndedAt`. Deriving a call's duration
+from `OccurredAt` will silently under-report it.
 
 #### Truncation policy
 

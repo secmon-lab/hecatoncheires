@@ -14,6 +14,7 @@ package runtrace
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -107,6 +108,45 @@ type Handler struct {
 	agentLabel         string // current sub-agent label
 	lastLLMResponseSeq int64  // most recent LLM_RESPONSE Sequence (for TOOL_CALL parents)
 	totals             runTotals
+
+	// toolByName splits the tool wall-clock per tool. Kept out of runTotals
+	// because that struct is returned by value (a map inside it would be
+	// shared with the caller); CallStats copies this one explicitly.
+	toolByName map[string]ToolCallStats
+	// knownTools is the set of tool names the model was actually offered,
+	// collected from the LLM requests this handler saw. It is the allow-list
+	// for toolByName keys — see addToolStatsLocked.
+	knownTools map[string]struct{}
+}
+
+// unregisteredToolKey buckets every tool execution whose name was not among
+// the tools the model was offered.
+const unregisteredToolKey = "unregistered"
+
+// maxToolNameKeys bounds how many distinct keys toolByName may hold, so one
+// run can never turn into an unbounded set of log fields.
+const maxToolNameKeys = 64
+
+// CallStats is the wall-clock time and call counts one Handler observed inside
+// LLM and tool calls. The durations are the SUM of the per-call spans: planexec
+// wires one Handler into sub-agents that run concurrently, so the sum can
+// exceed the turn's own elapsed time. The counts mirror
+// JobRunLog.LLMCallCount / ToolCallCount.
+type CallStats struct {
+	LLMCalls       int64
+	LLMDurationMs  int64
+	ToolCalls      int64
+	ToolDurationMs int64
+	// ToolByName splits ToolCalls / ToolDurationMs per tool. Nil when no tool
+	// ran. Keys are restricted to the tool names the model was offered, plus
+	// unregisteredToolKey for anything else.
+	ToolByName map[string]ToolCallStats
+}
+
+// ToolCallStats is one tool's share of CallStats.
+type ToolCallStats struct {
+	Calls      int64
+	DurationMs int64
 }
 
 // runTotals is the running tally across everything a Handler saw: tokens and
@@ -128,6 +168,12 @@ type runTotals struct {
 	// ToolCalls is the number of tool executions counted. Together with
 	// LLMCalls it gives the turn's step count.
 	ToolCalls int64
+	// LLMDurationMs / ToolDurationMs are the summed wall-clock of the calls
+	// counted above, measured around each call by the Start*/End* hook pair.
+	// They are reported on the run's summary log line only — neither is
+	// persisted on JobRunLog.
+	LLMDurationMs  int64
+	ToolDurationMs int64
 }
 
 var _ trace.Handler = (*Handler)(nil)
@@ -186,6 +232,12 @@ func (h *Handler) StartLLMCall(ctx context.Context) context.Context {
 // wall-clock. If err is non-nil the response event still captures whatever
 // partial data was returned; the surrounding run failure is recorded
 // separately via EmitRunError.
+//
+// BOTH events are stamped with the call's COMPLETION time: OccurredAt is not
+// the append time, but it is not the call's start either. The measured call
+// latency lives in LLMResponsePayload.DurationMs — never derive it from the
+// gap between the two events, which only reflects how long the two appends
+// took. See the JobRunEvent.OccurredAt godoc.
 func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err error) {
 	span := spanFromContext(ctx)
 	endedAt := h.clock()
@@ -198,9 +250,11 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	// the stream calls this with a nil LLMCallData (gollem's openai client does
 	// exactly that when CreateChatCompletionStream fails), and reaching the model
 	// is still a step the run took — the same reason EndToolExec counts a failed
-	// tool execution.
+	// tool execution. The duration is folded in here too: a call that failed
+	// after waiting on the provider still spent that wall-clock.
 	h.mu.Lock()
 	h.totals.LLMCalls++
+	h.totals.LLMDurationMs += durationMs
 	h.mu.Unlock()
 
 	if data == nil {
@@ -208,6 +262,19 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 		// the events rather than fabricate them. The attempt is already counted,
 		// so LLMCallCount can exceed the number of LLM_RESPONSE events.
 		return
+	}
+
+	// Remember which tools the model was actually offered. addToolStatsLocked
+	// uses this as the allow-list for per-tool keys.
+	if data.Request != nil && len(data.Request.Tools) > 0 {
+		h.mu.Lock()
+		if h.knownTools == nil {
+			h.knownTools = make(map[string]struct{}, len(data.Request.Tools))
+		}
+		for _, ts := range data.Request.Tools {
+			h.knownTools[ts.Name] = struct{}{}
+		}
+		h.mu.Unlock()
 	}
 
 	// LLM_REQUEST
@@ -275,18 +342,12 @@ func (h *Handler) StartToolExec(ctx context.Context, toolName string, args map[s
 }
 
 // EndToolExec appends a single TOOL_CALL event with ParentSequence pointing at
-// the most recent LLM_RESPONSE seen by this handler.
+// the most recent LLM_RESPONSE seen by this handler. The event's OccurredAt is
+// the execution's completion time; its measured duration is the
+// StartedAt/EndedAt pair inside ToolCallPayload.
 func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err error) {
 	span := spanFromContext(ctx)
 	endedAt := h.clock()
-
-	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
-	h.mu.Lock()
-	ev.ParentSequence = h.lastLLMResponseSeq
-	// Counted here rather than at Start so a tool that never returned (the
-	// process died mid-execution) is not billed as a completed step.
-	h.totals.ToolCalls++
-	h.mu.Unlock()
 
 	var startedAt time.Time
 	var toolName string
@@ -299,9 +360,70 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 	if startedAt.IsZero() {
 		startedAt = endedAt
 	}
+	durationMs := max(endedAt.Sub(startedAt).Milliseconds(), 0)
+
+	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
+	h.mu.Lock()
+	ev.ParentSequence = h.lastLLMResponseSeq
+	// Counted here rather than at Start so a tool that never returned (the
+	// process died mid-execution) is not billed as a completed step.
+	h.totals.ToolCalls++
+	h.totals.ToolDurationMs += durationMs
+	h.addToolStatsLocked(toolName, durationMs)
+	h.mu.Unlock()
 
 	ev.ToolCall = h.truncator.ToolCallFromTrace(toolName, args, result, err, startedAt, endedAt)
 	h.append(ctx, ev)
+}
+
+// addToolStatsLocked folds one execution into the per-tool tally. The caller
+// holds h.mu.
+//
+// The key is checked against the tool names the model was actually offered:
+// toolName reaches us from the provider's function call, so an invented name
+// would otherwise become a log field name and an unbounded source of
+// cardinality. Anything unrecognised — including an empty name from a lost
+// span, and any name past maxToolNameKeys — goes into one bucket rather than
+// being renamed into something it is not. The raw name is still recorded
+// verbatim on the TOOL_CALL event.
+func (h *Handler) addToolStatsLocked(toolName string, durationMs int64) {
+	key := unregisteredToolKey
+	if _, ok := h.knownTools[toolName]; ok {
+		key = toolName
+	}
+	if h.toolByName == nil {
+		h.toolByName = make(map[string]ToolCallStats, 8)
+	}
+	if _, exists := h.toolByName[key]; !exists && len(h.toolByName) >= maxToolNameKeys {
+		key = unregisteredToolKey
+	}
+	stats := h.toolByName[key]
+	stats.Calls++
+	stats.DurationMs += durationMs
+	h.toolByName[key] = stats
+}
+
+// CallStats returns what this handler has observed so far. Like runTotals it is
+// a per-handler tally, not the run's lifetime total: a resumed run builds a
+// fresh handler. The returned map is a copy, so the caller may keep it without
+// sharing state with the handler. Safe on a nil receiver.
+func (h *Handler) CallStats() CallStats {
+	if h == nil {
+		return CallStats{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := CallStats{
+		LLMCalls:       h.totals.LLMCalls,
+		LLMDurationMs:  h.totals.LLMDurationMs,
+		ToolCalls:      h.totals.ToolCalls,
+		ToolDurationMs: h.totals.ToolDurationMs,
+	}
+	if len(h.toolByName) > 0 {
+		out.ToolByName = make(map[string]ToolCallStats, len(h.toolByName))
+		maps.Copy(out.ToolByName, h.toolByName)
+	}
+	return out
 }
 
 // StartSubAgent flags the handler so subsequent events carry the named
@@ -405,10 +527,23 @@ func (h *Handler) append(ctx context.Context, ev *model.JobRunEvent) {
 		return
 	}
 	if logger := logging.From(ctx); logger != nil {
-		logger.Debug("appended job run event",
+		attrs := []any{
 			"run_id", h.routing.RunID,
 			"sequence", ev.Sequence,
-			"kind", string(ev.Kind))
+			"kind", string(ev.Kind),
+		}
+		// The measured latency, on the one line that already exists per event.
+		// No new per-event line is emitted: the run's aggregate is on the run
+		// summary, and this stays at DEBUG for per-call drill-down.
+		if ev.LLMResponse != nil {
+			attrs = append(attrs, "duration_ms", ev.LLMResponse.DurationMs)
+		}
+		if ev.ToolCall != nil {
+			attrs = append(attrs,
+				"tool_name", ev.ToolCall.ToolName,
+				"duration_ms", max(ev.ToolCall.EndedAt.Sub(ev.ToolCall.StartedAt).Milliseconds(), 0))
+		}
+		logger.Debug("appended job run event", attrs...)
 	}
 }
 

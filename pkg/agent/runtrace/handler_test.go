@@ -169,6 +169,130 @@ func llmCallWithCache(input, output, cacheCreation, cacheRead int) *trace.LLMCal
 	}
 }
 
+// steppingClock advances by step on every read, so the wall-clock a
+// Start*/End* pair measures is exactly one step.
+type steppingClock struct {
+	mu   sync.Mutex
+	now  time.Time
+	step time.Duration
+}
+
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(c.step)
+	return c.now
+}
+
+// newSteppingHandler builds a handler whose clock advances by step per read.
+func newSteppingHandler(t *testing.T, step time.Duration) (*runtrace.Handler, *memory.Memory) {
+	t.Helper()
+	repo := memory.New()
+	clock := &steppingClock{now: time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC), step: step}
+	h := runtrace.NewHandler(repo.JobRunEvent(), runtrace.Routing{
+		WorkspaceID: "ws1", CaseID: 42, JobID: "job-A", RunID: "run-1", TraceID: "trace-1",
+	}, runtrace.NewSequencer(), clock.Now)
+	return h, repo
+}
+
+// llmCallOfferingTools is llmCall plus the tool specs the model was offered,
+// which is what makes a tool name eligible as a per-tool key.
+func llmCallOfferingTools(input, output int, toolNames ...string) *trace.LLMCallData {
+	data := llmCall(input, output)
+	specs := make([]trace.ToolSpec, 0, len(toolNames))
+	for _, name := range toolNames {
+		specs = append(specs, trace.ToolSpec{Name: name, Description: "d"})
+	}
+	data.Request = &trace.LLMRequest{Tools: specs}
+	return data
+}
+
+// The measured latency is what makes a run's elapsed time decomposable, so the
+// handler must sum the spans it already measures per call.
+func TestHandler_CallStats_SumsMeasuredDurations(t *testing.T) {
+	h, _ := newSteppingHandler(t, 100*time.Millisecond)
+	ctx := context.Background()
+
+	// Each Start/End pair spans one clock step. baseEvent also reads the clock,
+	// but only through a value already taken, so the span stays one step.
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCallOfferingTools(10, 2, "slack_search", "notion_read"), nil)
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCall(20, 4), nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), map[string]any{"hits": 1}, nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), map[string]any{"hits": 2}, nil)
+	h.EndToolExec(h.StartToolExec(ctx, "notion_read", nil), nil, errors.New("page not found"))
+
+	stats := h.CallStats()
+	gt.Number(t, stats.LLMCalls).Equal(2)
+	gt.Number(t, stats.LLMDurationMs).Equal(200)
+	gt.Number(t, stats.ToolCalls).Equal(3)
+	gt.Number(t, stats.ToolDurationMs).Equal(300)
+
+	gt.Value(t, stats.ToolByName["slack_search"]).Equal(runtrace.ToolCallStats{Calls: 2, DurationMs: 200})
+	// A failed execution still consumed wall-clock, so it is counted.
+	gt.Value(t, stats.ToolByName["notion_read"]).Equal(runtrace.ToolCallStats{Calls: 1, DurationMs: 100})
+}
+
+// A tool name reaches the handler from the provider's function call, so an
+// unrecognised one must not become a log field of its own.
+func TestHandler_CallStats_BucketsUnofferedToolNames(t *testing.T) {
+	h, _ := newSteppingHandler(t, 50*time.Millisecond)
+	ctx := context.Background()
+
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCallOfferingTools(10, 2, "slack_search"), nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), nil, nil)
+	// Never offered to the model.
+	h.EndToolExec(h.StartToolExec(ctx, "rm_minus_rf", nil), nil, nil)
+	// Span lost, so no name at all.
+	h.EndToolExec(ctx, nil, nil)
+
+	stats := h.CallStats()
+	gt.Number(t, stats.ToolCalls).Equal(3)
+	gt.Value(t, stats.ToolByName["slack_search"].Calls).Equal(int64(1))
+	gt.Value(t, stats.ToolByName["unregistered"].Calls).Equal(int64(2))
+	_, leaked := stats.ToolByName["rm_minus_rf"]
+	gt.Bool(t, leaked).False()
+	_, empty := stats.ToolByName[""]
+	gt.Bool(t, empty).False()
+}
+
+// A call that failed before returning data still waited on the provider, so its
+// wall-clock must not be dropped along with its (absent) payload.
+func TestHandler_CallStats_CountsDurationOfCallWithNoData(t *testing.T) {
+	h, _ := newSteppingHandler(t, 250*time.Millisecond)
+	ctx := context.Background()
+
+	h.EndLLMCall(h.StartLLMCall(ctx), nil, errors.New("failed to create chat completion stream"))
+
+	stats := h.CallStats()
+	gt.Number(t, stats.LLMCalls).Equal(1)
+	gt.Number(t, stats.LLMDurationMs).Equal(250)
+}
+
+// The caller keeps the returned map (it goes onto a log line), so it must not
+// alias the handler's own state.
+func TestHandler_CallStats_ReturnsACopy(t *testing.T) {
+	h, _ := newSteppingHandler(t, 10*time.Millisecond)
+	ctx := context.Background()
+
+	h.EndLLMCall(h.StartLLMCall(ctx), llmCallOfferingTools(1, 1, "slack_search"), nil)
+	h.EndToolExec(h.StartToolExec(ctx, "slack_search", nil), nil, nil)
+
+	first := h.CallStats()
+	first.ToolByName["slack_search"] = runtrace.ToolCallStats{Calls: 999}
+	first.ToolByName["injected"] = runtrace.ToolCallStats{Calls: 1}
+
+	second := h.CallStats()
+	gt.Value(t, second.ToolByName["slack_search"].Calls).Equal(int64(1))
+	_, injected := second.ToolByName["injected"]
+	gt.Bool(t, injected).False()
+}
+
+// A nil handler is the resume prepare-failure path, where no trace was set up.
+func TestHandler_CallStats_NilReceiver(t *testing.T) {
+	var h *runtrace.Handler
+	gt.Value(t, h.CallStats()).Equal(runtrace.CallStats{})
+}
+
 func TestHandler_RunTotals_AccumulatesTokensAcrossCalls(t *testing.T) {
 	h, _ := newHandlerFixture(t)
 	ctx := context.Background()

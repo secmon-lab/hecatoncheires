@@ -26,6 +26,12 @@ const DefaultUnansweredTimeout = 24 * time.Hour
 // against a concurrent resume.
 const expireLeaseDuration = time.Minute
 
+// defaultRunSettleTimeout bounds how long a sweep waits for the runs it
+// dispatched before writing its summary. Longer than DefaultLeaseDuration so a
+// normal run is always counted, short enough that one stuck run cannot pin the
+// sweep's goroutine indefinitely — the summary then says it is partial.
+const defaultRunSettleTimeout = 15 * time.Minute
+
 // ScannerDeps groups the dependencies the ScheduledScanner needs.
 type ScannerDeps struct {
 	Repo      interfaces.Repository
@@ -35,6 +41,11 @@ type ScannerDeps struct {
 	// UnansweredTimeout overrides DefaultUnansweredTimeout for the
 	// stale-suspended-run sweep. 0 → DefaultUnansweredTimeout.
 	UnansweredTimeout time.Duration
+
+	// RunSettleTimeout overrides defaultRunSettleTimeout: how long Scan waits
+	// for the runs it dispatched before emitting the sweep summary. 0 →
+	// defaultRunSettleTimeout.
+	RunSettleTimeout time.Duration
 }
 
 // ScheduledScanner walks every workspace's scheduled Jobs and publishes
@@ -54,11 +65,19 @@ func NewScheduledScanner(deps ScannerDeps) *ScheduledScanner {
 // domain, and for each non-CLOSED case decides whether to publish a
 // scheduled event. Errors loading any individual case are logged but do
 // not abort the sweep; loud Repo / Registry failures stop the sweep.
+//
+// It closes by waiting for the runs it dispatched and writing one summary
+// line, so "how many became due" and "how many actually ran" are readable off
+// a single record. A Repo / Registry failure returns before that wait: there
+// is nothing to summarise, and blocking a failed sweep for the settle timeout
+// would help no one.
 func (s *ScheduledScanner) Scan(ctx context.Context) error {
 	if s == nil || s.deps.Registry == nil {
 		return goerr.New("scanner has no registry")
 	}
 	now := time.Now().UTC()
+	stats := newTickStats(now)
+	ctx = withTickStats(ctx, stats)
 
 	for _, ws := range s.deps.Registry.List() {
 		if ws == nil {
@@ -151,6 +170,7 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 				}
 				s.deps.Publisher.Publish(ctx, ev)
 				duePublished++
+				stats.addDue()
 			}
 		}
 
@@ -164,7 +184,22 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 			slog.Int("open_cases", len(cases)),
 			slog.Int("due_published", duePublished))
 	}
+
+	// Wait for the dispatched runs so the summary states what they did, not
+	// just what was raised. settled=false marks a partial count.
+	settled := stats.waitRuns(s.runSettleTimeout())
+	logging.From(ctx).LogAttrs(ctx, slog.LevelInfo, "job tick summary",
+		stats.logAttrs(time.Now().UTC(), settled)...)
 	return nil
+}
+
+// runSettleTimeout returns the configured settle timeout, or the default when
+// unset.
+func (s *ScheduledScanner) runSettleTimeout() time.Duration {
+	if s.deps.RunSettleTimeout > 0 {
+		return s.deps.RunSettleTimeout
+	}
+	return defaultRunSettleTimeout
 }
 
 // expireSuspendedRun fails an interactive run that has been awaiting user

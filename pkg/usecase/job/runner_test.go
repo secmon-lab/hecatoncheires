@@ -2,6 +2,7 @@ package job_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -2248,4 +2249,494 @@ func TestJobRunner_ScheduledInteractiveRunReleasesSlotOnSuspend(t *testing.T) {
 	stored, err := repo.JobSlot().List(ctx)
 	gt.NoError(t, err).Required()
 	gt.Array(t, stored).Length(0)
+}
+
+// --- run summary log --------------------------------------------------
+
+// runSummaryMsg is the message every Run / Resume attempt closes with.
+const runSummaryMsg = "job run finished"
+
+// requireRunSummary returns the single summary record, failing the test when it
+// is absent.
+func requireRunSummary(t *testing.T, out *syncBuffer) map[string]any {
+	t.Helper()
+	rec, ok := findLogRecord(out.lines(), runSummaryMsg)
+	gt.Bool(t, ok).True().Required()
+	return rec
+}
+
+// logString / logNumber read a field, failing when it is missing rather than
+// silently comparing against a zero value.
+func logString(t *testing.T, rec map[string]any, key string) string {
+	t.Helper()
+	v, ok := rec[key]
+	gt.Bool(t, ok).True().Required()
+	s, ok := v.(string)
+	gt.Bool(t, ok).True().Required()
+	return s
+}
+
+func logNumber(t *testing.T, rec map[string]any, key string) float64 {
+	t.Helper()
+	v, ok := rec[key]
+	gt.Bool(t, ok).True().Required()
+	n, ok := v.(float64)
+	gt.Bool(t, ok).True().Required()
+	return n
+}
+
+func TestJobRunner_SummaryLogOnSuccess(t *testing.T) {
+	exec := &recordingExecutor{}
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	runner, _, c := newRunner(t, "ws", []*model.Job{j}, exec)
+	ctx, out := jsonLogContext(context.Background())
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeCompletedForTest)
+	gt.String(t, logString(t, rec, "workspace_id")).Equal("ws")
+	gt.Number(t, logNumber(t, rec, "case_id")).Equal(float64(c.ID))
+	gt.String(t, logString(t, rec, "job_id")).Equal("summarize")
+	gt.String(t, logString(t, rec, "domain")).Equal(string(model.JobEventDomainCase))
+	gt.String(t, logString(t, rec, "strategy")).Equal(string(model.JobStrategySimple))
+	gt.Value(t, rec["resumed"]).Equal(false)
+	// The run reached the executor, so it carries the run id its log was
+	// created under.
+	gt.String(t, logString(t, rec, "run_id")).NotEqual("")
+
+	for _, field := range []string{"elapsed_ms", "admit_ms", "prepare_ms", "execute_ms", "finish_ms", "reflect_ms"} {
+		gt.Number(t, logNumber(t, rec, field)).GreaterOrEqual(0)
+	}
+	// The gate is not wired here, so its fields must be absent rather than
+	// reporting a limit of zero.
+	for _, key := range []string{"slot_observed", "slot_limit", "slot_hold_ms"} {
+		_, present := rec[key]
+		gt.Bool(t, present).False()
+	}
+}
+
+func TestJobRunner_SummaryLogOnFailure(t *testing.T) {
+	sentinel := goerr.New("llm down")
+	exec := &failingExecutor{err: sentinel}
+	j := &model.Job{
+		ID:     "fail-job",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	runner, _, c := newRunner(t, "ws", []*model.Job{j}, exec)
+	ctx, out := jsonLogContext(context.Background())
+
+	err := runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})
+	gt.Error(t, err).Is(sentinel)
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeFailedForTest)
+	gt.String(t, logString(t, rec, "run_id")).NotEqual("")
+}
+
+// A prepare-stage failure never reaches the executor, so the attempt must be
+// reported as failed WITHOUT a run id — that absence is what keeps it out of
+// the sweep's started count.
+func TestJobRunner_SummaryLogOnPrepareFailure(t *testing.T) {
+	exec := &recordingExecutor{}
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	runner, _, c := newRunner(t, "ws", []*model.Job{j}, exec)
+	ctx, out := jsonLogContext(context.Background())
+
+	// A case id that does not exist fails the prepare stage's case load.
+	err := runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID + 9999,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})
+	gt.Error(t, err)
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeFailedForTest)
+	gt.String(t, logString(t, rec, "run_id")).Equal("")
+	gt.Number(t, logNumber(t, rec, "execute_ms")).Equal(float64(0))
+}
+
+func TestJobRunner_SummaryLogWhenLeaseHeld(t *testing.T) {
+	exec := &recordingExecutor{}
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+	})
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	acquired, err := repo.JobRun().TryAcquireLease(context.Background(), key, time.Now().UTC(), 10*time.Minute)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, acquired).True().Required()
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeSkippedLeaseForTest)
+	gt.String(t, logString(t, rec, "run_id")).Equal("")
+}
+
+func TestJobRunner_SummaryLogWhenQuestionOpen(t *testing.T) {
+	now := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+	exec := &recordingExecutor{}
+	j := &model.Job{
+		ID:          "interactive",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	gt.NoError(t, j.Validate()).Required()
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "1700000000.0001")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+		Clock:     func() time.Time { return now },
+	})
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	logRec := &model.JobRunLog{
+		WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID,
+		RunID: "RUN-OPEN", TraceID: "TRACE-OPEN",
+		Stage: model.JobRunStageRunning, StartedAt: now.Add(-time.Minute),
+		ExecutorKind: model.ExecutorKindPlanexec,
+	}
+	gt.NoError(t, repo.JobRunLog().Create(context.Background(), logRec)).Required()
+	logRec.Stage = model.JobRunStageAwaitingInput
+	logRec.PendingInteraction = &model.PendingInteraction{
+		PostedChannelID: "C1", PostedMessageTS: "1700000000.000100", Reason: "need input",
+		Items: []model.PendingInteractionItem{{ID: "q1", Text: "Which one?", Type: "free_text"}},
+	}
+	gt.NoError(t, repo.JobRunLog().Suspend(context.Background(), logRec)).Required()
+	gt.NoError(t, repo.JobRun().Suspend(context.Background(), key, "RUN-OPEN", now.Add(-time.Minute))).Required()
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     now,
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeSkippedSuspendedForTest)
+}
+
+func TestJobRunner_SummaryLogWhenSlotsFull(t *testing.T) {
+	wsID := "ws-summary-slot-full"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+	occupyAllSlots(t, repo, 2, clock.Now())
+
+	j := scheduledSlotJob()
+	exec := &recordingExecutor{}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, repo.JobSlot(), 2, clock), wsID)
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, clock.Now()))).Required()
+	async.Wait()
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeSkippedSlotsFullForTest)
+	gt.String(t, logString(t, rec, "domain")).Equal(string(model.JobEventDomainScheduled))
+	// The occupancy behind the refusal, which the old skip line never carried.
+	gt.Number(t, logNumber(t, rec, "slot_observed")).Equal(float64(2))
+	gt.Number(t, logNumber(t, rec, "slot_limit")).Equal(float64(2))
+	gt.Number(t, logNumber(t, rec, "slot_hold_ms")).Equal(float64(0))
+
+	// The dedicated skip line is gone: one line per attempt is what makes the
+	// sweep's due / executed counts reconcilable.
+	_, found := findLogRecord(out.lines(), "job run skipped: concurrency slots full")
+	gt.Bool(t, found).False()
+}
+
+func TestJobRunner_SummaryLogReportsSlotHold(t *testing.T) {
+	wsID := "ws-summary-slot-hold"
+	repo, c := setupCase(t, wsID)
+	clock := newTestClock()
+
+	j := scheduledSlotJob()
+	// The executor advances the limiter's clock, so the hold time is exact
+	// rather than whatever the test machine took.
+	exec := &clockAdvancingExecutor{clock: clock, by: 5 * time.Second}
+	runner := newSlotGatedRunner(repo, j, exec, newLimiter(t, repo.JobSlot(), 1, clock), wsID)
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, clock.Now()))).Required()
+	async.Wait()
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeCompletedForTest)
+	gt.Number(t, logNumber(t, rec, "slot_hold_ms")).Equal(float64(5_000))
+	gt.Number(t, logNumber(t, rec, "slot_observed")).Equal(float64(0))
+	gt.Number(t, logNumber(t, rec, "slot_limit")).Equal(float64(1))
+
+	released, ok := findLogRecord(out.lines(), "job concurrency slot released")
+	gt.Bool(t, ok).True().Required()
+	gt.Number(t, logNumber(t, released, "slot_hold_ms")).Equal(float64(5_000))
+	gt.Number(t, logNumber(t, released, "slot_index")).Equal(float64(0))
+	gt.Number(t, logNumber(t, released, "slot_limit")).Equal(float64(1))
+}
+
+// A run that pauses for a human is neither a success nor a failure, and it is
+// the case where "no summary line" would hide time the run already spent.
+func TestJobRunner_SummaryLogOnSuspend(t *testing.T) {
+	wsID := "ws-summary-suspend"
+	now := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+
+	j := &model.Job{
+		ID:          "interactive_sweep",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		},
+	}
+	gt.NoError(t, j.Validate()).Required()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: wsID, Name: "WS"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{
+			model.JobStrategyPlanexec: &interactiveScriptedExecutor{firstTokens: traceLLMCallDataForTest},
+		},
+		InteractionPoster: &fakeQuestionPoster{returnTS: "FORM-TS-1"},
+		NewRunID:          func() string { return "RUN-SUSPEND-1" },
+		NewTraceID:        func() string { return "TRACE-SUSPEND-1" },
+		Clock:             func() time.Time { return now },
+	})
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, scheduledSlotEvent(wsID, c.ID, now))).Required()
+	async.Wait()
+
+	rec := requireRunSummary(t, out)
+	gt.String(t, logString(t, rec, "outcome")).Equal(job.OutcomeSuspendedForTest)
+	gt.String(t, logString(t, rec, "run_id")).Equal("RUN-SUSPEND-1")
+	gt.String(t, logString(t, rec, "strategy")).Equal(string(model.JobStrategyPlanexec))
+	// What the paused turn already spent, which is otherwise lost until the
+	// resume completes.
+	gt.Number(t, logNumber(t, rec, "llm_calls")).Equal(float64(1))
+}
+
+// clockAdvancingExecutor moves a test clock forward so a hold or stage duration
+// is deterministic.
+type clockAdvancingExecutor struct {
+	clock *testClock
+	by    time.Duration
+}
+
+func (e *clockAdvancingExecutor) Execute(_ context.Context, _ jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	e.clock.advance(e.by)
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+// The LLM / tool aggregate is what makes a run's elapsed time decomposable, so
+// the summary must carry the counts and the per-tool split.
+func TestJobRunner_SummaryLogCarriesCallStats(t *testing.T) {
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws", Name: "WS"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{
+			model.JobStrategySimple: &traceDrivingExecutor{toolName: "slack_search"},
+		},
+	})
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	rec := requireRunSummary(t, out)
+	gt.Number(t, logNumber(t, rec, "tool_calls")).Equal(float64(1))
+	gt.Number(t, logNumber(t, rec, "llm_calls")).Equal(float64(0))
+	gt.Number(t, logNumber(t, rec, "tool_ms")).GreaterOrEqual(0)
+
+	byName, ok := rec["tool_ms_by_name"].(map[string]any)
+	gt.Bool(t, ok).True().Required()
+	// The model was never offered this tool (no LLM request went through the
+	// handler), so the name is bucketed rather than becoming a log field.
+	entry, ok := byName["unregistered"].(map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Number(t, entry["Calls"].(float64)).Equal(float64(1))
+	_, leaked := byName["slack_search"]
+	gt.Bool(t, leaked).False()
+}
+
+// An input the runner rejects before it can identify the attempt produces no
+// summary line: counting it would report a run that never existed.
+func TestJobRunner_NoSummaryLogOnInvalidInput(t *testing.T) {
+	exec := &recordingExecutor{}
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	runner, _, c := newRunner(t, "ws", []*model.Job{j}, exec)
+
+	t.Run("nil job", func(t *testing.T) {
+		ctx, out := jsonLogContext(context.Background())
+		gt.Error(t, runner.Run(ctx, nil, job.Event{
+			Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+			Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+		}))
+		_, found := findLogRecord(out.lines(), runSummaryMsg)
+		gt.Bool(t, found).False()
+	})
+
+	t.Run("invalid key", func(t *testing.T) {
+		ctx, out := jsonLogContext(context.Background())
+		gt.Error(t, runner.Run(ctx, j, job.Event{
+			Domain: model.JobEventDomainCase, WorkspaceID: "", CaseID: c.ID,
+			Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+		}))
+		_, found := findLogRecord(out.lines(), runSummaryMsg)
+		gt.Bool(t, found).False()
+	})
+}
+
+// The summary is an aggregate, never a copy of the run's content: prompts,
+// tool arguments and tool results stay in the event trail.
+func TestJobRunner_SummaryLogCarriesNoPayload(t *testing.T) {
+	const marker = "MARKER-DO-NOT-LOG"
+	repo, c := setupCase(t, "ws")
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: marker + " prompt body",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{
+			model.JobStrategySimple: &payloadEmittingExecutor{marker: marker},
+		},
+	})
+
+	ctx, out := jsonLogContext(context.Background())
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	rec := requireRunSummary(t, out)
+	encoded, err := json.Marshal(rec)
+	gt.NoError(t, err).Required()
+	gt.String(t, string(encoded)).NotContains(marker)
+
+	// The tool NAME is allowed on the line — it is a registered identifier,
+	// not content — which is also what proves the marker's absence above is
+	// about the payload and not about the aggregate being empty.
+	byName, ok := rec["tool_ms_by_name"].(map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Map(t, byName).HasKey("search_tool")
+
+	// The payload did reach the event trail, so the assertion above is about
+	// where the content is allowed to live, not about it never being produced.
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	events, err := repo.JobRunEvent().List(ctx, key, logString(t, rec, "run_id"))
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(3).Required()
+	gt.Value(t, events[0].LLMRequest).NotNil().Required()
+	gt.String(t, events[0].LLMRequest.Messages[0].Contents[0].Text).Contains(marker)
+	gt.Value(t, events[2].ToolCall).NotNil().Required()
+	gt.String(t, events[2].ToolCall.ArgumentsJSON).Contains(marker)
+	gt.String(t, events[2].ToolCall.ResultJSON).Contains(marker)
+}
+
+// payloadEmittingExecutor drives one LLM call and one tool span whose messages,
+// arguments and results all carry the marker, so the test covers every payload
+// shape the trace handler sees.
+type payloadEmittingExecutor struct {
+	marker string
+}
+
+func (e *payloadEmittingExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	h, ok := req.TraceHandler.(*job.JobRunTraceHandlerForTest)
+	if !ok {
+		return nil, errors.New("payloadEmittingExecutor: TraceHandler is not the runtrace handler")
+	}
+	data := trace.LLMCallData{
+		Model:        "test-model",
+		InputTokens:  10,
+		OutputTokens: 5,
+		Request: &trace.LLMRequest{
+			Messages: []trace.Message{{
+				Role:     "user",
+				Contents: []trace.MessageContent{{Type: "text", Text: e.marker + " user prompt"}},
+			}},
+			Tools: []trace.ToolSpec{{Name: "search_tool", Description: "search"}},
+		},
+		Response: &trace.LLMResponse{Texts: []string{e.marker + " answer"}},
+	}
+	llmCtx := h.StartLLMCall(ctx)
+	h.EndLLMCall(llmCtx, &data, nil)
+	toolCtx := h.StartToolExec(ctx, "search_tool", map[string]any{"query": e.marker})
+	h.EndToolExec(toolCtx, map[string]any{"answer": e.marker}, nil)
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
 }

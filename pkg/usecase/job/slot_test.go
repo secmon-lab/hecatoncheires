@@ -266,6 +266,92 @@ func TestConcurrencyLimiter_IgnoresSlotsBeyondLimit(t *testing.T) {
 	gt.Value(t, hold).Nil()
 }
 
+// A refusal is only actionable with the occupancy behind it: "the limit is 2"
+// alone cannot distinguish a genuinely saturated gate from a misread one.
+func TestConcurrencyLimiter_ReportsObservedOccupancy(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New().JobSlot()
+	clock := newTestClock()
+	limiter := newLimiter(t, repo, 2, clock)
+
+	// Nothing held yet.
+	first, occupied, limit, err := job.AcquireSlotObservedForTest(ctx, limiter, slotKey(0))
+	gt.NoError(t, err).Required()
+	gt.Value(t, first).NotNil().Required()
+	gt.Number(t, occupied).Equal(0)
+	gt.Number(t, limit).Equal(2)
+
+	// One held.
+	second, occupied, limit, err := job.AcquireSlotObservedForTest(ctx, limiter, slotKey(1))
+	gt.NoError(t, err).Required()
+	gt.Value(t, second).NotNil().Required()
+	gt.Number(t, occupied).Equal(1)
+	gt.Number(t, limit).Equal(2)
+
+	// Saturated: the refusal reports both slots as occupied.
+	blocked, occupied, limit, err := job.AcquireSlotObservedForTest(ctx, limiter, slotKey(2))
+	gt.NoError(t, err).Required()
+	gt.Value(t, blocked).Nil()
+	gt.Number(t, occupied).Equal(2)
+	gt.Number(t, limit).Equal(2)
+
+	job.ReleaseSlotForTest(ctx, first)
+	job.ReleaseSlotForTest(ctx, second)
+	async.Wait()
+}
+
+// An invalid key never reaches the slot listing, so there is no occupancy to
+// report — but the limit is still known and must be reported rather than zero.
+func TestConcurrencyLimiter_ObservationOnInvalidKey(t *testing.T) {
+	ctx := context.Background()
+	limiter := newLimiter(t, memory.New().JobSlot(), 3, newTestClock())
+
+	hold, occupied, limit, err := job.AcquireSlotObservedForTest(ctx, limiter, model.JobRunKey{WorkspaceID: "ws"})
+	gt.Error(t, err)
+	gt.Value(t, hold).Nil()
+	gt.Number(t, occupied).Equal(0)
+	gt.Number(t, limit).Equal(3)
+}
+
+// The hold time is what says whether the capacity was actually working; it is
+// logged at release so a run that dies before its own summary still records it.
+func TestConcurrencyLimiter_ReleaseReportsHoldDuration(t *testing.T) {
+	repo := memory.New().JobSlot()
+	clock := newTestClock()
+	limiter := newLimiter(t, repo, 2, clock)
+
+	ctx, out := jsonLogContext(context.Background())
+	hold, err := job.AcquireSlotForTest(ctx, limiter, slotKey(0))
+	gt.NoError(t, err).Required()
+	gt.Value(t, hold).NotNil().Required()
+
+	clock.advance(7 * time.Second)
+	held := job.ReleaseSlotForTest(ctx, hold)
+	gt.Value(t, held).Equal(7 * time.Second)
+	async.Wait()
+
+	rec, ok := findLogRecord(out.lines(), "job concurrency slot released")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["slot_hold_ms"]).Equal(float64(7_000))
+	gt.Value(t, rec["slot_index"]).Equal(float64(job.SlotHoldIndexForTest(hold)))
+	gt.Value(t, rec["slot_limit"]).Equal(float64(2))
+}
+
+// A clock that goes backwards must not report a negative hold.
+func TestConcurrencyLimiter_ReleaseClampsNegativeHold(t *testing.T) {
+	ctx := context.Background()
+	clock := newTestClock()
+	limiter := newLimiter(t, memory.New().JobSlot(), 1, clock)
+
+	hold, err := job.AcquireSlotForTest(ctx, limiter, slotKey(0))
+	gt.NoError(t, err).Required()
+	gt.Value(t, hold).NotNil().Required()
+
+	clock.advance(-time.Minute)
+	gt.Value(t, job.ReleaseSlotForTest(ctx, hold)).Equal(time.Duration(0))
+	async.Wait()
+}
+
 func TestConcurrencyLimiter_KeyIsValidated(t *testing.T) {
 	ctx := context.Background()
 	limiter := newLimiter(t, memory.New().JobSlot(), 1, newTestClock())

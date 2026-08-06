@@ -6,12 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/robfig/cron/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
 func TestIsDue_Every(t *testing.T) {
@@ -120,6 +125,168 @@ func TestScheduledScanner_PublishesDueJobs(t *testing.T) {
 // came due, carrying that Job's own last-run / next-fire times. Due-ness is
 // built from `every` plus a seeded last-run time because Scan reads the wall
 // clock directly, which makes cron-based fixtures depend on the time of day.
+// The sweep must close with a line that reconciles what became due against
+// what actually ran — the reason the per-workspace due_published line alone was
+// not enough.
+func TestScheduledScanner_TickSummary(t *testing.T) {
+	ctx, out := jsonLogContext(context.Background())
+	// Two OPEN cases and one scheduled Job: the sweep raises two due events.
+	repo, _ := setupCase(t, "ws")
+	_, err := repo.Case().Create(ctx, "ws", &model.Case{
+		Title: "T2", Status: types.CaseStatusOpen, ReporterID: "U-REP",
+	})
+	gt.NoError(t, err).Required()
+
+	dueJob := &model.Job{
+		ID:     "stale_check",
+		Prompt: "x",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{dueJob},
+	})
+
+	exec := &recordingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+	})
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo:      repo,
+		Registry:  registry,
+		Publisher: job.NewUseCase(registry, runner),
+	})
+
+	gt.NoError(t, scanner.Scan(ctx)).Required()
+	async.Wait()
+
+	// Both cases were first-run due, and Scan waited for both runs before
+	// summarising them.
+	gt.Number(t, exec.calls.Load()).Equal(int32(2))
+	rec, ok := findLogRecord(out.lines(), "job tick summary")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["due_total"]).Equal(float64(2))
+	gt.Value(t, rec["started"]).Equal(float64(2))
+	gt.Value(t, rec["completed"]).Equal(float64(2))
+	gt.Value(t, rec["failed"]).Equal(float64(0))
+	gt.Value(t, rec["suspended"]).Equal(float64(0))
+	gt.Value(t, rec["skipped_slots_full"]).Equal(float64(0))
+	gt.Value(t, rec["skipped_lease"]).Equal(float64(0))
+	gt.Value(t, rec["skipped_suspended"]).Equal(float64(0))
+	gt.Value(t, rec["settled"]).Equal(true)
+	gt.Number(t, rec["elapsed_ms"].(float64)).GreaterOrEqual(0)
+
+	// The gate is not wired, so no capacity figures are reported.
+	for _, key := range []string{"slot_limit", "slot_busy_ms", "slot_idle_ms"} {
+		_, present := rec[key]
+		gt.Bool(t, present).False()
+	}
+
+	// The per-workspace line stays as it was.
+	sweep, ok := findLogRecord(out.lines(), "scheduled sweep completed")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, sweep["due_published"]).Equal(float64(2))
+	gt.Value(t, sweep["open_cases"]).Equal(float64(2))
+}
+
+// A run still in flight when the settle timeout expires must be reported as a
+// partial count, not silently under-reported.
+func TestScheduledScanner_TickSummaryReportsUnsettled(t *testing.T) {
+	ctx, out := jsonLogContext(context.Background())
+	repo, _ := setupCase(t, "ws")
+
+	dueJob := &model.Job{
+		ID:     "stale_check",
+		Prompt: "x",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{dueJob},
+	})
+
+	release := make(chan struct{})
+	exec := &blockingExecutor{release: release}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+	})
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo:             repo,
+		Registry:         registry,
+		Publisher:        job.NewUseCase(registry, runner),
+		RunSettleTimeout: 20 * time.Millisecond,
+	})
+
+	gt.NoError(t, scanner.Scan(ctx)).Required()
+
+	rec, ok := findLogRecord(out.lines(), "job tick summary")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["settled"]).Equal(false)
+	gt.Value(t, rec["due_total"]).Equal(float64(1))
+	gt.Value(t, rec["started"]).Equal(float64(0)) // still running, not yet reported
+
+	close(release)
+	async.Wait()
+}
+
+// listErrCase wraps a CaseRepository and forces List to fail, standing in for
+// a backend read error mid-sweep.
+type listErrCase struct {
+	interfaces.CaseRepository
+}
+
+func (listErrCase) List(_ context.Context, _ string, _ ...interfaces.ListCaseOption) ([]*model.Case, error) {
+	return nil, goerr.New("transient backend error")
+}
+
+// caseListFailingRepo is a Repository whose Case().List always fails.
+type caseListFailingRepo struct {
+	interfaces.Repository
+}
+
+func (r *caseListFailingRepo) Case() interfaces.CaseRepository {
+	return listErrCase{CaseRepository: r.Repository.Case()}
+}
+
+// blockingExecutor holds the run open until released, so a test can observe the
+// sweep giving up on the wait.
+type blockingExecutor struct {
+	release chan struct{}
+}
+
+func (e *blockingExecutor) Execute(_ context.Context, _ jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	<-e.release
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+// A sweep that fails before it can summarise must not block for the settle
+// timeout, and must not emit a summary describing a sweep that did not happen.
+func TestScheduledScanner_NoTickSummaryOnScanFailure(t *testing.T) {
+	ctx, out := jsonLogContext(context.Background())
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs: []*model.Job{{
+			ID:     "stale_check",
+			Prompt: "x",
+			Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+		}},
+	})
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo:      &caseListFailingRepo{Repository: memory.New()},
+		Registry:  registry,
+		Publisher: &recordingPublisher{},
+	})
+
+	gt.Error(t, scanner.Scan(ctx))
+	_, ok := findLogRecord(out.lines(), "job tick summary")
+	gt.Bool(t, ok).False()
+}
+
 func TestScheduledScanner_PublishesOnlyDueJob(t *testing.T) {
 	ctx, out := jsonLogContext(context.Background())
 	repo, caseA := setupCase(t, "ws")

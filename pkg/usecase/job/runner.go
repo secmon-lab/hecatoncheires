@@ -51,6 +51,94 @@ func executorKindFor(s model.JobStrategy) string {
 // for future expansion when those phases gain their own event trails.
 const runErrorStageExecute = "execute"
 
+// runSummary holds one Run / Resume attempt's observations, emitted as a single
+// log line when the attempt ends.
+//
+// It exists so that EVERY exit path — including the silent skips that used to
+// return without a trace — is accounted for by exactly one line carrying an
+// outcome. Reconciling a sweep's dispatched events against the runs it actually
+// executed previously required differencing two unrelated log messages.
+type runSummary struct {
+	workspaceID string
+	caseID      int64
+	jobID       string
+	// runID is set once the run log exists, i.e. once the attempt got past
+	// admission and prepare into the executor. Empty on every earlier exit,
+	// which is also what tells the sweep collector the run never started.
+	runID string
+	// domain is the triggering event's domain (scheduled / case / manual).
+	domain string
+	// strategy is the executor kind chosen for the Job; empty before selection.
+	strategy string
+	// resumed marks an attempt that continued a suspended run.
+	resumed bool
+	// outcome starts at outcomeFailed so an exit path that forgets to set it
+	// surfaces as a failure rather than silently reporting success.
+	outcome   runOutcome
+	startedAt time.Time
+
+	// Stage wall-clock in milliseconds. A stage never reached stays 0.
+	admitMs   int64 // lease + suspension check + concurrency admission
+	prepareMs int64 // entity loads, prompt build, run log, notifier, tools
+	executeMs int64 // the agent loop
+	finishMs  int64 // terminal record + notifications + reflection
+	reflectMs int64 // reflection's share of finishMs
+
+	// Concurrency gate observations. All three are meaningless — and are left
+	// out of the log line — unless slotGated.
+	slotGated    bool
+	slotObserved int
+	slotLimit    int
+	slotHoldMs   int64
+
+	// calls is the LLM / tool aggregate this attempt's trace handler observed.
+	// Zero when no handler was built.
+	calls runtrace.CallStats
+}
+
+// emitRunSummary writes the attempt's single summary line and reports it to the
+// sweep collector when this attempt belongs to one. Called from a defer so it
+// covers every exit, including a panic unwinding through Run.
+func (r *JobRunner) emitRunSummary(ctx context.Context, sum *runSummary) {
+	if sum == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("workspace_id", sum.workspaceID),
+		slog.Int64("case_id", sum.caseID),
+		slog.String("job_id", sum.jobID),
+		slog.String("run_id", sum.runID),
+		slog.String("domain", sum.domain),
+		slog.String("strategy", sum.strategy),
+		slog.Bool("resumed", sum.resumed),
+		slog.String("outcome", string(sum.outcome)),
+		slog.Int64("elapsed_ms", max(r.clock().Sub(sum.startedAt).Milliseconds(), 0)),
+		slog.Int64("admit_ms", sum.admitMs),
+		slog.Int64("prepare_ms", sum.prepareMs),
+		slog.Int64("execute_ms", sum.executeMs),
+		slog.Int64("finish_ms", sum.finishMs),
+		slog.Int64("reflect_ms", sum.reflectMs),
+		slog.Int64("llm_calls", sum.calls.LLMCalls),
+		// llm_ms / tool_ms are SUMS of concurrent spans (planexec runs
+		// sub-agents in parallel), so they can exceed execute_ms.
+		slog.Int64("llm_ms", sum.calls.LLMDurationMs),
+		slog.Int64("tool_calls", sum.calls.ToolCalls),
+		slog.Int64("tool_ms", sum.calls.ToolDurationMs),
+	}
+	if len(sum.calls.ToolByName) > 0 {
+		attrs = append(attrs, slog.Any("tool_ms_by_name", sum.calls.ToolByName))
+	}
+	if sum.slotGated {
+		attrs = append(attrs,
+			slog.Int("slot_observed", sum.slotObserved),
+			slog.Int("slot_limit", sum.slotLimit),
+			slog.Int64("slot_hold_ms", sum.slotHoldMs))
+	}
+	logging.From(ctx).LogAttrs(ctx, slog.LevelInfo, "job run finished", attrs...)
+
+	tickStatsFrom(ctx).recordRun(sum)
+}
+
 // ToolBuilder lets the host customise the gollem tool set bound to each
 // Job run. The JobRunner calls Build exactly once per invocation, after
 // it has acquired the lease and loaded the Case. Implementations are
@@ -232,6 +320,19 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return goerr.Wrap(err, "invalid job-run key")
 	}
 
+	// From here on every exit reports one summary line. Registered before the
+	// other defers so it runs last and observes what they recorded (the slot
+	// hold time in particular).
+	sum := &runSummary{
+		workspaceID: ev.WorkspaceID,
+		caseID:      ev.CaseID,
+		jobID:       j.ID,
+		domain:      string(ev.Domain),
+		startedAt:   r.clock(),
+		outcome:     outcomeFailed,
+	}
+	defer func() { r.emitRunSummary(ctx, sum) }()
+
 	lease := r.deps.LeaseDuration
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
@@ -245,6 +346,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	}
 	if !acquired {
 		// Another runner holds the lease — silent idempotent skip.
+		sum.outcome = outcomeSkippedLease
 		return nil
 	}
 	defer func() {
@@ -281,6 +383,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		// being blocked forever. The orphan's SuspendedRunID is cleared by
 		// this run's terminal RecordRun (or overwritten if it suspends again).
 		if r.suspensionIsActive(ctx, existing, leaseAt) {
+			sum.outcome = outcomeSkippedSuspended
 			return nil
 		}
 		r.finalizeOrphanedSuspension(ctx, existing)
@@ -293,7 +396,10 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// lifecycle event, a manual Run, or an interactive resume is a single
 	// user-visible action with no such retry, so those run regardless.
 	if ev.Domain == model.JobEventDomainScheduled && r.deps.SlotLimiter != nil {
-		hold, slotErr := r.deps.SlotLimiter.acquire(ctx, key)
+		hold, obs, slotErr := r.deps.SlotLimiter.acquire(ctx, key)
+		sum.slotGated = true
+		sum.slotObserved = obs.Occupied
+		sum.slotLimit = obs.Limit
 		if slotErr != nil {
 			// Fail closed: with the slot state unreadable we cannot tell how
 			// many runs are already in flight, and starting anyway would
@@ -304,17 +410,24 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 				goerr.V("job_id", j.ID), goerr.V("case_id", ev.CaseID))
 		}
 		if hold == nil {
-			logging.From(ctx).Info("job run skipped: concurrency slots full",
-				slog.String("workspace_id", ev.WorkspaceID),
-				slog.Int64("case_id", ev.CaseID),
-				slog.String("job_id", j.ID),
-				slog.Int("limit", r.deps.SlotLimiter.limit))
+			// No dedicated line: the summary carries outcome=skipped_slots_full
+			// alongside the occupancy that caused it, so one line per attempt
+			// covers both the refusal and the runs that did execute.
+			sum.outcome = outcomeSkippedSlotsFull
 			return nil
 		}
-		// context.Background() for the same reason as ReleaseLease above: the
-		// release must not depend on the run context's state.
-		defer hold.release(context.Background())
+		// WithoutCancel rather than Background for the same reason as
+		// ReleaseLease above — the release must not depend on the run
+		// context's cancellation — while keeping the context values so the
+		// release logs through the run's logger.
+		defer func() {
+			sum.slotHoldMs = hold.release(context.WithoutCancel(ctx)).Milliseconds()
+		}()
 	}
+	sum.admitMs = max(r.clock().Sub(sum.startedAt).Milliseconds(), 0)
+	// stageAt is the boundary the current stage is measured from; each stage
+	// closes by folding its elapsed time into sum and re-arming it.
+	stageAt := r.clock()
 
 	// Mark the context so any mutations the executor performs do not
 	// re-publish events.
@@ -410,6 +523,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	traceID := r.newTraceID()
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
+	sum.strategy = string(strategy)
 	executor, execLookupErr := r.deps.executorFor(strategy)
 	if execLookupErr != nil {
 		return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
@@ -436,6 +550,8 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return r.recordPrepareFailure(ctx, key, goerr.Wrap(createErr, "create job run log",
 			goerr.V("run_id", runID)))
 	}
+	// The run log exists, so the attempt counts as started from here on.
+	sum.runID = runID
 
 	seq := runtrace.NewSequencer()
 	handler := runtrace.NewHandler(
@@ -504,7 +620,11 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			channelID, questionThreadTS, requesterUserID, logRec, handler, r.clock,
 		)
 	}
+	sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+
+	stageAt = r.clock()
 	res, execErr := executor.Execute(ctx, execReq)
+	sum.executeMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
 
 	// An interactive run that suspended to ask the user has already
 	// transitioned its log to AWAITING_INPUT and marked the JobRun suspended
@@ -512,11 +632,24 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// RecordRun (which would clear the suspension marker). Resume arrives
 	// out-of-band when the user answers.
 	if execErr == nil && res != nil && res.Status == job.ExecuteStatusAwaitingInput {
+		sum.outcome = outcomeSuspended
+		// The suspending turn's own totals were folded into the persisted log
+		// by the Interactor; read them here so the line reports what this turn
+		// actually spent before pausing.
+		sum.calls = handler.CallStats()
 		return nil
 	}
 
 	// --- finish stage ----------------------------------------------
-	return r.finishRun(ctx, j, c, key, logRec, handler, channelID, sessionThreadTS, runID, traceID, execErr)
+	stageAt = r.clock()
+	finishErr := r.finishRun(ctx, j, c, key, logRec, handler, channelID, sessionThreadTS, runID, traceID, execErr, sum)
+	sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+	if finishErr != nil {
+		sum.outcome = outcomeFailed
+	} else {
+		sum.outcome = outcomeCompleted
+	}
+	return finishErr
 }
 
 // CanRunManual reports whether a manual run may start right now for the given
@@ -620,6 +753,10 @@ func (r *JobRunner) RunManual(ctx context.Context, workspaceID string, caseID in
 // pass, and records the outcome on the JobRun lock doc. Shared by the
 // fresh-run and resume paths so both terminate identically. RecordRun also
 // clears any suspension marker (a terminal run is no longer awaiting input).
+//
+// sum (nil-tolerant) collects the reflection timing and the run's call
+// aggregate; the summary line itself is emitted by the caller's defer, after
+// this returns, so its finish_ms covers everything done here.
 func (r *JobRunner) finishRun(
 	ctx context.Context,
 	j *model.Job,
@@ -629,6 +766,7 @@ func (r *JobRunner) finishRun(
 	handler *runtrace.Handler,
 	channelID, sessionThreadTS, runID, traceID string,
 	execErr error,
+	sum *runSummary,
 ) error {
 	endedAt := r.clock()
 	logRec.EndedAt = endedAt
@@ -656,7 +794,14 @@ func (r *JobRunner) finishRun(
 		// affects the run's outcome (failures are reported via errutil and the
 		// Job stays SUCCESS). Gated on the Job opting in, a non-private case,
 		// and the reflection deps being wired.
+		reflectAt := r.clock()
 		r.maybeReflect(ctx, j, c, key, runID, handler)
+		if sum != nil {
+			// Broken out of finish_ms because reflection is a whole extra
+			// agent pass: without the split a long reflection reads as slow
+			// bookkeeping.
+			sum.reflectMs = max(r.clock().Sub(reflectAt).Milliseconds(), 0)
+		}
 	}
 
 	// Fold this turn's totals in. Deliberately after maybeReflect: the
@@ -666,6 +811,11 @@ func (r *JobRunner) finishRun(
 	// overwrites; the resume prepare-failure path passes no handler and keeps
 	// whatever was persisted.
 	runtrace.AddRunTotals(logRec, handler)
+	if sum != nil {
+		// Same ordering requirement as AddRunTotals, and nil-safe on the
+		// resume prepare-failure path where no handler exists.
+		sum.calls = handler.CallStats()
+	}
 
 	if finErr := r.deps.Repo.JobRunLog().Finish(ctx, logRec); finErr != nil {
 		errutil.Handle(ctx, finErr, "job: finish job run log")
@@ -794,6 +944,20 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		return goerr.New("resume requires at least one answer", goerr.V("run_id", runID))
 	}
 
+	// A resumed turn is a run attempt like any other, so it reports the same
+	// summary line. domain / strategy are filled in once the run log and the
+	// Job are resolved below.
+	sum := &runSummary{
+		workspaceID: key.WorkspaceID,
+		caseID:      key.CaseID,
+		jobID:       key.JobID,
+		runID:       runID,
+		resumed:     true,
+		startedAt:   r.clock(),
+		outcome:     outcomeFailed,
+	}
+	defer func() { r.emitRunSummary(ctx, sum) }()
+
 	ws, wsErr := r.deps.Registry.Get(key.WorkspaceID)
 	if wsErr != nil {
 		return goerr.Wrap(wsErr, "load workspace for resume", goerr.V("workspace_id", key.WorkspaceID))
@@ -821,6 +985,7 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 	if !acquired {
 		// Another resume / sweep is in flight — no-op (the submit surface
 		// degrades to a stale form via the handler).
+		sum.outcome = outcomeSkippedLease
 		return nil
 	}
 	defer func() {
@@ -832,17 +997,23 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 	logRec, err := r.deps.Repo.JobRunLog().Get(ctx, key, runID)
 	if err != nil {
 		if errors.Is(err, interfaces.ErrJobRunLogNotFound) {
+			sum.outcome = outcomeSkippedStale
 			return nil
 		}
 		return goerr.Wrap(err, "load run log for resume", goerr.V("run_id", runID))
 	}
 	if logRec == nil || logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
 		// Already resumed, completed, or expired — stale, no-op.
+		sum.outcome = outcomeSkippedStale
 		return nil
 	}
 	pending := *logRec.PendingInteraction
+	sum.domain = logRec.EventType
+	sum.admitMs = max(r.clock().Sub(sum.startedAt).Milliseconds(), 0)
+	stageAt := r.clock()
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
+	sum.strategy = string(strategy)
 	executor, execLookupErr := r.deps.executorFor(strategy)
 	if execLookupErr != nil {
 		return goerr.Wrap(execLookupErr, "select executor for resume",
@@ -872,8 +1043,12 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 	prep, prepErr := r.prepareRun(ctx, j, ev)
 	if prepErr != nil {
 		// Mark the run failed: we cannot rebuild the context to continue.
-		return r.finishRun(ctx, j, nil, key, logRec, nil, "", "", runID, logRec.TraceID,
-			goerr.Wrap(prepErr, "prepare resume"))
+		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		stageAt = r.clock()
+		finishErr := r.finishRun(ctx, j, nil, key, logRec, nil, "", "", runID, logRec.TraceID,
+			goerr.Wrap(prepErr, "prepare resume"), sum)
+		sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		return finishErr
 	}
 
 	// Continue the run's event Sequence past the suspended turn's events so
@@ -937,14 +1112,29 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		Interactive:       true,
 		Interactor:        interactor,
 	}
+	sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+
+	stageAt = r.clock()
 	res, execErr := resumable.Resume(ctx, execReq, pending, answers)
+	sum.executeMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+
 	if execErr == nil && res != nil && res.Status == job.ExecuteStatusAwaitingInput {
 		// Re-suspended on a follow-up question; leave paused.
+		sum.outcome = outcomeSuspended
+		sum.calls = handler.CallStats()
 		return nil
 	}
 
 	sessionThreadTS := questionThreadTS
-	return r.finishRun(ctx, j, prep.c, key, logRec, handler, prep.channelID, sessionThreadTS, runID, logRec.TraceID, execErr)
+	stageAt = r.clock()
+	finishErr := r.finishRun(ctx, j, prep.c, key, logRec, handler, prep.channelID, sessionThreadTS, runID, logRec.TraceID, execErr, sum)
+	sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+	if finishErr != nil {
+		sum.outcome = outcomeFailed
+	} else {
+		sum.outcome = outcomeCompleted
+	}
+	return finishErr
 }
 
 // unansweredTimeout returns the configured suspension timeout, or the
