@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -61,12 +62,20 @@ type SlotHoldForTest = slotHold
 
 // AcquireSlotForTest exposes ConcurrencyLimiter.acquire.
 func AcquireSlotForTest(ctx context.Context, l *ConcurrencyLimiter, key model.JobRunKey) (*SlotHoldForTest, error) {
-	return l.acquire(ctx, key)
+	h, _, err := l.acquire(ctx, key)
+	return h, err
 }
 
-// ReleaseSlotForTest exposes slotHold.release.
-func ReleaseSlotForTest(ctx context.Context, h *SlotHoldForTest) {
-	h.release(ctx)
+// AcquireSlotObservedForTest is AcquireSlotForTest plus the admission
+// observation the runner reports on its summary line.
+func AcquireSlotObservedForTest(ctx context.Context, l *ConcurrencyLimiter, key model.JobRunKey) (hold *SlotHoldForTest, occupied, limit int, err error) {
+	h, obs, err := l.acquire(ctx, key)
+	return h, obs.Occupied, obs.Limit, err
+}
+
+// ReleaseSlotForTest exposes slotHold.release and its hold duration.
+func ReleaseSlotForTest(ctx context.Context, h *SlotHoldForTest) time.Duration {
+	return h.release(ctx)
 }
 
 // SlotHoldIndexForTest reports which execution slot a hold occupies. Tests
@@ -88,3 +97,64 @@ var IsQuietForTest = isQuiet
 // ValidateEventForTest exposes Event.validate so the per-domain invariants can
 // be table-tested directly instead of through eight Publish scenarios.
 var ValidateEventForTest = Event.validate
+
+// TickStatsForTest exposes the per-sweep outcome collector. It is unexported in
+// production because only the scanner may create one.
+type TickStatsForTest = tickStats
+
+// NewTickStatsForTest constructs a collector anchored at startedAt.
+func NewTickStatsForTest(startedAt time.Time) *TickStatsForTest {
+	return newTickStats(startedAt)
+}
+
+// WithTickStatsForTest attaches a collector to ctx, as the scanner does.
+func WithTickStatsForTest(ctx context.Context, s *TickStatsForTest) context.Context {
+	return withTickStats(ctx, s)
+}
+
+// TickStatsFromForTest reads the collector back out of a context.
+func TickStatsFromForTest(ctx context.Context) *TickStatsForTest {
+	return tickStatsFrom(ctx)
+}
+
+// TickStatsAddDueForTest counts one published (job, case) pair.
+func TickStatsAddDueForTest(s *TickStatsForTest) { s.addDue() }
+
+// BeginRunForTest / EndRunForTest bracket a dispatched run, as Publish does.
+func (s *tickStats) BeginRunForTest() { s.beginRun() }
+func (s *tickStats) EndRunForTest()   { s.endRun() }
+
+// TickStatsWaitRunsForTest waits for the dispatched runs, reporting whether all
+// of them were accounted for.
+func TickStatsWaitRunsForTest(s *TickStatsForTest, timeout time.Duration) bool {
+	return s.waitRuns(timeout)
+}
+
+// TickStatsRecordOutcomeForTest reports one finished attempt, as JobRunner does
+// via its run summary. runID is what marks the attempt as having started.
+func TickStatsRecordOutcomeForTest(s *TickStatsForTest, domain, outcome, runID string, slotLimit int, slotHoldMs int64) {
+	s.recordRun(&runSummary{
+		domain:     domain,
+		outcome:    runOutcome(outcome),
+		runID:      runID,
+		slotGated:  slotLimit > 0,
+		slotLimit:  slotLimit,
+		slotHoldMs: slotHoldMs,
+	})
+}
+
+// TickStatsLogAttrsForTest renders the summary attributes.
+func TickStatsLogAttrsForTest(s *TickStatsForTest, now time.Time, settled bool) []slog.Attr {
+	return s.logAttrs(now, settled)
+}
+
+// Run outcome labels, exposed so tests assert against the same constants the
+// production code emits instead of re-typing the strings.
+const (
+	OutcomeCompletedForTest        = string(outcomeCompleted)
+	OutcomeFailedForTest           = string(outcomeFailed)
+	OutcomeSuspendedForTest        = string(outcomeSuspended)
+	OutcomeSkippedLeaseForTest     = string(outcomeSkippedLease)
+	OutcomeSkippedSuspendedForTest = string(outcomeSkippedSuspended)
+	OutcomeSkippedSlotsFullForTest = string(outcomeSkippedSlotsFull)
+)

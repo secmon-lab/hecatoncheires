@@ -43,6 +43,9 @@ func cmdTick() *cli.Command {
 			if err != nil {
 				return goerr.Wrap(err, "failed to build tick runtime")
 			}
+			// Same line serve emits: the effective concurrency must be visible
+			// from whichever process actually dispatched the runs.
+			logging.Default().Info("Agent Job runtime configured", logAttrsToArgs(jobCfg.LogAttrs())...)
 			defer func() {
 				if err := deps.repo.Close(); err != nil {
 					errutil.Handle(ctx, goerr.Wrap(err, "close repo"), "close repo")

@@ -32,6 +32,7 @@ import (
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // jobReflectionLoopMax bounds the reflection agent's internal tool-calling
@@ -305,6 +306,18 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 				goerr.V("job_max_concurrency", deps.SlotLimit))
 		}
 		deps2.SlotLimiter = limiter
+		// The slot timings are compiled-in, so this is the only place they are
+		// visible; without them a slot_hold_ms cannot be read against the TTL
+		// that would have expired it. Emitted by both serve and tick, which
+		// share this constructor.
+		logging.Default().Info("job concurrency limiter enabled",
+			"job_max_concurrency", deps.SlotLimit,
+			"slot_ttl", jobSlotTTL.String(),
+			"slot_renew_interval", jobSlotRenewInterval.String(),
+			"slot_max_hold", jobSlotMaxHold.String())
+	} else {
+		logging.Default().Info("job concurrency limiter disabled",
+			"job_max_concurrency", deps.SlotLimit)
 	}
 	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)

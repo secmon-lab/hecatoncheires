@@ -513,7 +513,17 @@ type JobRunEvent struct {
 	// value space is still effectively unbounded for this workload
 	// (max int64 = 9.2e18 events per Run). List queries MUST OrderBy
 	// "Sequence" — doc ID order may diverge under clock skew.
-	Sequence   int64
+	Sequence int64
+	// OccurredAt is the time of the traced call BOUNDARY, taken from the
+	// runtrace handler's clock — not the time the record was appended, and
+	// NOT the time the call started. Every kind stamps the moment the handler
+	// observed the call finish, so LLM_REQUEST and LLM_RESPONSE for one call
+	// carry the SAME completion timestamp.
+	//
+	// Latency analysis therefore must NOT use the gap between those two
+	// records: it only measures how long the two appends took. The measured
+	// call latency lives in the payloads — LLMResponsePayload.DurationMs, and
+	// ToolCallPayload.StartedAt / EndedAt.
 	OccurredAt time.Time
 	Kind       JobRunEventKind
 
@@ -652,7 +662,11 @@ type LLMResponsePayload struct {
 	// kept rather than derived.
 	CacheCreationInputTokens int64 // LLMCallData.CacheCreationInputTokens
 	CacheReadInputTokens     int64 // LLMCallData.CacheReadInputTokens
-	DurationMs               int64 // wall-clock time between Start/End hook
+	// DurationMs is the measured wall-clock of the provider call, taken
+	// around it by the runtrace handler (StartLLMCall → EndLLMCall). This is
+	// the authoritative latency of the call; the event's OccurredAt is a
+	// completion timestamp and cannot be differenced to obtain it.
+	DurationMs int64
 }
 
 // LLMFunctionCall mirrors gollem trace.FunctionCall.
@@ -709,6 +723,10 @@ type ToolCallPayload struct {
 	IsError      bool
 	ErrorMessage string // trace.ToolExecData.Error when IsError
 
+	// StartedAt / EndedAt bracket the tool execution itself, measured by the
+	// runtrace handler (StartToolExec → EndToolExec). Their difference is the
+	// execution's real latency; the event's OccurredAt equals EndedAt and
+	// carries no separate information.
 	StartedAt time.Time
 	EndedAt   time.Time
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // ConcurrencyLimiterDeps groups what the limiter needs. Every duration is
@@ -121,18 +123,34 @@ type slotHold struct {
 	limiter  *ConcurrencyLimiter
 	stop     chan struct{}
 	once     sync.Once
+	// acquiredAt is when this hold claimed the slot, so release can report how
+	// long the slot was occupied.
+	acquiredAt time.Time
+}
+
+// slotObservation is what one admission attempt saw of the gate. The caller
+// reports it so a refusal shows the occupancy behind it, not just the limit.
+type slotObservation struct {
+	// Occupied is how many slots inside [0, limit) were held at the moment the
+	// attempt listed them. It is a snapshot: another instance may claim or free
+	// a slot while the attempt probes.
+	Occupied int
+	// Limit is the configured number of slots.
+	Limit int
 }
 
 // acquire claims one free slot for the given run and starts its heartbeat.
-// It returns (nil, nil) when every slot is occupied — the caller's contract is
-// to give up, not to wait. A repository failure returns an error: the caller
-// cannot tell how many runs are in flight, so it must not proceed.
-func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (*slotHold, error) {
+// It returns (nil, obs, nil) when every slot is occupied — the caller's
+// contract is to give up, not to wait. A repository failure returns an error:
+// the caller cannot tell how many runs are in flight, so it must not proceed.
+// The observation is filled in on every path that got far enough to make one.
+func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (*slotHold, slotObservation, error) {
 	if l == nil {
-		return nil, goerr.New("concurrency limiter is nil")
+		return nil, slotObservation{}, goerr.New("concurrency limiter is nil")
 	}
+	obs := slotObservation{Limit: l.limit}
 	if err := key.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "invalid job run key for slot acquire")
+		return nil, obs, goerr.Wrap(err, "invalid job run key for slot acquire")
 	}
 
 	// listedAt pairs with the List snapshot below: it decides which indices
@@ -141,7 +159,7 @@ func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (
 	listedAt := l.now()
 	stored, err := l.repo.List(ctx)
 	if err != nil {
-		return nil, goerr.Wrap(err, "list job slots")
+		return nil, obs, goerr.Wrap(err, "list job slots")
 	}
 
 	// Records at or beyond the limit belong to a previously configured
@@ -156,6 +174,7 @@ func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (
 			held[s.Index] = true
 		}
 	}
+	obs.Occupied = len(held)
 
 	holderID := l.newHolderID()
 	// Start probing at a holder-derived offset so simultaneous acquirers do
@@ -185,7 +204,7 @@ func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (
 		}
 		acquired, acqErr := l.repo.TryAcquire(ctx, slot, claimAt)
 		if acqErr != nil {
-			return nil, goerr.Wrap(acqErr, "try acquire job slot",
+			return nil, obs, goerr.Wrap(acqErr, "try acquire job slot",
 				goerr.V("index", index))
 		}
 		if !acquired {
@@ -193,16 +212,17 @@ func (l *ConcurrencyLimiter) acquire(ctx context.Context, key model.JobRunKey) (
 			continue
 		}
 		hold := &slotHold{
-			index:    index,
-			holderID: holderID,
-			limiter:  l,
-			stop:     make(chan struct{}),
+			index:      index,
+			holderID:   holderID,
+			limiter:    l,
+			stop:       make(chan struct{}),
+			acquiredAt: claimAt,
 		}
 		l.startRenew(ctx, hold, claimAt)
-		return hold, nil
+		return hold, obs, nil
 	}
 	// Every slot in range is occupied, or was taken while we probed.
-	return nil, nil
+	return nil, obs, nil
 }
 
 // startRenew keeps the hold's slot alive until Release, ctx cancellation, or
@@ -265,14 +285,25 @@ func (l *ConcurrencyLimiter) startRenew(ctx context.Context, hold *slotHold, acq
 	})
 }
 
-// release stops the heartbeat and frees the slot. Safe to call more than once.
-// Failures are non-fatal: the slot frees itself one TTL after the last
-// renewal, so a lost release costs delay, not correctness.
-func (h *slotHold) release(ctx context.Context) {
+// release stops the heartbeat and frees the slot, and returns how long the slot
+// was held. Safe to call more than once. Failures are non-fatal: the slot frees
+// itself one TTL after the last renewal, so a lost release costs delay, not
+// correctness.
+//
+// The hold time is logged here rather than only returned, because a run that
+// dies between release and its own summary line would otherwise leave no record
+// of how long it occupied capacity.
+func (h *slotHold) release(ctx context.Context) time.Duration {
 	if h == nil || h.limiter == nil {
-		return
+		return 0
 	}
+	held := max(h.limiter.now().Sub(h.acquiredAt), 0)
 	h.once.Do(func() { close(h.stop) })
+
+	logging.From(ctx).Info("job concurrency slot released",
+		slog.Int("slot_index", h.index),
+		slog.Int("slot_limit", h.limiter.limit),
+		slog.Int64("slot_hold_ms", held.Milliseconds()))
 	// The heartbeat is not waited on: Renew never re-creates a deleted
 	// record, so a renewal racing this delete just fails with
 	// ErrJobSlotNotHeld and stops.
@@ -281,6 +312,7 @@ func (h *slotHold) release(ctx context.Context) {
 			goerr.V("index", h.index),
 			goerr.V("holder_id", h.holderID)), "job: release concurrency slot")
 	}
+	return held
 }
 
 // hashOffset hashes a holder token into a stable slot offset.
