@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 // CaseRepository defines the interface for Case data access
@@ -80,14 +79,16 @@ type CaseRepository interface {
 	// Returns nil, nil if no case is found with the given key.
 	GetByRequestKey(ctx context.Context, workspaceID string, key string) (*model.Case, error)
 
-	// CountFieldValues counts the total number of cases with the specified field
-	// and how many of those have a value matching one of validValues.
-	// invalidCount = total - valid detects the existence of invalid values
-	// without transferring document data (uses aggregation queries).
-	CountFieldValues(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (total int64, valid int64, err error)
-
-	// FindCaseWithInvalidFieldValue returns one case where the specified field
-	// has a value not in validValues. Returns nil if all values are valid.
-	// Intended to be called after CountFieldValues confirms invalid values exist.
-	FindCaseWithInvalidFieldValue(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error)
+	// ScanAll streams every Case in the workspace — including drafts and any
+	// document whose Status does not match a known value — to fn, in unspecified
+	// order. It exists for whole-collection passes (the `validate --check-db`
+	// consistency check); List and ListDrafts are status-filtered, so a document
+	// carrying an unexpected Status would be silently skipped by both.
+	//
+	// fn MUST NOT call back into the repository: the in-memory backend holds its
+	// read lock for the duration of the scan. Collect what the caller needs and
+	// perform any lookups after ScanAll returns. An error returned by fn aborts
+	// the scan and is propagated unwrapped, so errors.Is / errors.As on the
+	// result still work.
+	ScanAll(ctx context.Context, workspaceID string, fn func(*model.Case) error) error
 }

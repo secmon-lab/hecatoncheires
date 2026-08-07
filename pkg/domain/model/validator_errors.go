@@ -17,6 +17,13 @@ var (
 	// ValidateCaseFields preserves unknown fields for forward compatibility;
 	// the create path rejects them instead of silently dropping data.)
 	ErrUnknownFieldID = goerr.New("unknown field ID")
+	// ErrStoredFieldTypeMismatch is reported by ValidateStored when a persisted
+	// FieldValue carries a Type that no longer matches the workspace schema's
+	// type for that field. It is distinct from ErrInvalidFieldType because the
+	// stored value's shape may still be acceptable under the new type (text and
+	// markdown are both strings), so a type change like that would otherwise
+	// pass unnoticed.
+	ErrStoredFieldTypeMismatch = goerr.New("stored field type does not match schema type")
 )
 
 // Context keys for error values

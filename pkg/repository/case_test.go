@@ -706,200 +706,142 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, found).Nil()
 	})
 
-	t.Run("CountFieldValues counts total and valid select values", func(t *testing.T) {
+	t.Run("ScanAll streams every case including drafts", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		// Create 3 cases with select field: 2 valid, 1 invalid
-		for _, severity := range []string{"high", "medium", "invalid-opt"} {
+		titleByStatus := map[types.CaseStatus]string{
+			types.CaseStatusOpen:   "Open case",
+			types.CaseStatusClosed: "Closed case",
+			types.CaseStatusDraft:  "Draft case",
+		}
+		for _, status := range []types.CaseStatus{types.CaseStatusOpen, types.CaseStatusClosed, types.CaseStatusDraft} {
 			_, err := repo.Case().Create(ctx, wsID, &model.Case{
-				ReporterID: "U-TEST-DEFAULT",
-				Title:      "Case " + severity,
-				FieldValues: map[string]model.FieldValue{
-					"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: severity},
-				},
+				ReporterID: "U-SCAN",
+				CreatedAt:  time.Now().UTC(),
+				UpdatedAt:  time.Now().UTC(),
+				Title:      titleByStatus[status],
+				Status:     status,
 			})
 			gt.NoError(t, err).Required()
 		}
 
-		total, valid, err := repo.Case().CountFieldValues(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
-		)
+		seen := map[string]types.CaseStatus{}
+		gt.NoError(t, repo.Case().ScanAll(ctx, wsID, func(c *model.Case) error {
+			seen[c.Title] = c.Status
+			return nil
+		})).Required()
+
+		gt.Value(t, len(seen)).Equal(3)
+		gt.Value(t, seen["Open case"]).Equal(types.CaseStatusOpen)
+		gt.Value(t, seen["Closed case"]).Equal(types.CaseStatusClosed)
+		gt.Value(t, seen["Draft case"]).Equal(types.CaseStatusDraft)
+
+		// List / ListDrafts are status-filtered, which is why ScanAll exists.
+		listed, err := repo.Case().List(ctx, wsID)
 		gt.NoError(t, err).Required()
-		gt.Value(t, total).Equal(int64(3))
-		gt.Value(t, valid).Equal(int64(2))
+		gt.Array(t, listed).Length(2)
 	})
 
-	t.Run("CountFieldValues returns zero for empty workspace", func(t *testing.T) {
+	t.Run("ScanAll does not invoke fn for an empty workspace", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		total, valid, err := repo.Case().CountFieldValues(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, total).Equal(int64(0))
-		gt.Value(t, valid).Equal(int64(0))
+		calls := 0
+		gt.NoError(t, repo.Case().ScanAll(ctx, wsID, func(_ *model.Case) error {
+			calls++
+			return nil
+		})).Required()
+		gt.Value(t, calls).Equal(0)
 	})
 
-	t.Run("CountFieldValues ignores different field types", func(t *testing.T) {
+	t.Run("ScanAll aborts and propagates the error returned by fn", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		// Create a case with text field (not select)
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Text case",
-			FieldValues: map[string]model.FieldValue{
-				"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
-			},
+		for i := 0; i < 3; i++ {
+			_, err := repo.Case().Create(ctx, wsID, &model.Case{
+				ReporterID: "U-SCAN",
+				CreatedAt:  time.Now().UTC(),
+				UpdatedAt:  time.Now().UTC(),
+				Title:      fmt.Sprintf("Case %d", i),
+			})
+			gt.NoError(t, err).Required()
+		}
+
+		stop := errors.New("stop scanning")
+		calls := 0
+		err := repo.Case().ScanAll(ctx, wsID, func(_ *model.Case) error {
+			calls++
+			return stop
 		})
-		gt.NoError(t, err).Required()
-
-		total, valid, err := repo.Case().CountFieldValues(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, total).Equal(int64(0))
-		gt.Value(t, valid).Equal(int64(0))
+		gt.Error(t, err).Is(stop)
+		gt.Value(t, calls).Equal(1)
 	})
 
-	t.Run("CountFieldValues counts multi-select values", func(t *testing.T) {
+	t.Run("ScanAll preserves every field of the scanned case", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Valid tags",
-			FieldValues: map[string]model.FieldValue{
-				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
-			},
-		})
-		gt.NoError(t, err).Required()
-
-		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Invalid tags",
-			FieldValues: map[string]model.FieldValue{
-				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "bogus"}},
-			},
-		})
-		gt.NoError(t, err).Required()
-
-		total, valid, err := repo.Case().CountFieldValues(
-			ctx, wsID, "tags", types.FieldTypeMultiSelect, []string{"network", "malware", "phishing"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, total).Equal(int64(2))
-		gt.Value(t, valid).Equal(int64(1))
-	})
-
-	t.Run("FindCaseWithInvalidFieldValue returns invalid case", func(t *testing.T) {
-		repo := newRepo(t)
-		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		ctx := context.Background()
-
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Valid case",
+		created := time.Now().UTC().Truncate(time.Second)
+		threadTS := fmt.Sprintf("%d.000777", time.Now().UnixNano())
+		want := &model.Case{
+			ReporterID:            "U-REPORTER",
+			AssigneeIDs:           []string{"U-A1", "U-A2"},
+			CreatedAt:             created,
+			UpdatedAt:             created,
+			Title:                 "Full case",
+			Description:           "Every field populated",
+			Status:                types.CaseStatusOpen,
+			SlackChannelID:        "C-MONITOR",
+			SlackThreadTS:         threadTS,
+			BoardStatus:           "TRIAGE",
+			IsPrivate:             true,
+			IsTest:                true,
+			ChannelUserIDs:        []string{"U-M1"},
+			RequestKey:            fmt.Sprintf("req-%d", time.Now().UnixNano()),
+			AgentAdditionalPrompt: "extra prompt",
+			AgentSourceIDs:        []model.SourceID{"src-1"},
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
 			},
-		})
+		}
+		createdCase, err := repo.Case().Create(ctx, wsID, want)
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Invalid case",
-			FieldValues: map[string]model.FieldValue{
-				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
-			},
-		})
-		gt.NoError(t, err).Required()
+		var got *model.Case
+		gt.NoError(t, repo.Case().ScanAll(ctx, wsID, func(c *model.Case) error {
+			got = c
+			return nil
+		})).Required()
+		gt.Value(t, got).NotNil().Required()
 
-		found, err := repo.Case().FindCaseWithInvalidFieldValue(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, found).NotNil()
-		gt.Value(t, found.Title).Equal("Invalid case")
+		gt.Value(t, got.ID).Equal(createdCase.ID)
+		gt.Value(t, got.Title).Equal("Full case")
+		gt.Value(t, got.Description).Equal("Every field populated")
+		gt.Value(t, got.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, got.ReporterID).Equal("U-REPORTER")
+		gt.Value(t, got.AssigneeIDs).Equal([]string{"U-A1", "U-A2"})
+		gt.Value(t, got.SlackChannelID).Equal("C-MONITOR")
+		gt.Value(t, got.SlackThreadTS).Equal(threadTS)
+		gt.Value(t, got.BoardStatus).Equal("TRIAGE")
+		gt.Bool(t, got.IsPrivate).True()
+		gt.Bool(t, got.IsTest).True()
+		gt.Value(t, got.ChannelUserIDs).Equal([]string{"U-M1"})
+		gt.Value(t, got.RequestKey).Equal(want.RequestKey)
+		gt.Value(t, got.AgentAdditionalPrompt).Equal("extra prompt")
+		gt.Value(t, got.AgentSourceIDs).Equal([]model.SourceID{"src-1"})
+		gt.Bool(t, got.CreatedAt.Equal(created)).True()
+		gt.Bool(t, got.UpdatedAt.Equal(created)).True()
 
-		fv, ok := found.FieldValues["severity"]
-		gt.Bool(t, ok).True()
-		gt.Value(t, fv.Value).Equal("deleted-option")
-	})
-
-	t.Run("FindCaseWithInvalidFieldValue returns nil when all valid", func(t *testing.T) {
-		repo := newRepo(t)
-		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		ctx := context.Background()
-
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Valid case",
-			FieldValues: map[string]model.FieldValue{
-				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
-			},
-		})
-		gt.NoError(t, err).Required()
-
-		found, err := repo.Case().FindCaseWithInvalidFieldValue(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, found).Nil()
-	})
-
-	t.Run("FindCaseWithInvalidFieldValue detects invalid multi-select", func(t *testing.T) {
-		repo := newRepo(t)
-		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		ctx := context.Background()
-
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
-			Title:      "Bad multi-select",
-			FieldValues: map[string]model.FieldValue{
-				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "removed-tag"}},
-			},
-		})
-		gt.NoError(t, err).Required()
-
-		found, err := repo.Case().FindCaseWithInvalidFieldValue(
-			ctx, wsID, "tags", types.FieldTypeMultiSelect, []string{"network", "malware", "phishing"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, found).NotNil()
-		gt.Value(t, found.Title).Equal("Bad multi-select")
-	})
-
-	t.Run("FindCaseWithInvalidFieldValue returns nil for empty workspace", func(t *testing.T) {
-		repo := newRepo(t)
-		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		ctx := context.Background()
-
-		found, err := repo.Case().FindCaseWithInvalidFieldValue(
-			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
-		)
-		gt.NoError(t, err).Required()
-		gt.Value(t, found).Nil()
+		fv, ok := got.FieldValues["severity"]
+		gt.Bool(t, ok).True().Required()
+		gt.Value(t, fv.Type).Equal(types.FieldTypeSelect)
+		gt.Value(t, fv.Value).Equal("high")
 	})
 
 	t.Run("List retrieves all cases", func(t *testing.T) {

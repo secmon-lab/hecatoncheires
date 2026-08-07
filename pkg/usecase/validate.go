@@ -2,109 +2,569 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
-// ValidationIssue represents a single validation issue found during DB consistency check
-type ValidationIssue struct {
-	WorkspaceID string
-	CaseID      int64
-	FieldID     string
-	Message     string
-	Expected    string
-	Actual      string
+// ValidationIssueKind identifies which consistency check reported an issue.
+type ValidationIssueKind string
+
+const (
+	// IssueKindFieldValue is a stored field value that violates its schema type
+	// (a wrong value shape, an option id the definition no longer lists, a date
+	// that is not RFC3339, ...).
+	IssueKindFieldValue ValidationIssueKind = "field_value"
+	// IssueKindFieldTypeMismatch is a stored FieldValue.Type that no longer
+	// matches the schema type for that field.
+	IssueKindFieldTypeMismatch ValidationIssueKind = "field_type_mismatch"
+	// IssueKindCaseRefMissing is a case_ref / multi_case_ref value pointing at a
+	// Case that does not exist in the field's configured reference_workspace.
+	IssueKindCaseRefMissing ValidationIssueKind = "case_ref_missing"
+	// IssueKindBoardStatus is a thread-mode Case whose BoardStatus is empty or
+	// is not part of the workspace's configured case status set.
+	IssueKindBoardStatus ValidationIssueKind = "board_status_invalid"
+	// IssueKindLifecycleMismatch is a thread-mode Case whose lifecycle Status
+	// disagrees with whether its BoardStatus is configured as closed.
+	IssueKindLifecycleMismatch ValidationIssueKind = "lifecycle_status_mismatch"
+	// IssueKindActionStatus is an Action whose Status is not part of the
+	// workspace's configured action status set.
+	IssueKindActionStatus ValidationIssueKind = "action_status_invalid"
+)
+
+// ValidationTargetKind names the kind of entity an issue was found on.
+type ValidationTargetKind string
+
+const (
+	TargetKindCase   ValidationTargetKind = "case"
+	TargetKindAction ValidationTargetKind = "action"
+	TargetKindMemo   ValidationTargetKind = "memo"
+)
+
+// ValidationTarget identifies one persisted entity. CaseID is always set:
+// Actions and Memos are both Case-scoped.
+type ValidationTarget struct {
+	Kind     ValidationTargetKind
+	CaseID   int64
+	ActionID int64        // set only when Kind is TargetKindAction
+	MemoID   model.MemoID // set only when Kind is TargetKindMemo
 }
 
-// ValidationResult holds the results of DB validation
+// String renders the target for log output, e.g. "case:42" or "memo:42/01H...".
+func (t ValidationTarget) String() string {
+	switch t.Kind {
+	case TargetKindAction:
+		return fmt.Sprintf("action:%d/%d", t.CaseID, t.ActionID)
+	case TargetKindMemo:
+		return fmt.Sprintf("memo:%d/%s", t.CaseID, t.MemoID)
+	default:
+		return fmt.Sprintf("case:%d", t.CaseID)
+	}
+}
+
+// compare orders targets so the sample an issue retains does not depend on
+// repository iteration order.
+func (t ValidationTarget) compare(other ValidationTarget) int {
+	if c := strings.Compare(string(t.Kind), string(other.Kind)); c != 0 {
+		return c
+	}
+	if t.CaseID != other.CaseID {
+		if t.CaseID < other.CaseID {
+			return -1
+		}
+		return 1
+	}
+	if t.ActionID != other.ActionID {
+		if t.ActionID < other.ActionID {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(string(t.MemoID), string(other.MemoID))
+}
+
+// ValidationIssue is one GROUP of identical inconsistencies within a single
+// workspace. A configuration change affects a whole workspace uniformly, so
+// reporting every offending entity would bury the operator in output: Count is
+// how many ENTITIES hit the same (Kind, FieldID) problem — never how many
+// individual bad values they hold — and Sample together with Expected / Actual /
+// Message describe only the lowest-ordered one.
+//
+// Actual carries the offending value of the sample. For IssueKindCaseRefMissing
+// it is every missing case id of that one entity, comma-separated in ascending
+// order, because a multi_case_ref value can point at several absent Cases.
+type ValidationIssue struct {
+	WorkspaceID string
+	Kind        ValidationIssueKind
+	FieldID     string // empty for the status kinds
+	Count       int64
+	Sample      ValidationTarget
+	Expected    string
+	Actual      string
+	Message     string
+}
+
+// ValidationResult holds the results of a DB consistency check.
 type ValidationResult struct {
 	Issues []ValidationIssue
 }
 
-// HasIssues returns true if there are any validation issues
+// HasIssues returns true if there are any validation issues.
 func (r *ValidationResult) HasIssues() bool {
 	return len(r.Issues) > 0
 }
 
-// AddIssue adds a validation issue to the result
-func (r *ValidationResult) AddIssue(issue ValidationIssue) {
-	r.Issues = append(r.Issues, issue)
+// TotalCount returns how many individual entities are inconsistent, across
+// every issue group.
+func (r *ValidationResult) TotalCount() int64 {
+	var total int64
+	for _, issue := range r.Issues {
+		total += issue.Count
+	}
+	return total
 }
 
-// ValidateDB validates that select/multi-select field values in the DB
-// are consistent with the field schema defined in configuration.
-// It uses count-based detection to avoid transferring document data,
-// and only fetches a sample case when an inconsistency is found.
-// It does NOT modify any data.
+// issueKey groups occurrences that should collapse into one reported issue.
+type issueKey struct {
+	kind    ValidationIssueKind
+	fieldID string
+}
+
+// issueAccumulator folds occurrences into per-(kind, field) groups for one
+// workspace, keeping a count and the lowest-ordered target as the sample.
+type issueAccumulator struct {
+	workspaceID string
+	groups      map[issueKey]*ValidationIssue
+}
+
+func newIssueAccumulator(workspaceID string) *issueAccumulator {
+	return &issueAccumulator{
+		workspaceID: workspaceID,
+		groups:      make(map[issueKey]*ValidationIssue),
+	}
+}
+
+func (a *issueAccumulator) add(kind ValidationIssueKind, fieldID string, target ValidationTarget, expected, actual, message string) {
+	key := issueKey{kind: kind, fieldID: fieldID}
+	existing, ok := a.groups[key]
+	if !ok {
+		a.groups[key] = &ValidationIssue{
+			WorkspaceID: a.workspaceID,
+			Kind:        kind,
+			FieldID:     fieldID,
+			Count:       1,
+			Sample:      target,
+			Expected:    expected,
+			Actual:      actual,
+			Message:     message,
+		}
+		return
+	}
+
+	existing.Count++
+	// Keep the lowest-ordered target so the reported sample is stable across
+	// runs and identical between the memory and Firestore backends.
+	if target.compare(existing.Sample) < 0 {
+		existing.Sample = target
+		existing.Expected = expected
+		existing.Actual = actual
+		existing.Message = message
+	}
+}
+
+func (a *issueAccumulator) issues() []ValidationIssue {
+	out := make([]ValidationIssue, 0, len(a.groups))
+	for _, issue := range a.groups {
+		out = append(out, *issue)
+	}
+	slices.SortFunc(out, compareIssues)
+	return out
+}
+
+func compareIssues(a, b ValidationIssue) int {
+	if c := strings.Compare(a.WorkspaceID, b.WorkspaceID); c != 0 {
+		return c
+	}
+	if c := strings.Compare(string(a.Kind), string(b.Kind)); c != 0 {
+		return c
+	}
+	return strings.Compare(a.FieldID, b.FieldID)
+}
+
+// ValidateDB checks the persisted Cases, Actions and Memos of every registered
+// workspace against that workspace's configuration and reports the mismatches.
+// It reads only; nothing is repaired or rewritten.
+//
+// What it deliberately does NOT report: a field id stored under a definition the
+// config no longer has, and a required field with no stored value. Both are
+// consequences of editing the configuration that the project accepts. See
+// CLAUDE.md § "DB consistency checks".
 func (uc *UseCases) ValidateDB(ctx context.Context) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
-	entries := uc.workspaceRegistry.List()
-	for _, entry := range entries {
-		wsID := entry.Workspace.ID
-		schema := entry.FieldSchema
+	for _, entry := range uc.workspaceRegistry.List() {
+		issues, err := uc.validateWorkspaceData(ctx, entry)
+		if err != nil {
+			return nil, err
+		}
+		result.Issues = append(result.Issues, issues...)
+	}
 
-		for _, fieldDef := range schema.Fields {
-			if fieldDef.Type != types.FieldTypeSelect && fieldDef.Type != types.FieldTypeMultiSelect {
-				continue
+	slices.SortFunc(result.Issues, compareIssues)
+	return result, nil
+}
+
+func (uc *UseCases) validateWorkspaceData(ctx context.Context, entry *model.WorkspaceEntry) ([]ValidationIssue, error) {
+	wsID := entry.Workspace.ID
+	acc := newIssueAccumulator(wsID)
+
+	caseIDs, refWanted, err := uc.validateCases(ctx, entry, acc)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.validateCaseRefs(ctx, wsID, refWanted, acc); err != nil {
+		return nil, err
+	}
+	if err := uc.validateActionStatuses(ctx, entry, acc); err != nil {
+		return nil, err
+	}
+	if err := uc.validateMemoFields(ctx, entry, caseIDs, acc); err != nil {
+		return nil, err
+	}
+
+	return acc.issues(), nil
+}
+
+// caseRefWant records which Cases a reference workspace is expected to hold and
+// which entities referenced them.
+type caseRefWant struct {
+	// fieldID -> referenced case id -> referring targets.
+	byField map[string]map[int64][]ValidationTarget
+}
+
+// validateCases walks every Case in the workspace once, checking field values
+// and the thread-mode status invariants. It returns the Case ids it saw (the
+// Memo pass needs them) and the case references it collected: the existence
+// lookups must happen after the scan, because ScanAll forbids calling back into
+// the repository from its callback.
+func (uc *UseCases) validateCases(ctx context.Context, entry *model.WorkspaceEntry, acc *issueAccumulator) ([]int64, map[string]*caseRefWant, error) {
+	wsID := entry.Workspace.ID
+
+	var validator *model.FieldValidator
+	defByID := make(map[string]config.FieldDefinition)
+	if entry.FieldSchema != nil {
+		validator = model.NewFieldValidator(entry.FieldSchema)
+		for _, fd := range entry.FieldSchema.Fields {
+			defByID[fd.ID] = fd
+		}
+	}
+
+	var caseIDs []int64
+	refWanted := make(map[string]*caseRefWant)
+
+	err := uc.repo.Case().ScanAll(ctx, wsID, func(c *model.Case) error {
+		caseIDs = append(caseIDs, c.ID)
+		target := ValidationTarget{Kind: TargetKindCase, CaseID: c.ID}
+
+		if validator != nil {
+			addFieldViolations(acc, target, defByID, c.FieldValues, validator.ValidateStored(c.FieldValues))
+			collectCaseRefs(refWanted, target, defByID, c.FieldValues)
+		}
+		checkCaseStatuses(acc, entry, c, target)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, goerr.Wrap(err, "failed to scan cases for consistency check",
+			goerr.V("workspace_id", wsID))
+	}
+
+	return caseIDs, refWanted, nil
+}
+
+// addFieldViolations maps the validator's per-field violations onto issue kinds.
+func addFieldViolations(
+	acc *issueAccumulator,
+	target ValidationTarget,
+	defByID map[string]config.FieldDefinition,
+	values map[string]model.FieldValue,
+	violations []model.FieldViolation,
+) {
+	for _, v := range violations {
+		kind := IssueKindFieldValue
+		if errors.Is(v.Err, model.ErrStoredFieldTypeMismatch) {
+			kind = IssueKindFieldTypeMismatch
+		}
+
+		expected := ""
+		if fd, ok := defByID[v.FieldID]; ok {
+			expected = string(fd.Type)
+		}
+		actual := ""
+		if fv, ok := values[v.FieldID]; ok {
+			if kind == IssueKindFieldTypeMismatch {
+				actual = string(fv.Type)
+			} else {
+				actual = fmt.Sprint(fv.Value)
 			}
+		}
 
-			validOptionIDs := extractOptionIDs(fieldDef)
+		acc.add(kind, v.FieldID, target, expected, actual, v.Err.Error())
+	}
+}
 
-			// Phase 1: Count-based detection (no document data transfer)
-			total, valid, err := uc.repo.Case().CountFieldValues(
-				ctx, wsID, fieldDef.ID, fieldDef.Type, validOptionIDs,
-			)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to count field values",
-					goerr.V("workspace_id", wsID),
-					goerr.V("field_id", fieldDef.ID))
+// collectCaseRefs records every case reference so their targets can be looked up
+// in one batch per reference workspace after the scan finishes.
+func collectCaseRefs(
+	refWanted map[string]*caseRefWant,
+	target ValidationTarget,
+	defByID map[string]config.FieldDefinition,
+	values map[string]model.FieldValue,
+) {
+	for fieldID, fv := range values {
+		fd, ok := defByID[fieldID]
+		if !ok || !fd.Type.IsCaseRef() || fd.ReferenceWorkspace == "" {
+			continue
+		}
+
+		// Extract according to the CURRENT schema type, not the stored one: a
+		// stale stored Type is itself reported separately, and the references
+		// must be checked against the configuration in force now.
+		fv.Type = fd.Type
+		ids, err := caseRefIDs(fv)
+		if err != nil {
+			// A malformed reference value is already reported as a field-value
+			// violation; there is no id to look up here.
+			continue
+		}
+
+		for _, id := range ids {
+			want, ok := refWanted[fd.ReferenceWorkspace]
+			if !ok {
+				want = &caseRefWant{byField: make(map[string]map[int64][]ValidationTarget)}
+				refWanted[fd.ReferenceWorkspace] = want
 			}
-
-			invalidCount := total - valid
-			if invalidCount == 0 {
-				continue
+			if want.byField[fieldID] == nil {
+				want.byField[fieldID] = make(map[int64][]ValidationTarget)
 			}
+			want.byField[fieldID][id] = append(want.byField[fieldID][id], target)
+		}
+	}
+}
 
-			// Phase 2: Fetch one sample case for the error report
-			sample, err := uc.repo.Case().FindCaseWithInvalidFieldValue(
-				ctx, wsID, fieldDef.ID, fieldDef.Type, validOptionIDs,
-			)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to find invalid field value sample",
-					goerr.V("workspace_id", wsID),
-					goerr.V("field_id", fieldDef.ID))
+// checkCaseStatuses validates the thread-mode board status and the lifecycle
+// status derived from it.
+//
+// The gate is the workspace's configured CaseMode, not merely the presence of a
+// case status set: config.resolveCaseStatusSet builds the set from the [case]
+// section alone without consulting CaseMode, so a workspace switched to channel
+// mode that still carries [case] in its TOML would otherwise have its old
+// thread-bound Cases checked against a status set the workspace no longer uses.
+//
+// IsThreadBound stays in the condition deliberately. CaseUseCase.applyThreadBinding
+// is the only place that populates BoardStatus and it runs on the thread path
+// only, so a channel-bound Case in a thread-mode workspace carries an empty
+// BoardStatus that no code path ever fills — reporting it would be a false
+// positive rather than a finding.
+func checkCaseStatuses(acc *issueAccumulator, entry *model.WorkspaceEntry, c *model.Case, target ValidationTarget) {
+	set := entry.CaseStatusSet
+	if !entry.IsThreadMode() || set == nil || !c.IsThreadBound() || c.IsDraft() {
+		return
+	}
+
+	if c.BoardStatus == "" {
+		acc.add(IssueKindBoardStatus, "", target,
+			"one of the configured case status ids", "",
+			"thread-mode case has no board status")
+		return
+	}
+	if !set.IsValid(c.BoardStatus) {
+		acc.add(IssueKindBoardStatus, "", target,
+			"one of the configured case status ids", c.BoardStatus,
+			"board status is not defined in the workspace configuration")
+		return
+	}
+
+	// Mirror model.Case.SyncLifecycleFromBoardStatus: a closed board status maps
+	// to CLOSED, anything else to OPEN. An empty stored Status predates DRAFT and
+	// means OPEN, so normalize before comparing.
+	expected := types.CaseStatusOpen
+	if set.IsClosed(c.BoardStatus) {
+		expected = types.CaseStatusClosed
+	}
+	if actual := c.Status.Normalize(); actual != expected {
+		acc.add(IssueKindLifecycleMismatch, "", target,
+			string(expected), string(actual),
+			"lifecycle status disagrees with whether the board status is configured as closed")
+	}
+}
+
+// validateCaseRefs confirms each collected reference points at a Case that
+// exists in the field's configured reference workspace. Existence is the only
+// check: whether a Case may be referenced (private / draft) is a write-time
+// policy, and applying it here would flag references that were legitimate when
+// they were written.
+func (uc *UseCases) validateCaseRefs(ctx context.Context, wsID string, refWanted map[string]*caseRefWant, acc *issueAccumulator) error {
+	for _, refWS := range slices.Sorted(maps.Keys(refWanted)) {
+		want := refWanted[refWS]
+
+		ids := make(map[int64]struct{})
+		for _, byID := range want.byField {
+			for id := range byID {
+				ids[id] = struct{}{}
 			}
+		}
+		if len(ids) == 0 {
+			continue
+		}
 
-			actual := "<unknown>"
-			if sample != nil {
-				if fv, ok := sample.FieldValues[fieldDef.ID]; ok {
-					actual = fmt.Sprint(fv.Value)
+		missing, err := uc.findMissingCases(ctx, refWS, slices.Sorted(maps.Keys(ids)))
+		if err != nil {
+			return goerr.Wrap(err, "failed to load referenced cases for consistency check",
+				goerr.V("workspace_id", wsID),
+				goerr.V("reference_workspace", refWS))
+		}
+		if len(missing) == 0 {
+			continue
+		}
+
+		for _, fieldID := range slices.Sorted(maps.Keys(want.byField)) {
+			// One occurrence per referring entity, not per missing id: Count is
+			// defined as the number of entities affected, and a single
+			// multi_case_ref value can carry several missing ids (or the same id
+			// twice).
+			missingByTarget := make(map[ValidationTarget]map[int64]struct{})
+			for id, targets := range want.byField[fieldID] {
+				if _, ok := missing[id]; !ok {
+					continue
 				}
+				for _, target := range targets {
+					if missingByTarget[target] == nil {
+						missingByTarget[target] = make(map[int64]struct{})
+					}
+					missingByTarget[target][id] = struct{}{}
+				}
+			}
 
-				result.AddIssue(ValidationIssue{
-					WorkspaceID: wsID,
-					CaseID:      sample.ID,
-					FieldID:     fieldDef.ID,
-					Message:     fmt.Sprintf("found %d case(s) with invalid option value", invalidCount),
-					Expected:    "valid option ID",
-					Actual:      actual,
-				})
+			for _, target := range slices.SortedFunc(maps.Keys(missingByTarget), ValidationTarget.compare) {
+				acc.add(IssueKindCaseRefMissing, fieldID, target,
+					fmt.Sprintf("existing cases in workspace %q", refWS),
+					joinCaseIDs(missingByTarget[target]),
+					"referenced case does not exist in the configured reference workspace")
 			}
 		}
 	}
 
-	return result, nil
+	return nil
 }
 
-// extractOptionIDs returns the list of valid option IDs from a field definition
-func extractOptionIDs(fieldDef config.FieldDefinition) []string {
-	ids := make([]string, len(fieldDef.Options))
-	for i, opt := range fieldDef.Options {
-		ids[i] = opt.ID
+// caseRefLookupChunk bounds how many case ids go into one GetByIDs call.
+// GetByIDs issues a single Firestore GetAll for whatever it is handed, and the
+// id set here grows with the workspace rather than with a page of UI rows. 500
+// mirrors the batch size the Firestore repositories already use for bulk work;
+// it is a self-imposed bound, not a documented read limit.
+const caseRefLookupChunk = 500
+
+// findMissingCases returns the subset of ids that no Case in workspaceID has.
+func (uc *UseCases) findMissingCases(ctx context.Context, workspaceID string, ids []int64) (map[int64]struct{}, error) {
+	missing := make(map[int64]struct{})
+
+	for start := 0; start < len(ids); start += caseRefLookupChunk {
+		chunk := ids[start:min(start+caseRefLookupChunk, len(ids))]
+		found, err := uc.repo.Case().GetByIDs(ctx, workspaceID, chunk)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to batch get referenced cases",
+				goerr.V("chunk_size", len(chunk)))
+		}
+		for _, id := range chunk {
+			if _, ok := found[id]; !ok {
+				missing[id] = struct{}{}
+			}
+		}
 	}
-	return ids
+
+	return missing, nil
+}
+
+// joinCaseIDs renders a set of case ids as a comma-separated ascending list.
+func joinCaseIDs(ids map[int64]struct{}) string {
+	sorted := slices.Sorted(maps.Keys(ids))
+	out := make([]string, len(sorted))
+	for i, id := range sorted {
+		out[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(out, ",")
+}
+
+// validateActionStatuses checks every Action, archived ones included: an
+// archived Action still shows up in the Case history, so a status id the
+// configuration dropped is just as visible there.
+func (uc *UseCases) validateActionStatuses(ctx context.Context, entry *model.WorkspaceEntry, acc *issueAccumulator) error {
+	set := entry.ActionStatusSet
+	if set == nil {
+		return nil
+	}
+	wsID := entry.Workspace.ID
+
+	actions, err := uc.repo.Action().List(ctx, wsID, interfaces.ActionListOptions{
+		ArchiveScope: interfaces.ActionArchiveScopeAll,
+	})
+	if err != nil {
+		return goerr.Wrap(err, "failed to list actions for consistency check",
+			goerr.V("workspace_id", wsID))
+	}
+
+	for _, a := range actions {
+		if set.IsValid(string(a.Status)) {
+			continue
+		}
+		acc.add(IssueKindActionStatus, "",
+			ValidationTarget{Kind: TargetKindAction, CaseID: a.CaseID, ActionID: a.ID},
+			"one of the configured action status ids", string(a.Status),
+			"action status is not defined in the workspace configuration")
+	}
+
+	return nil
+}
+
+// validateMemoFields checks memo field values against the memo schema. Memos
+// live in a per-Case subcollection, so they are fetched Case by Case rather than
+// through a workspace-wide query (which would need a new Firestore index).
+func (uc *UseCases) validateMemoFields(ctx context.Context, entry *model.WorkspaceEntry, caseIDs []int64, acc *issueAccumulator) error {
+	if !entry.MemoConfig.Enabled() {
+		return nil
+	}
+	wsID := entry.Workspace.ID
+
+	validator := model.NewFieldValidator(entry.MemoConfig.FieldSchema)
+	defByID := make(map[string]config.FieldDefinition, len(entry.MemoConfig.FieldSchema.Fields))
+	for _, fd := range entry.MemoConfig.FieldSchema.Fields {
+		defByID[fd.ID] = fd
+	}
+
+	for _, caseID := range caseIDs {
+		memos, err := uc.repo.Memo().List(ctx, wsID, caseID, interfaces.MemoListOptions{
+			ArchiveScope: interfaces.MemoArchiveScopeAll,
+		})
+		if err != nil {
+			return goerr.Wrap(err, "failed to list memos for consistency check",
+				goerr.V("workspace_id", wsID),
+				goerr.V("case_id", caseID))
+		}
+
+		for _, m := range memos {
+			target := ValidationTarget{Kind: TargetKindMemo, CaseID: m.CaseID, MemoID: m.ID}
+			addFieldViolations(acc, target, defByID, m.FieldValues, validator.ValidateStored(m.FieldValues))
+		}
+	}
+
+	return nil
 }

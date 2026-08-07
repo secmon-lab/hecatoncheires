@@ -2,9 +2,12 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -61,6 +64,12 @@ func buildValidateTestSchema() *config.FieldSchema {
 				Name: "Reference",
 				Type: types.FieldTypeURL,
 			},
+			{
+				ID:       "required-note",
+				Name:     "Required Note",
+				Type:     types.FieldTypeText,
+				Required: true,
+			},
 		},
 		Labels: config.EntityLabels{Case: "Case"},
 	}
@@ -76,6 +85,29 @@ func setupValidateTest(t *testing.T, wsID string, schema *config.FieldSchema) (*
 	})
 	uc := usecase.New(repo, registry)
 	return repo, uc
+}
+
+// newValidateTestStatusSet builds a status set with a single closed status, used
+// for both the Action status and the thread-mode Case board status checks.
+func newValidateTestStatusSet(t *testing.T) *model.ActionStatusSet {
+	t.Helper()
+	set, err := model.NewActionStatusSet("TRIAGE", []string{"DONE"}, []model.ActionStatusDefinition{
+		{ID: "TRIAGE", Name: "Triage", Color: "idle"},
+		{ID: "WORKING", Name: "Working", Color: "active"},
+		{ID: "DONE", Name: "Done", Color: "success"},
+	})
+	gt.NoError(t, err).Required()
+	return set
+}
+
+// issueByKind indexes issues so assertions can name the check they belong to.
+func issueByKind(issues []usecase.ValidationIssue, kind usecase.ValidationIssueKind, fieldID string) (usecase.ValidationIssue, bool) {
+	for _, issue := range issues {
+		if issue.Kind == kind && issue.FieldID == fieldID {
+			return issue, true
+		}
+	}
+	return usecase.ValidationIssue{}, false
 }
 
 func TestValidateDB_NoCases(t *testing.T) {
@@ -97,13 +129,14 @@ func TestValidateDB_AllFieldTypesValid(t *testing.T) {
 		Title:       "Valid Case",
 		Description: "All field types are valid",
 		FieldValues: map[string]model.FieldValue{
-			"title-text": {FieldID: "title-text", Type: types.FieldTypeText, Value: "hello"},
-			"score":      {FieldID: "score", Type: types.FieldTypeNumber, Value: float64(42)},
-			"severity":   {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
-			"tags":       {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
-			"assignee":   {FieldID: "assignee", Type: types.FieldTypeUser, Value: "U001"},
-			"due-date":   {FieldID: "due-date", Type: types.FieldTypeDate, Value: "2026-02-14T00:00:00Z"},
-			"reference":  {FieldID: "reference", Type: types.FieldTypeURL, Value: "https://example.com"},
+			"title-text":    {FieldID: "title-text", Type: types.FieldTypeText, Value: "hello"},
+			"score":         {FieldID: "score", Type: types.FieldTypeNumber, Value: float64(42)},
+			"severity":      {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			"tags":          {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
+			"assignee":      {FieldID: "assignee", Type: types.FieldTypeUser, Value: "U001"},
+			"due-date":      {FieldID: "due-date", Type: types.FieldTypeDate, Value: "2026-02-14T00:00:00Z"},
+			"reference":     {FieldID: "reference", Type: types.FieldTypeURL, Value: "https://example.com"},
+			"required-note": {FieldID: "required-note", Type: types.FieldTypeText, Value: "noted"},
 		},
 	})
 	gt.NoError(t, err).Required()
@@ -129,10 +162,12 @@ func TestValidateDB_SelectInvalidOptionID(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindFieldValue)
 	gt.Value(t, result.Issues[0].FieldID).Equal("severity")
 	gt.Value(t, result.Issues[0].WorkspaceID).Equal(wsID)
+	gt.Value(t, result.Issues[0].Actual).Equal("unknown-severity")
+	gt.Value(t, result.Issues[0].Expected).Equal(string(types.FieldTypeSelect))
 }
 
 func TestValidateDB_SelectWrongType(t *testing.T) {
@@ -140,7 +175,6 @@ func TestValidateDB_SelectWrongType(t *testing.T) {
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	// Value is int instead of string — detected as invalid because Value won't match any option
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Select Wrong Type",
@@ -152,8 +186,8 @@ func TestValidateDB_SelectWrongType(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindFieldValue)
 	gt.Value(t, result.Issues[0].FieldID).Equal("severity")
 }
 
@@ -173,8 +207,8 @@ func TestValidateDB_MultiSelectInvalidOptionID(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindFieldValue)
 	gt.Value(t, result.Issues[0].FieldID).Equal("tags")
 }
 
@@ -183,7 +217,6 @@ func TestValidateDB_MultiSelectWrongType(t *testing.T) {
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	// Value is string instead of []string — invalid for multi-select
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Bad MultiSelect Type",
@@ -195,17 +228,18 @@ func TestValidateDB_MultiSelectWrongType(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
 	gt.Value(t, result.Issues[0].FieldID).Equal("tags")
 }
 
-func TestValidateDB_NonSelectFieldsNotChecked(t *testing.T) {
+// TestValidateDB_NonSelectFieldTypesChecked pins the behaviour this feature added:
+// before it, only select / multi-select values were inspected, so a text field
+// holding a number or a date field holding a non-RFC3339 string went unreported.
+func TestValidateDB_NonSelectFieldTypesChecked(t *testing.T) {
 	wsID := "ws-non-select"
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	// Even with wrong types for non-select fields, ValidateDB should not report issues
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Non-select fields with wrong types",
@@ -213,8 +247,72 @@ func TestValidateDB_NonSelectFieldsNotChecked(t *testing.T) {
 			"title-text": {FieldID: "title-text", Type: types.FieldTypeText, Value: 12345},
 			"score":      {FieldID: "score", Type: types.FieldTypeNumber, Value: "not-a-number"},
 			"assignee":   {FieldID: "assignee", Type: types.FieldTypeUser, Value: 999},
-			"due-date":   {FieldID: "due-date", Type: types.FieldTypeDate, Value: 12345},
+			"due-date":   {FieldID: "due-date", Type: types.FieldTypeDate, Value: "14/02/2026"},
 			"reference":  {FieldID: "reference", Type: types.FieldTypeURL, Value: 12345},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(5)
+
+	for _, fieldID := range []string{"title-text", "score", "assignee", "due-date", "reference"} {
+		issue, ok := issueByKind(result.Issues, usecase.IssueKindFieldValue, fieldID)
+		gt.Bool(t, ok).True().Required()
+		gt.Value(t, issue.Count).Equal(int64(1))
+	}
+}
+
+func TestValidateDB_StoredFieldTypeMismatch(t *testing.T) {
+	wsID := "ws-type-drift"
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{ID: "note", Name: "Note", Type: types.FieldTypeMarkdown},
+		},
+		Labels: config.EntityLabels{Case: "Case"},
+	}
+	repo, uc := setupValidateTest(t, wsID, schema)
+	ctx := context.Background()
+
+	// The value shape (string) is still acceptable for markdown, so only the
+	// stored Type reveals that the schema used to declare this field as text.
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Type drift",
+		FieldValues: map[string]model.FieldValue{
+			"note": {FieldID: "note", Type: types.FieldTypeText, Value: "still a string"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindFieldTypeMismatch)
+	gt.Value(t, result.Issues[0].FieldID).Equal("note")
+	gt.Value(t, result.Issues[0].Expected).Equal(string(types.FieldTypeMarkdown))
+	gt.Value(t, result.Issues[0].Actual).Equal(string(types.FieldTypeText))
+}
+
+func TestValidateDB_EmptyStoredFieldTypeNotReported(t *testing.T) {
+	wsID := "ws-empty-type"
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{ID: "note", Name: "Note", Type: types.FieldTypeMarkdown},
+		},
+		Labels: config.EntityLabels{Case: "Case"},
+	}
+	repo, uc := setupValidateTest(t, wsID, schema)
+	ctx := context.Background()
+
+	// Documents written before FieldValue.Type was recorded carry an empty Type,
+	// which says nothing about the schema and must not be reported as drift.
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Legacy document",
+		FieldValues: map[string]model.FieldValue{
+			"note": {FieldID: "note", Value: "still a string"},
 		},
 	})
 	gt.NoError(t, err).Required()
@@ -243,12 +341,31 @@ func TestValidateDB_UnknownFieldSkipped(t *testing.T) {
 	gt.Bool(t, result.HasIssues()).False()
 }
 
+// TestValidateDB_RequiredFieldNotReported pins the decision to leave required
+// fields out of the consistency check: adding required=true to an existing
+// workspace must not flag every Case that predates it.
+func TestValidateDB_RequiredFieldNotReported(t *testing.T) {
+	wsID := "ws-required"
+	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
+	ctx := context.Background()
+
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:  "U-TEST-DEFAULT",
+		Title:       "Missing the required field",
+		FieldValues: map[string]model.FieldValue{},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
 func TestValidateDB_MultipleIssuesAcrossFields(t *testing.T) {
 	wsID := "ws-multi-issues"
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	// Case with invalid values in both select and multi-select fields
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Multiple Issues",
@@ -261,15 +378,9 @@ func TestValidateDB_MultipleIssuesAcrossFields(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Number(t, len(result.Issues)).Equal(2)
-
-	fieldIDs := make(map[string]bool)
-	for _, issue := range result.Issues {
-		fieldIDs[issue.FieldID] = true
-	}
-	gt.Bool(t, fieldIDs["severity"]).True()
-	gt.Bool(t, fieldIDs["tags"]).True()
+	gt.Array(t, result.Issues).Length(2).Required()
+	gt.Value(t, result.Issues[0].FieldID).Equal("severity")
+	gt.Value(t, result.Issues[1].FieldID).Equal("tags")
 }
 
 func TestValidateDB_MultipleWorkspaces(t *testing.T) {
@@ -316,7 +427,6 @@ func TestValidateDB_MultipleWorkspaces(t *testing.T) {
 
 	uc := usecase.New(repo, registry)
 
-	// Valid case in ws1
 	_, err := repo.Case().Create(ctx, wsID1, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Valid in ws1",
@@ -326,7 +436,6 @@ func TestValidateDB_MultipleWorkspaces(t *testing.T) {
 	})
 	gt.NoError(t, err).Required()
 
-	// Invalid case in ws2
 	_, err = repo.Case().Create(ctx, wsID2, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Invalid in ws2",
@@ -338,8 +447,7 @@ func TestValidateDB_MultipleWorkspaces(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
 	gt.Value(t, result.Issues[0].WorkspaceID).Equal(wsID2)
 	gt.Value(t, result.Issues[0].FieldID).Equal("priority")
 }
@@ -369,7 +477,6 @@ func TestValidateDB_InterfaceSliceMultiSelectInvalid(t *testing.T) {
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	// []interface{} with non-string elements
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
 		Title:      "Interface Slice Invalid",
@@ -381,45 +488,18 @@ func TestValidateDB_InterfaceSliceMultiSelectInvalid(t *testing.T) {
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
+	gt.Array(t, result.Issues).Length(1).Required()
 	gt.Value(t, result.Issues[0].FieldID).Equal("tags")
 }
 
-func TestValidateDB_IssueContainsSampleInfo(t *testing.T) {
-	wsID := "ws-sample-info"
+func TestValidateDB_IssuesGroupedWithLowestSample(t *testing.T) {
+	wsID := "ws-grouping"
 	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
 	ctx := context.Background()
 
-	created, err := repo.Case().Create(ctx, wsID, &model.Case{
-		ReporterID: "U-TEST-DEFAULT",
-		Title:      "Sample Case",
-		FieldValues: map[string]model.FieldValue{
-			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
-		},
-	})
-	gt.NoError(t, err).Required()
-
-	result, err := uc.ValidateDB(ctx)
-	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	gt.Array(t, result.Issues).Length(1)
-
-	issue := result.Issues[0]
-	gt.Value(t, issue.CaseID).Equal(created.ID)
-	gt.Value(t, issue.FieldID).Equal("severity")
-	gt.Value(t, issue.Actual).Equal("deleted-option")
-	gt.Value(t, issue.WorkspaceID).Equal(wsID)
-}
-
-func TestValidateDB_MultipleCasesOnlyCountsOne(t *testing.T) {
-	wsID := "ws-multi-cases"
-	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
-	ctx := context.Background()
-
-	// Create 3 cases with the same invalid select value
-	for i := 0; i < 3; i++ {
-		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+	var firstID int64
+	for i := range 3 {
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			ReporterID: "U-TEST-DEFAULT",
 			Title:      "Bad Case",
 			FieldValues: map[string]model.FieldValue{
@@ -427,12 +507,585 @@ func TestValidateDB_MultipleCasesOnlyCountsOne(t *testing.T) {
 			},
 		})
 		gt.NoError(t, err).Required()
+		if i == 0 {
+			firstID = created.ID
+		}
 	}
 
 	result, err := uc.ValidateDB(ctx)
 	gt.NoError(t, err).Required()
-	gt.Bool(t, result.HasIssues()).True()
-	// Only one issue per field, not one per case
-	gt.Array(t, result.Issues).Length(1)
-	gt.Value(t, result.Issues[0].FieldID).Equal("severity")
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Count).Equal(int64(3))
+	gt.Value(t, issue.Sample.Kind).Equal(usecase.TargetKindCase)
+	gt.Value(t, issue.Sample.CaseID).Equal(firstID)
+	gt.Value(t, issue.Sample.String()).Equal("case:" + strconv.FormatInt(firstID, 10))
+	gt.Value(t, issue.Actual).Equal("removed")
+	gt.Value(t, result.TotalCount()).Equal(int64(3))
+}
+
+func TestValidateDB_ResultIsDeterministic(t *testing.T) {
+	wsID := "ws-deterministic"
+	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
+	ctx := context.Background()
+
+	for range 4 {
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Bad Case",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "removed"},
+				"tags":     {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"gone"}},
+				"score":    {FieldID: "score", Type: types.FieldTypeNumber, Value: "not-a-number"},
+			},
+		})
+		gt.NoError(t, err).Required()
+	}
+
+	first, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	second, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Value(t, second.Issues).Equal(first.Issues)
+
+	// Sorted by (workspace, kind, field id).
+	gt.Array(t, first.Issues).Length(3).Required()
+	gt.Value(t, first.Issues[0].FieldID).Equal("score")
+	gt.Value(t, first.Issues[1].FieldID).Equal("severity")
+	gt.Value(t, first.Issues[2].FieldID).Equal("tags")
+}
+
+func TestValidateDB_CaseRefMissingTarget(t *testing.T) {
+	refWS := "ws-ref-target"
+	wsID := "ws-ref-source"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: refWS, Name: "Reference Workspace"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{{ID: "note", Name: "Note", Type: types.FieldTypeText}},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "Source Workspace"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "parent", Name: "Parent", Type: types.FieldTypeCaseRef, ReferenceWorkspace: refWS},
+			},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+	uc := usecase.New(repo, registry)
+
+	target, err := repo.Case().Create(ctx, refWS, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Referenced case",
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Points at an existing case",
+		FieldValues: map[string]model.FieldValue{
+			"parent": {FieldID: "parent", Type: types.FieldTypeCaseRef, Value: strconv.FormatInt(target.ID, 10)},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+
+	dangling, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Points at a missing case",
+		FieldValues: map[string]model.FieldValue{
+			"parent": {FieldID: "parent", Type: types.FieldTypeCaseRef, Value: "99999"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err = uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindCaseRefMissing)
+	gt.Value(t, result.Issues[0].FieldID).Equal("parent")
+	gt.Value(t, result.Issues[0].WorkspaceID).Equal(wsID)
+	gt.Value(t, result.Issues[0].Sample.CaseID).Equal(dangling.ID)
+	gt.Value(t, result.Issues[0].Actual).Equal("99999")
+}
+
+// TestValidateDB_MultiCaseRefCountsEntitiesNotReferences pins that Count is the
+// number of affected entities: one multi_case_ref value carrying several missing
+// ids — including the same id twice — is still one Case.
+func TestValidateDB_MultiCaseRefCountsEntitiesNotReferences(t *testing.T) {
+	refWS := "ws-multiref-target"
+	wsID := "ws-multiref-source"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: refWS, Name: "Reference Workspace"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{{ID: "note", Name: "Note", Type: types.FieldTypeText}},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "Source Workspace"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "related", Name: "Related", Type: types.FieldTypeMultiCaseRef, ReferenceWorkspace: refWS},
+			},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+	uc := usecase.New(repo, registry)
+
+	present, err := repo.Case().Create(ctx, refWS, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Referenced case",
+	})
+	gt.NoError(t, err).Required()
+
+	source, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Two missing ids and one duplicate",
+		FieldValues: map[string]model.FieldValue{
+			"related": {
+				FieldID: "related",
+				Type:    types.FieldTypeMultiCaseRef,
+				Value: []string{
+					strconv.FormatInt(present.ID, 10),
+					"77777",
+					"88888",
+					"77777",
+				},
+			},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindCaseRefMissing)
+	gt.Value(t, issue.FieldID).Equal("related")
+	gt.Value(t, issue.Count).Equal(int64(1))
+	gt.Value(t, issue.Sample.CaseID).Equal(source.ID)
+	// Every missing id of that one entity, ascending, deduplicated.
+	gt.Value(t, issue.Actual).Equal("77777,88888")
+	gt.Value(t, result.TotalCount()).Equal(int64(1))
+}
+
+func TestValidateDB_BoardStatusInvalid(t *testing.T) {
+	wsID := "ws-board-status"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: wsID, Name: "Thread Workspace"},
+		FieldSchema:   &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		CaseMode:      model.CaseModeThread,
+		CaseStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	undefined, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Board status dropped from config",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000100",
+		BoardStatus:    "RETIRED",
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "No board status at all",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000200",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindBoardStatus)
+	gt.Value(t, issue.FieldID).Equal("")
+	gt.Value(t, issue.Count).Equal(int64(2))
+	// Both offenders collapse into one group; the lower case id wins the sample.
+	gt.Value(t, issue.Sample.CaseID).Equal(undefined.ID)
+	gt.Value(t, issue.Actual).Equal("RETIRED")
+}
+
+func TestValidateDB_BoardStatusSkippedForChannelMode(t *testing.T) {
+	wsID := "ws-channel-mode"
+	repo, uc := setupValidateTest(t, wsID, &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}})
+	ctx := context.Background()
+
+	// No CaseStatusSet registered: a channel-mode Case legitimately has no board
+	// status, so nothing here may be reported.
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Channel-mode case",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-DEDICATED",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
+// TestValidateDB_BoardStatusSkippedWhenModeIsChannel covers a workspace switched
+// to channel mode whose TOML still carries a [case] section: config builds a
+// CaseStatusSet from that section alone, so the status set is present even though
+// the workspace no longer uses a board. Old thread-bound Cases must not be
+// checked against it.
+func TestValidateDB_BoardStatusSkippedWhenModeIsChannel(t *testing.T) {
+	wsID := "ws-mode-switched-to-channel"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: wsID, Name: "Switched Workspace"},
+		FieldSchema:   &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		CaseMode:      model.CaseModeChannel,
+		CaseStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	// Both a board status the set does not define and a closed/open divergence:
+	// neither may be reported while the workspace is in channel mode.
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Left over from thread mode",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000500",
+		BoardStatus:    "RETIRED",
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Closed board status still open",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000600",
+		BoardStatus:    "DONE",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
+// TestValidateDB_BoardStatusSkippedForDraft pins that a thread-mode DRAFT is out
+// of scope for both status checks: a draft is an unfinished entry, not divergent
+// data.
+func TestValidateDB_BoardStatusSkippedForDraft(t *testing.T) {
+	wsID := "ws-thread-draft"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: wsID, Name: "Thread Workspace"},
+		FieldSchema:   &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		CaseMode:      model.CaseModeThread,
+		CaseStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Draft with a dropped board status",
+		Status:         types.CaseStatusDraft,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000700",
+		BoardStatus:    "RETIRED",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
+// TestValidateDB_BoardStatusSkippedForChannelBoundCase covers a Case created
+// before the workspace moved to thread mode: it is channel-bound, and
+// applyThreadBinding — the only writer of BoardStatus — never runs for it, so an
+// empty BoardStatus there is expected rather than divergent.
+func TestValidateDB_BoardStatusSkippedForChannelBoundCase(t *testing.T) {
+	wsID := "ws-thread-with-legacy-case"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: wsID, Name: "Thread Workspace"},
+		FieldSchema:   &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		CaseMode:      model.CaseModeThread,
+		CaseStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Channel-bound case predating the mode switch",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-DEDICATED",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
+func TestValidateDB_LifecycleStatusMismatch(t *testing.T) {
+	wsID := "ws-lifecycle"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: wsID, Name: "Thread Workspace"},
+		FieldSchema:   &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		CaseMode:      model.CaseModeThread,
+		CaseStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	// DONE is configured as closed, so the lifecycle status should be CLOSED.
+	diverged, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Closed board status but still open",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000300",
+		BoardStatus:    "DONE",
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		Title:          "Consistent pair",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1700000000.000400",
+		BoardStatus:    "WORKING",
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindLifecycleMismatch)
+	gt.Value(t, issue.Count).Equal(int64(1))
+	gt.Value(t, issue.Sample.CaseID).Equal(diverged.ID)
+	gt.Value(t, issue.Expected).Equal(string(types.CaseStatusClosed))
+	gt.Value(t, issue.Actual).Equal(string(types.CaseStatusOpen))
+}
+
+func TestValidateDB_ActionStatusInvalid(t *testing.T) {
+	wsID := "ws-action-status"
+	ctx := context.Background()
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:       model.Workspace{ID: wsID, Name: "Action Workspace"},
+		FieldSchema:     &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		ActionStatusSet: newValidateTestStatusSet(t),
+	})
+	uc := usecase.New(repo, registry)
+
+	parent, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Parent case",
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Action().Create(ctx, wsID, &model.Action{
+		CaseID: parent.ID,
+		Title:  "Valid status",
+		Status: types.ActionStatus("WORKING"),
+	})
+	gt.NoError(t, err).Required()
+
+	bad, err := repo.Action().Create(ctx, wsID, &model.Action{
+		CaseID: parent.ID,
+		Title:  "Status dropped from config",
+		Status: types.ActionStatus("ABANDONED"),
+	})
+	gt.NoError(t, err).Required()
+
+	archivedAt := bad.CreatedAt
+	archived, err := repo.Action().Create(ctx, wsID, &model.Action{
+		CaseID:     parent.ID,
+		Title:      "Archived with a dropped status",
+		Status:     types.ActionStatus("ABANDONED"),
+		ArchivedAt: &archivedAt,
+	})
+	gt.NoError(t, err).Required()
+	gt.Bool(t, archived.IsArchived()).True()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindActionStatus)
+	// Archived actions count too: they remain visible in the Case history.
+	gt.Value(t, issue.Count).Equal(int64(2))
+	gt.Value(t, issue.Sample.Kind).Equal(usecase.TargetKindAction)
+	gt.Value(t, issue.Sample.CaseID).Equal(parent.ID)
+	gt.Value(t, issue.Sample.ActionID).Equal(bad.ID)
+	gt.Value(t, issue.Actual).Equal("ABANDONED")
+}
+
+func TestValidateDB_MemoFieldValues(t *testing.T) {
+	wsID := "ws-memo"
+	ctx := context.Background()
+
+	memoSchema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID: "kind", Name: "Kind", Type: types.FieldTypeSelect,
+				Options: []config.FieldOption{{ID: "fact", Name: "Fact"}},
+			},
+		},
+		Labels: config.EntityLabels{Case: "Case"},
+	}
+
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: wsID, Name: "Memo Workspace"},
+		FieldSchema: &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}},
+		MemoConfig:  &config.MemoConfig{Description: "notes", FieldSchema: memoSchema},
+	})
+	uc := usecase.New(repo, registry)
+
+	parent, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Parent case",
+	})
+	gt.NoError(t, err).Required()
+
+	badMemo := &model.Memo{
+		ID:          model.NewMemoID(),
+		WorkspaceID: wsID,
+		CaseID:      parent.ID,
+		Title:       "Memo with a dropped option",
+		CreatorID:   "U-TEST-DEFAULT",
+		FieldValues: map[string]model.FieldValue{
+			"kind": {FieldID: "kind", Type: types.FieldTypeSelect, Value: "hypothesis"},
+		},
+	}
+	_, err = repo.Memo().Create(ctx, wsID, badMemo)
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindFieldValue)
+	gt.Value(t, issue.FieldID).Equal("kind")
+	gt.Value(t, issue.Sample.Kind).Equal(usecase.TargetKindMemo)
+	gt.Value(t, issue.Sample.CaseID).Equal(parent.ID)
+	gt.Value(t, issue.Sample.MemoID).Equal(badMemo.ID)
+	gt.Value(t, issue.Actual).Equal("hypothesis")
+}
+
+func TestValidateDB_MemoSkippedWhenDisabled(t *testing.T) {
+	wsID := "ws-memo-disabled"
+	repo, uc := setupValidateTest(t, wsID, &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}})
+	ctx := context.Background()
+
+	parent, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Parent case",
+	})
+	gt.NoError(t, err).Required()
+
+	// No MemoConfig registered: the memo pass must not run at all, even though a
+	// memo document exists with a value no schema could accept.
+	_, err = repo.Memo().Create(ctx, wsID, &model.Memo{
+		ID:          model.NewMemoID(),
+		WorkspaceID: wsID,
+		CaseID:      parent.ID,
+		Title:       "Orphan memo",
+		CreatorID:   "U-TEST-DEFAULT",
+		FieldValues: map[string]model.FieldValue{
+			"kind": {FieldID: "kind", Type: types.FieldTypeSelect, Value: "hypothesis"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+}
+
+// scanFailureRepository substitutes a Case repository whose ScanAll always
+// fails, leaving every other repository backed by the in-memory implementation.
+type scanFailureRepository struct {
+	*memory.Memory
+	caseRepo interfaces.CaseRepository
+}
+
+func (r *scanFailureRepository) Case() interfaces.CaseRepository { return r.caseRepo }
+
+type scanFailureCaseRepository struct {
+	interfaces.CaseRepository
+	err error
+}
+
+func (r *scanFailureCaseRepository) ScanAll(_ context.Context, _ string, _ func(*model.Case) error) error {
+	return r.err
+}
+
+func TestValidateDB_PropagatesRepositoryError(t *testing.T) {
+	wsID := "ws-scan-error"
+	ctx := context.Background()
+
+	base := memory.New()
+	scanErr := errors.New("scan exploded")
+	repo := &scanFailureRepository{
+		Memory:   base,
+		caseRepo: &scanFailureCaseRepository{CaseRepository: base.Case(), err: scanErr},
+	}
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: wsID, Name: "Broken Workspace"},
+		FieldSchema: buildValidateTestSchema(),
+	})
+	uc := usecase.New(repo, registry)
+
+	result, err := uc.ValidateDB(ctx)
+	gt.Value(t, result).Nil()
+	gt.Error(t, err).Is(scanErr)
 }
