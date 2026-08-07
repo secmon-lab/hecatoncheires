@@ -1089,3 +1089,61 @@ func TestValidateDB_PropagatesRepositoryError(t *testing.T) {
 	gt.Value(t, result).Nil()
 	gt.Error(t, err).Is(scanErr)
 }
+
+// TestValidateDBWithConfig_UsesSuppliedRegistry pins that the caller's
+// configuration decides the verdict, not the one this UseCases was built with:
+// the same stored value is clean under the process schema and reported under the
+// supplied one. This is what the HTTP check endpoint relies on.
+func TestValidateDBWithConfig_UsesSuppliedRegistry(t *testing.T) {
+	wsID := "ws-supplied-config"
+	repo, uc := setupValidateTest(t, wsID, buildValidateTestSchema())
+	ctx := context.Background()
+
+	stored, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Severity is high",
+		FieldValues: map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	// The process configuration lists "high", so nothing is wrong today.
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, result.HasIssues()).False()
+
+	// A candidate configuration that drops the option reports the stored value.
+	candidate := model.NewWorkspaceRegistry()
+	candidate.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "Candidate Config"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{
+					ID:      "severity",
+					Name:    "Severity",
+					Type:    types.FieldTypeSelect,
+					Options: []config.FieldOption{{ID: "critical", Name: "Critical"}},
+				},
+			},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+
+	result, err = uc.ValidateDBWithConfig(ctx, candidate)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+	gt.Value(t, result.Issues[0].Kind).Equal(usecase.IssueKindFieldValue)
+	gt.Value(t, result.Issues[0].FieldID).Equal("severity")
+	gt.Value(t, result.Issues[0].WorkspaceID).Equal(wsID)
+	gt.Value(t, result.Issues[0].Actual).Equal("high")
+	gt.Number(t, result.Issues[0].Sample.CaseID).Equal(stored.ID)
+}
+
+func TestValidateDBWithConfig_NilRegistryIsAnError(t *testing.T) {
+	_, uc := setupValidateTest(t, "ws-nil-registry", buildValidateTestSchema())
+
+	result, err := uc.ValidateDBWithConfig(context.Background(), nil)
+	gt.Value(t, result).Nil()
+	gt.Value(t, err).NotNil()
+}

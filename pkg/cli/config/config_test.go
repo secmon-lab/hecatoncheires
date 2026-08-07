@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 func TestLoadFieldSchema(t *testing.T) {
@@ -490,6 +491,218 @@ func TestLoadWorkspaceConfigs_EmptyDirectory(t *testing.T) {
 	_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
 	gt.Value(t, err).NotNil()
 	gt.Error(t, err).Is(config.ErrNoConfigFiles)
+}
+
+func TestParseWorkspaceConfigs_MultipleDocuments(t *testing.T) {
+	configs, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{
+			Name: "risk.toml",
+			Data: []byte(`
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[labels]
+case = "Risk"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "text"
+`),
+		},
+		{
+			Name: "task.toml",
+			Data: []byte(`
+[workspace]
+id = "task"
+name = "Task Tracking"
+
+[[fields]]
+id = "owner"
+name = "Owner"
+type = "user"
+`),
+		},
+	})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(2).Required()
+
+	gt.Value(t, configs[0].ID).Equal("risk")
+	gt.Value(t, configs[0].Name).Equal("Risk Management")
+	gt.Value(t, configs[0].FieldSchema.Labels.Case).Equal("Risk")
+	gt.Array(t, configs[0].FieldSchema.Fields).Length(1).Required()
+	gt.Value(t, configs[0].FieldSchema.Fields[0].ID).Equal("category")
+
+	gt.Value(t, configs[1].ID).Equal("task")
+	gt.Array(t, configs[1].FieldSchema.Fields).Length(1).Required()
+	gt.Value(t, configs[1].FieldSchema.Fields[0].ID).Equal("owner")
+	gt.Value(t, configs[1].FieldSchema.Fields[0].Type).Equal(types.FieldTypeUser)
+}
+
+func TestParseWorkspaceConfigs_NoDocuments(t *testing.T) {
+	_, err := config.ParseWorkspaceConfigs(nil)
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrNoConfigFiles)
+}
+
+func TestParseWorkspaceConfigs_DuplicateID(t *testing.T) {
+	doc := []byte(`
+[workspace]
+id = "risk"
+name = "Risk"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+	_, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{Name: "first.toml", Data: doc},
+		{Name: "second.toml", Data: doc},
+	})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrDuplicateWorkspaceID)
+}
+
+func TestParseWorkspaceConfigs_UnknownReferenceWorkspace(t *testing.T) {
+	_, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{
+			Name: "risk.toml",
+			Data: []byte(`
+[workspace]
+id = "risk"
+name = "Risk"
+
+[[fields]]
+id = "related"
+name = "Related"
+type = "case_ref"
+reference_workspace = "absent"
+`),
+		},
+	})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrUnknownReferenceWorkspace)
+}
+
+// TestParseWorkspaceConfigs_PromptFileNotReadWithoutBaseDir pins that a document
+// with no BaseDir never touches the filesystem: prompt_file names a path that
+// does not exist, and the parse still succeeds with the prompt left unresolved.
+// The DB consistency check endpoint depends on this — resolving a submitted
+// document's prompt_file against the server's files would be an arbitrary read.
+func TestParseWorkspaceConfigs_PromptFileNotReadWithoutBaseDir(t *testing.T) {
+	configs, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{
+			Name: "risk.toml",
+			Data: []byte(`
+[workspace]
+id = "risk"
+name = "Risk"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+
+[[job]]
+id = "stale_check"
+prompt_file = "/nonexistent/prompts/stale.md"
+events.scheduled = { every = "1h" }
+`),
+		},
+	})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.Array(t, configs[0].Jobs).Length(1).Required()
+	gt.Value(t, configs[0].Jobs[0].ID).Equal("stale_check")
+	gt.String(t, configs[0].Jobs[0].Prompt).Equal("")
+}
+
+// TestParseWorkspaceConfigs_WorkspaceAgentPromptFileNotReadWithoutBaseDir covers
+// the second filesystem path a document can name. prompt_file is absolute, so it
+// would be read verbatim if BaseDir were consulted at all; the parse must
+// succeed with the prompt left unresolved instead.
+func TestParseWorkspaceConfigs_WorkspaceAgentPromptFileNotReadWithoutBaseDir(t *testing.T) {
+	configs, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{
+			Name: "risk.toml",
+			Data: []byte(`
+[workspace]
+id = "risk"
+name = "Risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[slack.workspace_agent]
+prompt_file = "/nonexistent/prompts/workspace-agent.md"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`),
+		},
+	})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.String(t, configs[0].WorkspaceAgentPrompt).Equal("")
+	gt.Value(t, configs[0].WorkspaceChannelID).Equal("C0123456789")
+}
+
+func TestBuildWorkspaceRegistry(t *testing.T) {
+	configs, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{
+			Name: "risk.toml",
+			Data: []byte(`
+[workspace]
+id = "risk"
+name = "Risk Management"
+description = "Security risks"
+
+[slack]
+mode = "thread"
+channel = "C123"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+[[case.status]]
+id = "TRIAGE"
+name = "Triage"
+
+[[case.status]]
+id = "DONE"
+name = "Done"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "text"
+`),
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	registry := config.BuildWorkspaceRegistry(configs)
+	entries := registry.List()
+	gt.Array(t, entries).Length(1).Required()
+
+	entry := entries[0]
+	gt.Value(t, entry.Workspace.ID).Equal("risk")
+	gt.Value(t, entry.Workspace.Name).Equal("Risk Management")
+	gt.Value(t, entry.Workspace.Description).Equal("Security risks")
+	gt.Bool(t, entry.IsThreadMode()).True()
+	gt.Value(t, entry.SlackMonitorChannelID).Equal("C123")
+	gt.Value(t, entry.FieldSchema).NotNil().Required()
+	gt.Array(t, entry.FieldSchema.Fields).Length(1).Required()
+	gt.Value(t, entry.FieldSchema.Fields[0].ID).Equal("category")
+	gt.Value(t, entry.CaseStatusSet).NotNil().Required()
+	gt.Bool(t, entry.CaseStatusSet.IsValid("TRIAGE")).True()
+	gt.Bool(t, entry.CaseStatusSet.IsClosed("DONE")).True()
+	gt.Value(t, entry.ActionStatusSet).NotNil()
 }
 
 func TestLoadWorkspaceConfigs_MixedFileAndDirectory(t *testing.T) {

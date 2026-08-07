@@ -30,6 +30,7 @@ type Server struct {
 	slackSigningSecret      string
 	workspaceRegistry       *model.WorkspaceRegistry
 	tickHookHandler         *TickHookHandler
+	dbCheckHandler          *DBCheckHandler
 	mcpHandler              http.Handler
 }
 
@@ -84,6 +85,15 @@ func WithSlackCommand(handler *SlackCommandHandler) Options {
 func WithTickHook(handler *TickHookHandler) Options {
 	return func(s *Server) {
 		s.tickHookHandler = handler
+	}
+}
+
+// WithDBCheck wires the POST /api/validate/db endpoint so operator tooling can
+// run the `validate --check-db` consistency report against workspace
+// configuration it submits. nil handler leaves the route unregistered.
+func WithDBCheck(handler *DBCheckHandler) Options {
+	return func(s *Server) {
+		s.dbCheckHandler = handler
 	}
 }
 
@@ -175,6 +185,13 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 	// behind IAP / private network).
 	if s.tickHookHandler != nil {
 		r.Post("/hooks/tick", s.tickHookHandler.ServeHTTP)
+	}
+
+	// DB consistency check endpoint. Unauthenticated by design, same as
+	// /hooks/tick — and the response names Case / Action / Memo ids, so the
+	// deployment must keep it off the public internet.
+	if s.dbCheckHandler != nil {
+		r.Post("/api/validate/db", s.dbCheckHandler.ServeHTTP)
 	}
 
 	// MCP endpoint (Streamable HTTP). The handler embeds its own Rego-based

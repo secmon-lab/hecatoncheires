@@ -213,6 +213,14 @@ The check reads the data as it finds it and does not take a snapshot, so a
 workspace being written to concurrently can yield a count that is already stale.
 Re-run it if the numbers matter.
 
+### Running the same check over HTTP
+
+The `serve` server exposes the identical check at `POST /api/validate/db`, with
+one difference: the configuration is taken from the request instead of from the
+running process, so a candidate config change can be checked before it is
+deployed. The report comes back as JSON. See
+[operations.md § DB consistency check over HTTP](./operations.md#db-consistency-check-over-http).
+
 Configuration validation parses every Go `text/template` prompt the config supplies — each `[[job]]` `prompt` / `prompt_file` and every Slack `welcome_messages` entry — with the same template dialect the runtime renders with. A malformed template (an unbalanced `{{ ... }}` action, an unknown function) fails `validate` up-front instead of only erroring the first time the Job runs or a case is created. This is a parse check: it proves the template compiles, not that a specific field reference resolves against a live case (that is exercised at render time).
 
 ---

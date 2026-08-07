@@ -5,8 +5,10 @@ import (
 
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // RegistryHasInteractiveJobForTest exposes registryHasInteractiveJob.
@@ -68,6 +70,14 @@ func HTTPStatusForGraphQLErrorCodesForTest(codes ...string) int {
 		out[i].Extensions.Code = c
 	}
 	return httpStatusForGraphQLErrors(out)
+}
+
+// --- dbcheck.go seams (POST /api/validate/db) -----------------------------
+
+// NewDBConsistencyCheckerForTest exposes newDBConsistencyChecker behind the
+// interface the HTTP handler consumes, so the concrete type stays unexported.
+func NewDBConsistencyCheckerForTest(uc *usecase.UseCases) httpctrl.DBConsistencyChecker {
+	return newDBConsistencyChecker(uc)
 }
 
 // --- eval.go / diagnosis.go command constructors --------------------------

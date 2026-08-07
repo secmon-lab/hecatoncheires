@@ -472,7 +472,7 @@ func (a *AppConfig) Validate() error {
 	// [[job]] entries are optional. When supplied, validate eagerly so
 	// schema / cron / duration errors surface at startup. baseDir is empty:
 	// this structural pass must not read prompt_file contents (the config
-	// path is unknown here); the file read happens in loadSingleWorkspaceConfig.
+	// path is unknown here); the file read happens in parseWorkspaceConfig.
 	if _, err := a.resolveJobs(""); err != nil {
 		return goerr.Wrap(err, "invalid [[job]] section")
 	}
@@ -500,8 +500,8 @@ func (a *AppConfig) Validate() error {
 // a workspace_channel to run in, in thread mode it stands alone.
 //
 // prompt/prompt_file exclusivity is checked structurally here (no file read);
-// the actual read is deferred to loadSingleWorkspaceConfig where the config
-// directory is known.
+// the actual read is deferred to parseWorkspaceConfig, and happens only when the
+// source carries a BaseDir.
 func (a *AppConfig) validateWorkspaceChannel() error {
 	ch := a.Slack.WorkspaceChannel
 	agent := a.Slack.WorkspaceAgent
@@ -667,20 +667,68 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(ErrNoConfigFiles, "no .toml files found in specified paths")
 	}
 
-	var configs []*WorkspaceConfig
-	seenIDs := make(map[string]string)       // workspaceID → file path
-	seenReactions := make(map[string]string) // reaction emoji → workspaceID
+	sources := make([]WorkspaceConfigSource, 0, len(tomlFiles))
 	for _, f := range tomlFiles {
-		wc, err := loadSingleWorkspaceConfig(f)
+		// #nosec G304 - path is expected to be provided by CLI argument
+		data, err := os.ReadFile(f)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to load workspace config", goerr.V(ConfigPathKey, f))
+			return nil, goerr.Wrap(
+				goerr.Wrap(err, "failed to read config file", goerr.V(ConfigPathKey, f)),
+				"failed to load workspace config", goerr.V(ConfigPathKey, f))
+		}
+		sources = append(sources, WorkspaceConfigSource{
+			Name:    f,
+			Data:    data,
+			BaseDir: filepath.Dir(f),
+		})
+	}
+
+	return ParseWorkspaceConfigs(sources)
+}
+
+// WorkspaceConfigSource is one workspace configuration document handed to
+// ParseWorkspaceConfigs.
+type WorkspaceConfigSource struct {
+	// Name identifies the document in error messages and log fields: the file
+	// path when the document was read from disk, the request part name when it
+	// arrived over HTTP.
+	Name string
+	// Data is the raw TOML document.
+	Data []byte
+	// BaseDir is the directory a relative prompt_file is resolved against.
+	// Leave it empty for a document that has no directory of its own (one
+	// submitted over HTTP): the parse then reads no files at all and the
+	// prompt_file contents stay unresolved, which is the structural-validation
+	// mode JobSection.Validate and WorkspaceAgentSection.resolvePrompt already
+	// implement. Resolving a submitted document's prompt_file against the
+	// server's filesystem would turn config submission into an arbitrary file
+	// read.
+	BaseDir string
+}
+
+// ParseWorkspaceConfigs parses and validates in-memory workspace configuration
+// documents. It carries the checks that can only run once every workspace is
+// known: duplicate workspace ids, duplicate reaction emojis, case_ref fields
+// naming an unknown reference workspace, and channel routing collisions.
+func ParseWorkspaceConfigs(sources []WorkspaceConfigSource) ([]*WorkspaceConfig, error) {
+	if len(sources) == 0 {
+		return nil, goerr.Wrap(ErrNoConfigFiles, "no workspace configuration document supplied")
+	}
+
+	var configs []*WorkspaceConfig
+	seenIDs := make(map[string]string)       // workspaceID → document name
+	seenReactions := make(map[string]string) // reaction emoji → workspaceID
+	for _, src := range sources {
+		wc, err := parseWorkspaceConfig(src)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to load workspace config", goerr.V(ConfigPathKey, src.Name))
 		}
 
 		if existing, ok := seenIDs[wc.ID]; ok {
 			return nil, goerr.Wrap(ErrDuplicateWorkspaceID, "duplicate workspace ID",
 				goerr.V(WorkspaceIDKey, wc.ID),
 				goerr.V("first_file", existing),
-				goerr.V("second_file", f),
+				goerr.V("second_file", src.Name),
 			)
 		}
 		// Reaction emojis must be unique across workspaces so emoji-to-workspace
@@ -696,7 +744,7 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 			}
 			seenReactions[wc.ReactionEmoji] = wc.ID
 		}
-		seenIDs[wc.ID] = f
+		seenIDs[wc.ID] = src.Name
 		configs = append(configs, wc)
 	}
 
@@ -753,15 +801,12 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 	return configs, nil
 }
 
-func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
-	// #nosec G304 - path is expected to be provided by CLI argument
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to read config file", goerr.V(ConfigPathKey, path))
-	}
+func parseWorkspaceConfig(src WorkspaceConfigSource) (*WorkspaceConfig, error) {
+	path := src.Name
+	baseDir := src.BaseDir
 
 	var appCfg AppConfig
-	if err := toml.Unmarshal(data, &appCfg); err != nil {
+	if err := toml.Unmarshal(src.Data, &appCfg); err != nil {
 		return nil, goerr.Wrap(err, "failed to parse TOML config", goerr.V(ConfigPathKey, path))
 	}
 
@@ -822,7 +867,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 	}
 
 	// Resolve relative prompt_file paths against the config file's directory.
-	jobs, err := appCfg.resolveJobs(filepath.Dir(path))
+	jobs, err := appCfg.resolveJobs(baseDir)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to resolve jobs", goerr.V(ConfigPathKey, path))
 	}
@@ -849,7 +894,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 	// config file's directory). Structural validation already ran in Validate().
 	workspaceAgentPrompt := ""
 	if appCfg.Slack.WorkspaceAgent != nil {
-		workspaceAgentPrompt, _, err = appCfg.Slack.WorkspaceAgent.resolvePrompt(filepath.Dir(path))
+		workspaceAgentPrompt, _, err = appCfg.Slack.WorkspaceAgent.resolvePrompt(baseDir)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to resolve workspace agent prompt", goerr.V(ConfigPathKey, path))
 		}
@@ -937,6 +982,20 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 		return nil, nil, err
 	}
 
+	registry := BuildWorkspaceRegistry(workspaceConfigs)
+	for _, wc := range workspaceConfigs {
+		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())
+	}
+
+	return workspaceConfigs, registry, nil
+}
+
+// BuildWorkspaceRegistry turns parsed workspace configurations into the registry
+// the runtime and the consistency check read. It is separate from Configure so a
+// caller that obtained its configurations from somewhere other than CLI paths
+// (the DB consistency check endpoint, which parses documents out of a request)
+// builds the same registry.
+func BuildWorkspaceRegistry(workspaceConfigs []*WorkspaceConfig) *model.WorkspaceRegistry {
 	registry := model.NewWorkspaceRegistry()
 	for _, wc := range workspaceConfigs {
 		registry.Register(&model.WorkspaceEntry{
@@ -969,10 +1028,9 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			SlackWorkspaceChannelID: wc.WorkspaceChannelID,
 			WorkspaceAgentPrompt:    wc.WorkspaceAgentPrompt,
 		})
-		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())
 	}
 
-	return workspaceConfigs, registry, nil
+	return registry
 }
 
 // toDomainFields converts TOML FieldDefinition rows into their domain form.
