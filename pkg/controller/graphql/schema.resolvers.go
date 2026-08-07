@@ -1443,6 +1443,11 @@ func (r *queryResolver) CaseStatusConfig(ctx context.Context, workspaceID string
 	return toActionConfig(statusSet), nil
 }
 
+// FrequentAssigneeIDs is the resolver for the frequentAssigneeIDs field.
+func (r *queryResolver) FrequentAssigneeIDs(ctx context.Context, workspaceID string) ([]string, error) {
+	return r.UseCases.Case.ListFrequentAssignees(ctx, workspaceID)
+}
+
 // SlackUsers is the resolver for the slackUsers field.
 func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error) {
 	users, err := r.repo.SlackUser().GetAll(ctx)

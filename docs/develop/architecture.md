@@ -422,6 +422,79 @@ cache; Claude only) and `CacheReadInputToken` (tokens served from it).
 existing token-budget accounting stays correct whether or not a cache hit
 occurred.
 
+## Assignee ranking cache
+
+The WebUI assignee pickers order their candidates by how often each user is
+assigned in the current workspace (`frequentAssigneeIDs`). The ordering data has
+to come from somewhere, and the constraint that shaped the design is that a
+picker opens on **every** case-detail view: the query must not scan the Case
+collection.
+
+### Storage
+
+One document per workspace at `workspaces/{workspaceID}/rankings/assignee`,
+holding `model.AssigneeRanking` directly (no struct tags, so the Firestore field
+names are the Go ones):
+
+| Field        | Meaning                                                      |
+|--------------|--------------------------------------------------------------|
+| `WorkspaceID` | The workspace. Also the document's parent path segment.     |
+| `UserIDs`     | Ranked Slack user IDs, most assigned first, at most 12.     |
+| `ComputedAt`  | When `UserIDs` was produced. Zero value = never computed.   |
+
+It is derived data. Deleting it costs one recompute and nothing else.
+
+### Read path and refresh
+
+`CaseUseCase.ListFrequentAssignees` (`pkg/usecase/assignee_ranking.go`) first
+rejects a `workspaceID` the `WorkspaceRegistry` does not know
+(`model.ErrWorkspaceNotFound`, which the GraphQL error mapper already reports as
+`NOT_FOUND`). The other workspace-scoped reads can skip that check because a
+bogus id simply returns nothing — but this one *writes* on a cold cache, and
+Firestore creates `workspaces/{anything}/rankings/assignee` even when no such
+workspace exists, so an unchecked id would let a caller leave a junk document
+behind per id it invents. The registry is in-process configuration, so the check
+costs no read.
+
+It then reads the document and returns `UserIDs` as-is. If `ComputedAt` is older than one hour — or
+the document does not exist — it dispatches `refreshAssigneeRanking` through
+`async.Dispatch` and **still returns what it had**, which on a cold cache is an
+empty slice. So the request path is one document read, always; the caller never
+waits for a scan.
+
+The refresh calls the existing `Case().List(ctx, workspaceID)` and counts
+assignments in Go. It deliberately does **not** add a bounded projection query
+(`OrderBy("UpdatedAt").Select(...).Limit(N)`): that would need a new repository
+method, two backend implementations, and a projection model, to bound work that
+already runs at most once per hour per workspace and outside the request. The
+whole (non-`DRAFT`) case set is read instead.
+
+Two consequences of keeping it this simple:
+
+- **No refresh exclusion.** Several instances crossing the freshness boundary at
+  once each recompute; `Set` is last-write-wins and the results are
+  near-identical, so a claim document and its expiry handling would buy nothing
+  but a handful of saved reads per hour.
+- **An empty result still stores `ComputedAt`.** A workspace where nothing
+  qualifies must not be re-scanned on every request.
+
+### Private cases are filtered in Go, not in the query
+
+`rankAssignees` skips `IsPrivate` cases so the shared ranking cannot leak who
+works inside them. The filter lives in Go rather than the query because
+`Where("IsPrivate", "==", false)` combined with any `OrderBy` requires a
+composite index, which `.claude/rules/firestore.md` forbids.
+
+### Client side
+
+`useAssigneeCandidates` (`frontend/src/hooks/useAssigneeCandidates.ts`) is the
+single supply point for every picker's user list: it pairs `slackUsers` with
+`frequentAssigneeIDs` and runs `orderAssigneeCandidates`
+(`frontend/src/utils/assignees.ts`), which puts ranked users first and sorts the
+rest by display name. The ranking is treated as optional throughout — while it
+loads, when it errors, and before a workspace is resolved, the list degrades to
+display-name order rather than blocking the picker.
+
 ## See Also
 
 - [develop/README.md](./README.md) — developer documentation index

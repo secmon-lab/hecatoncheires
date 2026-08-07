@@ -6,10 +6,10 @@ import { buildSelectStyles, portalProps } from '../components/selectStyles'
 import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
+import { useAssigneeCandidates } from '../hooks/useAssigneeCandidates'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
 import { displayName } from '../utils/user'
@@ -44,8 +44,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const [assigneeID, setAssigneeID] = useState<string | null>(action?.assigneeID ?? null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const { data: usersData } = useQuery(GET_SLACK_USERS)
-  const users = usersData?.slackUsers || []
+  const { users } = useAssigneeCandidates(currentWorkspace?.id)
   const userOptions = users.map((u: any) => ({
     value: u.id as string,
     label: displayName(u),

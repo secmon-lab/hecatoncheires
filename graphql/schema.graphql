@@ -734,6 +734,16 @@ type Query {
   # Reuses the ActionConfig shape since both are generic status sets.
   caseStatusConfig(workspaceId: String!): ActionConfig
 
+  # frequentAssigneeIDs returns the Slack user IDs most often assigned to this
+  # workspace's Cases, most assigned first. It orders the assignee picker, so it
+  # is a hint rather than an exact statistic: the ranking is cached server-side
+  # and recomputed in the background, which keeps the request path at one
+  # document read but lets it lag the Cases by up to an hour. It is empty until
+  # the first refresh completes, and clients must then fall back to their own
+  # default ordering. Private Cases are excluded, so it leaks no private-Case
+  # membership.
+  frequentAssigneeIDs(workspaceId: String!): [String!]!
+
   # Slack (not workspace-scoped)
   slackUsers: [SlackUser!]!
   slackJoinedChannels: [SlackChannelInfo!]!

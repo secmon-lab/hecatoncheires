@@ -6,9 +6,9 @@ import { CREATE_CASE, UPDATE_CASE, ASSIGN_CASE, UNASSIGN_CASE, GET_CASE, GET_CAS
 import { CREATE_DRAFT, SUBMIT_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { diffAssignees } from '../utils/assignees'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useCaseStatuses } from '../hooks/useCaseStatuses'
+import { useAssigneeCandidates } from '../hooks/useAssigneeCandidates'
 import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
@@ -16,13 +16,6 @@ import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
 import { IconLock, IconFlask } from '../components/Icons'
 import { sanitizeFieldValues } from '../utils/sanitizeFieldValues'
 import { displayName } from '../utils/user'
-
-interface User {
-  id: string
-  name: string
-  realName: string
-  imageUrl?: string
-}
 
 interface CaseItem {
   id: number
@@ -88,8 +81,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
-  const { data: usersData } = useQuery(GET_SLACK_USERS)
-  const users: User[] = usersData?.slackUsers || []
+  const { users } = useAssigneeCandidates(currentWorkspace?.id)
 
   const [createCase, { loading: creating }] = useMutation(CREATE_CASE, {
     refetchQueries: [{ query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } }],

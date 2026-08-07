@@ -1838,6 +1838,69 @@ func TestGraphQLHandler_SlackUsersQuery(t *testing.T) {
 	})
 }
 
+func TestGraphQLHandler_FrequentAssigneeIDsQuery(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedCase := func(assigneeIDs ...string) {
+		t.Helper()
+		_, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:       "ranking case",
+			Status:      types.CaseStatusOpen,
+			ReporterID:  "U-REPORTER",
+			AssigneeIDs: assigneeIDs,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		gt.NoError(t, err).Required()
+	}
+	seedCase("U-BUSY")
+	seedCase("U-BUSY", "U-QUIET")
+
+	query := `
+		query($workspaceId: String!) {
+			frequentAssigneeIDs(workspaceId: $workspaceId)
+		}
+	`
+	variables := map[string]interface{}{"workspaceId": testWorkspaceID}
+
+	run := func(t *testing.T) []string {
+		t.Helper()
+		rec := executeGraphQLRequest(t, handler, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil().Required()
+
+		var result struct {
+			FrequentAssigneeIDs []string `json:"frequentAssigneeIDs"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		// The field is [String!]! so it must arrive as [], never JSON null —
+		// which decodes to a nil slice here.
+		gt.Bool(t, result.FrequentAssigneeIDs != nil).True()
+		return result.FrequentAssigneeIDs
+	}
+
+	t.Run("cold cache returns an empty list", func(t *testing.T) {
+		gt.Array(t, run(t)).Length(0)
+	})
+
+	t.Run("returns the ranking once the background refresh lands", func(t *testing.T) {
+		async.Wait()
+
+		ids := run(t)
+		gt.Array(t, ids).Length(2).Required()
+		gt.Value(t, ids[0]).Equal("U-BUSY")
+		gt.Value(t, ids[1]).Equal("U-QUIET")
+	})
+}
+
 func TestGraphQLHandler_SourceQueries(t *testing.T) {
 	repo := memory.New()
 	handler, err := setupGraphQLServer(repo)

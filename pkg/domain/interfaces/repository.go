@@ -32,6 +32,7 @@ type Repository interface {
 	ReactionClaim() ReactionClaimRepository
 	UserPreference() UserPreferenceRepository
 	HomeMessage() HomeMessageRepository
+	AssigneeRanking() AssigneeRankingRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

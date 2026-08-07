@@ -9,31 +9,32 @@ import (
 )
 
 type Firestore struct {
-	client         *firestore.Client
-	caseRepo       *caseRepository
-	action         *actionRepository
-	memo           *memoRepository
-	knowledge      *knowledgeRepository
-	tag            *tagRepository
-	slack          *slackRepository
-	slackUser      *slackUserRepository
-	source         *sourceRepository
-	caseMessage    *caseMessageRepository
-	actionMessage  *actionMessageRepository
-	actionEvent    *actionEventRepository
-	actionStep     *actionStepRepository
-	assistLog      *firestoreAssistLogRepository
-	caseProposal   *caseProposalRepository
-	session        *sessionRepository
-	notifySlot     *notificationSlotRepository
-	jobRun         *jobRunRepository
-	jobRunLog      *jobRunLogRepository
-	jobRunEvent    *jobRunEventRepository
-	jobSlot        *jobSlotRepository
-	importRepo     *importRepository
-	reactionClaim  *reactionClaimRepository
-	userPreference *userPreferenceRepository
-	homeMessage    *homeMessageRepository
+	client          *firestore.Client
+	caseRepo        *caseRepository
+	action          *actionRepository
+	memo            *memoRepository
+	knowledge       *knowledgeRepository
+	tag             *tagRepository
+	slack           *slackRepository
+	slackUser       *slackUserRepository
+	source          *sourceRepository
+	caseMessage     *caseMessageRepository
+	actionMessage   *actionMessageRepository
+	actionEvent     *actionEventRepository
+	actionStep      *actionStepRepository
+	assistLog       *firestoreAssistLogRepository
+	caseProposal    *caseProposalRepository
+	session         *sessionRepository
+	notifySlot      *notificationSlotRepository
+	jobRun          *jobRunRepository
+	jobRunLog       *jobRunLogRepository
+	jobRunEvent     *jobRunEventRepository
+	jobSlot         *jobSlotRepository
+	importRepo      *importRepository
+	reactionClaim   *reactionClaimRepository
+	userPreference  *userPreferenceRepository
+	homeMessage     *homeMessageRepository
+	assigneeRanking *assigneeRankingRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -54,31 +55,32 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 	}
 
 	f := &Firestore{
-		client:         client,
-		caseRepo:       newCaseRepository(client),
-		action:         newActionRepository(client),
-		memo:           newMemoRepository(client),
-		knowledge:      newKnowledgeRepository(client),
-		tag:            newTagRepository(client),
-		slack:          newSlackRepository(client),
-		slackUser:      newSlackUserRepository(client),
-		source:         newSourceRepository(client),
-		caseMessage:    newCaseMessageRepository(client),
-		actionMessage:  newActionMessageRepository(client),
-		actionEvent:    newActionEventRepository(client),
-		actionStep:     newActionStepRepository(client),
-		assistLog:      newFirestoreAssistLogRepository(client),
-		caseProposal:   newCaseProposalRepository(client),
-		session:        newSessionRepository(client),
-		notifySlot:     newNotificationSlotRepository(client),
-		jobRun:         newJobRunRepository(client),
-		jobRunLog:      newJobRunLogRepository(client),
-		jobRunEvent:    newJobRunEventRepository(client),
-		jobSlot:        newJobSlotRepository(client),
-		importRepo:     newImportRepository(client),
-		reactionClaim:  newReactionClaimRepository(client),
-		userPreference: newUserPreferenceRepository(client),
-		homeMessage:    newHomeMessageRepository(client),
+		client:          client,
+		caseRepo:        newCaseRepository(client),
+		action:          newActionRepository(client),
+		memo:            newMemoRepository(client),
+		knowledge:       newKnowledgeRepository(client),
+		tag:             newTagRepository(client),
+		slack:           newSlackRepository(client),
+		slackUser:       newSlackUserRepository(client),
+		source:          newSourceRepository(client),
+		caseMessage:     newCaseMessageRepository(client),
+		actionMessage:   newActionMessageRepository(client),
+		actionEvent:     newActionEventRepository(client),
+		actionStep:      newActionStepRepository(client),
+		assistLog:       newFirestoreAssistLogRepository(client),
+		caseProposal:    newCaseProposalRepository(client),
+		session:         newSessionRepository(client),
+		notifySlot:      newNotificationSlotRepository(client),
+		jobRun:          newJobRunRepository(client),
+		jobRunLog:       newJobRunLogRepository(client),
+		jobRunEvent:     newJobRunEventRepository(client),
+		jobSlot:         newJobSlotRepository(client),
+		importRepo:      newImportRepository(client),
+		reactionClaim:   newReactionClaimRepository(client),
+		userPreference:  newUserPreferenceRepository(client),
+		homeMessage:     newHomeMessageRepository(client),
+		assigneeRanking: newAssigneeRankingRepository(client),
 	}
 
 	return f, nil
@@ -178,6 +180,10 @@ func (f *Firestore) UserPreference() interfaces.UserPreferenceRepository {
 
 func (f *Firestore) HomeMessage() interfaces.HomeMessageRepository {
 	return f.homeMessage
+}
+
+func (f *Firestore) AssigneeRanking() interfaces.AssigneeRankingRepository {
+	return f.assigneeRanking
 }
 
 func (f *Firestore) Close() error {

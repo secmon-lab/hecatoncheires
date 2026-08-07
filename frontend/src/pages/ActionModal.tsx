@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_ACTION, UPDATE_ACTION, ARCHIVE_ACTION, UNARCHIVE_ACTION, GET_ACTIONS } from '../graphql/action'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
+import { useAssigneeCandidates } from '../hooks/useAssigneeCandidates'
 import { actionStatusColor } from '../utils/actionStatusStyle'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
@@ -54,8 +54,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   const action = data?.action
   const [savedFlash, setSavedFlash] = useState(false)
 
-  const { data: usersData } = useQuery(GET_SLACK_USERS)
-  const users = usersData?.slackUsers || []
+  const { users } = useAssigneeCandidates(currentWorkspace?.id)
 
   const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [
