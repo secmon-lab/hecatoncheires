@@ -308,6 +308,19 @@ new configurable item silently starts out unchecked.
   definitions fall under the exclusion above.
 - `ValidateDB` is read-only. It reports; it never repairs. Repair jobs belong
   under the `diagnosis` subcommand.
+- The check has **two entry points** and both must keep working: the CLI
+  (`validate --check-db`, against the config the process loaded) and
+  `POST /api/validate/db` on `serve` (against workspace TOML supplied in the
+  request, via `UseCases.ValidateDBWithConfig`). A new check needs nothing extra
+  for the HTTP path — it shares the usecase — but the JSON response shape in
+  `pkg/controller/http/validate.go` names each `kind`, so a new `kind` belongs in
+  the endpoint's documented catalog (`docs/operations.md` § DB consistency check
+  over HTTP) as well as in `docs/cli.md`.
+- The HTTP path parses request-supplied documents with an empty
+  `config.WorkspaceConfigSource.BaseDir` on purpose: that keeps the parse off the
+  filesystem, so a submitted `prompt_file` is never read. Do not "fix" it by
+  handing it a base directory — that turns an unauthenticated endpoint into an
+  arbitrary file read.
 
 ### Check
 

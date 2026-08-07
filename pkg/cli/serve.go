@@ -662,6 +662,12 @@ func cmdServe() *cli.Command {
 			// Register the scheduled-Job sweep webhook.
 			httpOpts = append(httpOpts, httpctrl.WithTickHook(tickHook))
 
+			// Register the DB consistency check endpoint. Its configuration comes
+			// from the request, not from this process, so an operator can ask
+			// whether a candidate config change would leave data inconsistent
+			// without restarting anything.
+			httpOpts = append(httpOpts, httpctrl.WithDBCheck(httpctrl.NewDBCheckHandler(newDBConsistencyChecker(uc))))
+
 			// Wire the MCP endpoint when enabled. Configure fails loudly if
 			// --mcp is set without a --policy: we never expose the MCP data
 			// surface without a Rego authorization policy.

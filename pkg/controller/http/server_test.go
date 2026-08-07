@@ -4,12 +4,52 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gt"
 	controllerhttp "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
+
+// TestServer_DBCheckRouteRegistered drives the router itself, not the handler:
+// the endpoint only exists if New registers it ahead of the catch-all SPA route,
+// which serves index.html for anything it does not recognise and would hide a
+// missing registration behind a 200.
+func TestServer_DBCheckRouteRegistered(t *testing.T) {
+	checker := &stubDBChecker{result: &usecase.ValidationResult{}}
+	srv, err := controllerhttp.New(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		controllerhttp.WithDBCheck(controllerhttp.NewDBCheckHandler(checker)),
+	)
+	gt.NoError(t, err).Required()
+
+	req := httptest.NewRequest("POST", "/api/validate/db", strings.NewReader("[workspace]\nid = \"risk\"\n"))
+	req.Header.Set("Content-Type", "application/toml")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	gt.Number(t, rec.Code).Equal(200)
+	gt.String(t, rec.Header().Get("Content-Type")).Equal("application/json")
+	gt.Array(t, checker.docs).Length(1).Required()
+	gt.String(t, string(checker.docs[0].Data)).Equal("[workspace]\nid = \"risk\"\n")
+}
+
+// TestServer_DBCheckRouteAbsentWithoutHandler pins that a deployment that does
+// not wire the checker exposes no such endpoint at all.
+func TestServer_DBCheckRouteAbsentWithoutHandler(t *testing.T) {
+	srv, err := controllerhttp.New(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	)
+	gt.NoError(t, err).Required()
+
+	req := httptest.NewRequest("POST", "/api/validate/db", strings.NewReader("[workspace]\nid = \"risk\"\n"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	gt.Number(t, rec.Code).Equal(http.StatusMethodNotAllowed)
+}
 
 type workspaceItem struct {
 	ID    string `json:"id"`

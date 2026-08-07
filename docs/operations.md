@@ -539,6 +539,112 @@ principle** — most features are designed to work against the existing
 indexes, so a `migrate` run that wants to add an index should be reviewed
 with the team before it is applied in production.
 
+## DB consistency check over HTTP
+
+`POST /api/validate/db` on the `serve` server runs the same consistency check as
+`hecatoncheires validate --check-db` — the check catalog and the deliberate
+exclusions are documented once, in the
+[CLI Reference](./cli.md#what---check-db-checks). Everything below is what
+differs on the HTTP path.
+
+**The configuration comes from the request, not from the server.** The endpoint
+checks the persisted data against the workspace TOML you submit, so you can ask
+"would this config change leave existing data inconsistent?" before deploying
+it. The running process's own configuration is not consulted.
+
+- **Unauthenticated by design**, the same assumption as `POST /hooks/tick`:
+  deploy behind IAP / Cloud Run internal-only ingress / private networking.
+  Never expose it to the public internet — the response names Case, Action and
+  Memo ids and echoes the offending field values.
+- **Synchronous.** The report *is* the result, so unlike the tick hook it cannot
+  be dispatched to the background: the request takes as long as scanning the
+  workspaces takes. Call it from operator tooling that tolerates that, not from
+  a request path with a short timeout.
+- **Read-only**, exactly like the CLI. It reports; repair stays with the
+  `diagnosis` subcommands.
+- **Request body limit: 1 MiB.** Larger requests are rejected with `413`.
+- **`prompt_file` is not read.** A submitted document has no directory of its
+  own, so a `[[job]]` / `[slack.workspace_agent]` `prompt_file` is left
+  unresolved rather than resolved against the server's filesystem. Prompt text
+  plays no part in the consistency check; a broken prompt template is still
+  caught by `validate` on the CLI path.
+
+### Submitting the configuration
+
+One workspace TOML document is one workspace. Send the whole set in a single
+request — cross-workspace validation (duplicate ids, duplicate reaction emojis,
+a `case_ref` field's `reference_workspace`, channel routing collisions) runs
+over the documents in the request, so a document whose `case_ref` points at a
+workspace you did not submit is rejected as invalid configuration.
+
+A single workspace as the raw body:
+
+```bash
+curl -X POST http://localhost:8080/api/validate/db \
+  -H 'Content-Type: application/toml' \
+  --data-binary @config/risk.toml
+```
+
+Several workspaces as multipart parts (each part's file name identifies it in
+error messages):
+
+```bash
+curl -X POST http://localhost:8080/api/validate/db \
+  -F config=@config/risk.toml \
+  -F config=@config/task.toml
+```
+
+### Response
+
+`200` with the report. `has_issues` is the flag to alert on; `total_count` is
+how many entities are inconsistent across every group. `issues` is a list of
+groups, never `null`:
+
+```json
+{
+  "has_issues": true,
+  "total_count": 8,
+  "issues": [
+    {
+      "workspace_id": "risk",
+      "kind": "board_status_invalid",
+      "field_id": "",
+      "count": 7,
+      "sample": { "kind": "case", "case_id": 42 },
+      "expected": "one of the configured case status ids",
+      "actual": "triage",
+      "message": "board status is not defined in the workspace configuration"
+    },
+    {
+      "workspace_id": "risk",
+      "kind": "field_value",
+      "field_id": "severity",
+      "count": 1,
+      "sample": { "kind": "memo", "case_id": 9, "memo_id": "01J..." },
+      "expected": "select",
+      "actual": "sev0",
+      "message": "value is not a valid option"
+    }
+  ]
+}
+```
+
+`kind` values and their meaning are the `Reported as` column of the
+[check catalog](./cli.md#what---check-db-checks). `sample` carries
+`action_id` only for `action` targets and `memo_id` only for `memo` targets.
+Finding issues is still `200` — the check ran successfully. Other statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `400` | No document supplied, or the submitted configuration is invalid (bad TOML, duplicate workspace id, unknown `reference_workspace`, …). The body carries the reason |
+| `413` | Request body exceeds 1 MiB |
+| `500` | The check itself failed (e.g. the storage backend became unavailable mid-scan). The body is a fixed message; the detail is in the server log and the error sink |
+| `405` | The server was built without this endpoint (the route is not registered at all) |
+
+`400` and `413` are ordinary client-side outcomes: they are logged at Info level
+and deliberately not sent to Sentry, so a monitoring job that occasionally posts
+a bad document does not page anyone. `500` is reported as an error.
+
 ## `diagnosis` usage
 
 The `diagnosis` command groups one-shot data inspection / repair jobs. Each
