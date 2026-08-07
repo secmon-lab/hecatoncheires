@@ -8,62 +8,64 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo       *caseRepository
-	action         *actionRepository
-	memo           *memoRepository
-	knowledge      *knowledgeRepository
-	tag            *tagRepository
-	tokens         *tokenStore
-	slack          *slackRepository
-	slackUser      *slackUserRepository
-	source         *sourceRepository
-	caseMessage    *caseMessageRepository
-	actionMessage  *actionMessageRepository
-	actionEvent    *actionEventRepository
-	actionStep     *actionStepRepository
-	assistLog      *assistLogRepository
-	caseProposal   *caseProposalRepository
-	session        *sessionRepository
-	notifySlot     *notificationSlotRepository
-	jobRun         *jobRunRepository
-	jobRunLog      *jobRunLogRepository
-	jobRunEvent    *jobRunEventRepository
-	jobSlot        *jobSlotRepository
-	importRepo     *importRepository
-	reactionClaim  *reactionClaimRepository
-	userPreference *userPreferenceRepository
-	homeMessage    *homeMessageRepository
+	caseRepo        *caseRepository
+	action          *actionRepository
+	memo            *memoRepository
+	knowledge       *knowledgeRepository
+	tag             *tagRepository
+	tokens          *tokenStore
+	slack           *slackRepository
+	slackUser       *slackUserRepository
+	source          *sourceRepository
+	caseMessage     *caseMessageRepository
+	actionMessage   *actionMessageRepository
+	actionEvent     *actionEventRepository
+	actionStep      *actionStepRepository
+	assistLog       *assistLogRepository
+	caseProposal    *caseProposalRepository
+	session         *sessionRepository
+	notifySlot      *notificationSlotRepository
+	jobRun          *jobRunRepository
+	jobRunLog       *jobRunLogRepository
+	jobRunEvent     *jobRunEventRepository
+	jobSlot         *jobSlotRepository
+	importRepo      *importRepository
+	reactionClaim   *reactionClaimRepository
+	userPreference  *userPreferenceRepository
+	homeMessage     *homeMessageRepository
+	assigneeRanking *assigneeRankingRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
 	return &Memory{
-		caseRepo:       newCaseRepository(),
-		action:         newActionRepository(),
-		memo:           newMemoRepository(),
-		knowledge:      newKnowledgeRepository(),
-		tag:            newTagRepository(),
-		tokens:         newTokenStore(),
-		slack:          newSlackRepository(),
-		slackUser:      newSlackUserRepository(),
-		source:         newSourceRepository(),
-		caseMessage:    newCaseMessageRepository(),
-		actionMessage:  newActionMessageRepository(),
-		actionEvent:    newActionEventRepository(),
-		actionStep:     newActionStepRepository(),
-		assistLog:      newAssistLogRepository(),
-		caseProposal:   newCaseProposalRepository(),
-		session:        newSessionRepository(),
-		notifySlot:     newNotificationSlotRepository(),
-		jobRun:         newJobRunRepository(),
-		jobRunLog:      newJobRunLogRepository(),
-		jobRunEvent:    newJobRunEventRepository(),
-		jobSlot:        newJobSlotRepository(),
-		importRepo:     newImportRepository(),
-		reactionClaim:  newReactionClaimRepository(),
-		userPreference: newUserPreferenceRepository(),
-		homeMessage:    newHomeMessageRepository(),
+		caseRepo:        newCaseRepository(),
+		action:          newActionRepository(),
+		memo:            newMemoRepository(),
+		knowledge:       newKnowledgeRepository(),
+		tag:             newTagRepository(),
+		tokens:          newTokenStore(),
+		slack:           newSlackRepository(),
+		slackUser:       newSlackUserRepository(),
+		source:          newSourceRepository(),
+		caseMessage:     newCaseMessageRepository(),
+		actionMessage:   newActionMessageRepository(),
+		actionEvent:     newActionEventRepository(),
+		actionStep:      newActionStepRepository(),
+		assistLog:       newAssistLogRepository(),
+		caseProposal:    newCaseProposalRepository(),
+		session:         newSessionRepository(),
+		notifySlot:      newNotificationSlotRepository(),
+		jobRun:          newJobRunRepository(),
+		jobRunLog:       newJobRunLogRepository(),
+		jobRunEvent:     newJobRunEventRepository(),
+		jobSlot:         newJobSlotRepository(),
+		importRepo:      newImportRepository(),
+		reactionClaim:   newReactionClaimRepository(),
+		userPreference:  newUserPreferenceRepository(),
+		homeMessage:     newHomeMessageRepository(),
+		assigneeRanking: newAssigneeRankingRepository(),
 	}
 }
 
@@ -161,6 +163,10 @@ func (m *Memory) UserPreference() interfaces.UserPreferenceRepository {
 
 func (m *Memory) HomeMessage() interfaces.HomeMessageRepository {
 	return m.homeMessage
+}
+
+func (m *Memory) AssigneeRanking() interfaces.AssigneeRankingRepository {
+	return m.assigneeRanking
 }
 
 func (m *Memory) Close() error {

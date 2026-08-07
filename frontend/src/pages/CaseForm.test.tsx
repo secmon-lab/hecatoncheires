@@ -5,7 +5,7 @@ import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
 import { MemoryRouter } from 'react-router'
 import { I18nProvider } from '../i18n'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { GET_FREQUENT_ASSIGNEE_IDS, GET_SLACK_USERS } from '../graphql/slackUsers'
 import { GET_CASE_STATUS_CONFIG } from '../graphql/caseStatus'
 import CaseForm from './CaseForm'
 
@@ -47,6 +47,15 @@ function slackUsersMock(): MockedResponse {
   return {
     request: { query: GET_SLACK_USERS },
     result: { data: { slackUsers: [] } },
+  }
+}
+
+// The assignee picker orders its candidates by this ranking; the form itself has
+// no user to rank here, so an empty list is enough to satisfy the query.
+function frequentAssigneesMock(): MockedResponse {
+  return {
+    request: { query: GET_FREQUENT_ASSIGNEE_IDS, variables: { workspaceId: WORKSPACE_ID } },
+    result: { data: { frequentAssigneeIDs: [] } },
   }
 }
 
@@ -100,7 +109,10 @@ function pendingStatusMock(): MockedResponse {
 function renderForm(statusMock: MockedResponse) {
   return render(
     <MemoryRouter initialEntries={[`/ws/${WORKSPACE_ID}/cases`]}>
-      <MockedProvider mocks={[fieldConfigMock(), slackUsersMock(), statusMock]} addTypename={false}>
+      <MockedProvider
+        mocks={[fieldConfigMock(), slackUsersMock(), frequentAssigneesMock(), statusMock]}
+        addTypename={false}
+      >
         <I18nProvider defaultLang="en">
           <CaseForm caseItem={null} onClose={vi.fn()} />
         </I18nProvider>

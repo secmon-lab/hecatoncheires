@@ -241,6 +241,9 @@ func (m *mockRepo) UserPreference() interfaces.UserPreferenceRepository {
 func (m *mockRepo) HomeMessage() interfaces.HomeMessageRepository {
 	panic("unexpected call: HomeMessage()")
 }
+func (m *mockRepo) AssigneeRanking() interfaces.AssigneeRankingRepository {
+	panic("unexpected call: AssigneeRanking()")
+}
 func (m *mockRepo) Memo() interfaces.MemoRepository {
 	panic("unexpected call: Memo()")
 }

@@ -7,7 +7,8 @@ interface User {
   id: string
   name: string
   realName: string
-  imageUrl?: string
+  // Nullable, matching the schema's `SlackUser.imageUrl: String`.
+  imageUrl?: string | null
 }
 
 interface UserFieldProps {

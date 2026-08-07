@@ -139,6 +139,28 @@ current assignees and call `assignCase` / `unassignCase` for just the
 difference. The agent does the same via its `case__assign` /
 `case__unassign` tools.
 
+#### Candidate order in the WebUI picker
+
+Every WebUI assignee picker — case detail inline edit, the case
+create/edit modal, the action create/edit form and modal, and
+`User`-typed custom fields — lists the people who are **most often
+assigned in the current workspace first**, then everyone else by display
+name. Previously the list came back in Slack user ID order, which is
+meaningless to a human.
+
+Two things are worth knowing about the order:
+
+* It is a hint, not a live statistic. The ranking is computed on the
+  server and cached per workspace, so a change in who is assigned takes
+  **up to an hour** to show up in the order. A brand-new deployment shows
+  display-name order only until the first ranking is computed.
+* **Private cases are not counted.** The ranking is one value shared by
+  everyone, so counting private-case assignees would let a non-member
+  infer who is working inside them. `DRAFT` cases are not counted either.
+
+The search box filters the list without changing this order, so looking
+up a specific person is unaffected.
+
 ### Slack: Save as Draft
 
 The `/cmd` creation modal exposes a **Draft mode** checkbox inside

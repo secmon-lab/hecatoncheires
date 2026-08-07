@@ -30,7 +30,9 @@ interface User {
   id: string
   name: string
   realName: string
-  imageUrl?: string
+  // Nullable, matching the schema's `SlackUser.imageUrl: String` — a user with
+  // no avatar comes back as null, not as an absent field.
+  imageUrl?: string | null
 }
 
 interface CustomFieldRendererProps {

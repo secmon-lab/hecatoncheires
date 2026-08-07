@@ -17,7 +17,6 @@ import { diffAssignees } from '../utils/assignees'
 import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'
 import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { GET_CASE_LATEST_JOB_RUN } from '../graphql/caseAgent'
 import { GET_MEMO_CONFIGURATION } from '../graphql/memo'
 import MemoTab from '../components/memo/MemoTab'
@@ -30,6 +29,7 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { useCaseStatuses } from '../hooks/useCaseStatuses'
+import { useAssigneeCandidates } from '../hooks/useAssigneeCandidates'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { buildSlackCaseLink } from '../utils/slackLink'
 import { displayName } from '../utils/user'
@@ -286,8 +286,7 @@ export default function CaseDetail() {
     awaitRefetchQueries: true,
   })
   const [draftError, setDraftError] = useState<string | null>(null)
-  const { data: slackUsersData } = useQuery(GET_SLACK_USERS)
-  const slackUsers = slackUsersData?.slackUsers || []
+  const { users: slackUsers } = useAssigneeCandidates(currentWorkspace?.id)
 
   const [syncMembers, { loading: syncing }] = useMutation(SYNC_CASE_CHANNEL_USERS, {
     refetchQueries: [{
