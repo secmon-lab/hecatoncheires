@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
@@ -95,17 +94,24 @@ func cmdValidate() *cli.Command {
 
 			if validationResult.HasIssues() {
 				for _, issue := range validationResult.Issues {
+					// One line per (kind, field) group: Count is how many entities
+					// share the problem, and the remaining values describe the
+					// sample the usecase retained.
 					logger.Warn("DB consistency issue found",
 						"workspace_id", issue.WorkspaceID,
-						"case_id", issue.CaseID,
+						"kind", string(issue.Kind),
 						"field_id", issue.FieldID,
-						"message", issue.Message,
+						"count", issue.Count,
+						"sample", issue.Sample.String(),
 						"expected", issue.Expected,
 						"actual", issue.Actual,
+						"message", issue.Message,
 					)
 				}
 
-				return fmt.Errorf("DB consistency check found %d issue(s)", len(validationResult.Issues))
+				return goerr.New("DB consistency check found inconsistencies",
+					goerr.V("issue_groups", len(validationResult.Issues)),
+					goerr.V("total_occurrences", validationResult.TotalCount()))
 			}
 
 			logger.Info("DB consistency check passed")

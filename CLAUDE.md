@@ -279,6 +279,36 @@ In principle, do not trust developers who use this library from outside
   simulatable or live-only in the catalog entry (e.g. `github_search` is
   live-only in v1).
 
+### DB consistency checks (`validate --check-db`)
+
+`hecatoncheires validate --check-db` is what tells an operator whether a
+configuration change has left existing data inconsistent. It only covers what
+`UseCases.ValidateDB` (`pkg/usecase/validate.go`) explicitly checks, so every
+new configurable item silently starts out unchecked.
+
+- **Whenever you add or change a configuration item that persisted data
+  refers to, you MUST review `ValidateDB` and either add the corresponding
+  check or record why none is needed.** This applies to: a new field type or
+  field constraint, a new status set or status attribute, a new TOML section
+  whose values are stored on an entity, and a new persisted model that carries
+  config-derived values (the way `Case` / `Action` / `Memo` do).
+- The same obligation applies in reverse: when you add a **persisted model**
+  that stores config-derived values, decide whether `ValidateDB` must walk it,
+  and say so in the spec — not after the fact.
+- Keep the check catalog in `docs/cli.md` (§ `validate`) in sync with
+  `ValidateDB`, including the items deliberately left unchecked and the reason.
+  A reader must be able to tell "not detected" from "not implemented".
+- Deliberate exclusions currently in force: a **field definition removed from
+  config** leaves its stored values orphaned, and that is accepted, not
+  reported; missing values for `required` fields are likewise not reported. Do
+  not reintroduce either without asking.
+- Note the asymmetry: a **status id** removed or renamed IS reported
+  (`board_status_invalid` / `action_status_invalid`), because the Case or Action
+  keeps pointing at a Kanban column or state that no longer exists. Only field
+  definitions fall under the exclusion above.
+- `ValidateDB` is read-only. It reports; it never repairs. Repair jobs belong
+  under the `diagnosis` subcommand.
+
 ### Check
 
 When making changes, before finishing the task, always:

@@ -63,6 +63,8 @@ exempt_name := {
 	"Summary",
 	"ComputeScore",
 	"String",
+	# sums the Count fields of an already-computed ValidationResult
+	"TotalCount",
 	"FormatPrefix",
 	"CaseURL",
 	"SlackActionAssigneeBlockID",
@@ -93,7 +95,6 @@ exempt_name := {
 	"LLMRequestFromTrace",
 	"LLMResponseFromTrace",
 	"ToolCallFromTrace",
-	"AddIssue",
 	# in-memory counters (mutex-guarded, no external I/O)
 	"Next",
 }

@@ -166,6 +166,53 @@ The `validate` command (alias: `v`) validates configuration files and optionally
 
 When `--check-db` is not specified, only the configuration files are validated and the DB consistency check is skipped.
 
+### What `--check-db` checks
+
+The DB consistency check answers one question: has a configuration change left
+existing data inconsistent with the configuration now in force? It reads every
+Case, Action and Memo of every registered workspace and reports the mismatches.
+**It never writes** — repairing data is the job of `diagnosis` subcommands.
+
+| Reported as | Applies to | Detects |
+|-------------|-----------|---------|
+| `field_value` | Case and Memo field values | A stored value that violates its declared type: a `select` / `multi-select` option id the definition no longer lists, a `date` that is not RFC3339, a `number` holding a string, a `case_ref` that is not a numeric id, and the equivalent for every other field type |
+| `field_type_mismatch` | Case and Memo field values | A stored value whose recorded type no longer matches the schema. This catches a type change whose values still happen to fit — `text` → `markdown` are both strings — which `field_value` alone cannot see. Values written before the type was recorded (empty type) are not comparable and are skipped |
+| `case_ref_missing` | Case field values | A `case_ref` / `multi_case_ref` value pointing at a Case that does not exist in the field's configured `reference_workspace`. This is what surfaces after `reference_workspace` is repointed |
+| `board_status_invalid` | thread-mode Cases | A `BoardStatus` that is empty or is not one of the `[[case.status]]` ids. Such a Case appears in no Kanban column |
+| `lifecycle_status_mismatch` | thread-mode Cases | A Case whose lifecycle status (`OPEN` / `CLOSED`) disagrees with whether its `BoardStatus` is listed under `[case] closed`. This is what surfaces after a status is added to or removed from `closed` |
+| `action_status_invalid` | Actions | A `Status` that is not one of the `[[action.status]]` ids. Archived Actions are included, because they stay visible in the Case history |
+
+Each row of output is one **group**, not one entity: a configuration change
+affects a whole workspace uniformly, so occurrences sharing the same check and
+field id collapse into a single line carrying `count` (how many entities) and
+`sample` (the lowest-id entity, e.g. `case:42` / `action:42/7` / `memo:42/<id>`).
+`expected`, `actual` and `message` describe that sample only.
+
+### What `--check-db` deliberately does NOT check
+
+These are consequences of editing the configuration that the project accepts.
+They are **not detected** — which is different from not implemented:
+
+- **A field definition removed from the config.** Values stored under a field id
+  the schema no longer defines are left alone; only fields whose definition still
+  exists are checked. Status ids are the exception, not an oversight: a
+  `[[case.status]]` / `[[action.status]]` id that is removed or renamed **is**
+  reported by `board_status_invalid` / `action_status_invalid`, because the Case
+  or Action keeps pointing at a column or state that no longer exists.
+- **A `required` field with no stored value.** `required` is enforced when
+  writing. Adding `required = true` later would otherwise flag every Case that
+  predates the change.
+- **`[[job]]`, Source and Tag references.** Sources and Tags are stored entities
+  rather than configuration, and a `JobRun` left behind by a deleted `[[job]]`
+  falls under the removed-definition rule above.
+- **Whether a referenced Case may be referenced.** `case_ref_missing` checks
+  existence only. Privacy and draft state gate references when they are written;
+  applying that here would flag references that were legitimate at write time.
+
+The check reads the data as it finds it and does not take a snapshot, so a
+workspace being written to concurrently can yield a count that is already stale.
+Re-run it if the numbers matter.
+
 Configuration validation parses every Go `text/template` prompt the config supplies — each `[[job]]` `prompt` / `prompt_file` and every Slack `welcome_messages` entry — with the same template dialect the runtime renders with. A malformed template (an unbalanced `{{ ... }}` action, an unknown function) fails `validate` up-front instead of only erroring the first time the Job runs or a case is created. This is a parse check: it proves the template compiles, not that a specific field reference resolves against a live case (that is exercised at render time).
 
 ---

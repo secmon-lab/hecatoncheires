@@ -2,12 +2,12 @@ package memory
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type caseRepository struct {
@@ -334,50 +334,25 @@ func (r *caseRepository) GetByRequestKey(_ context.Context, workspaceID string, 
 	return nil, nil
 }
 
-func (r *caseRepository) CountFieldValues(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
+// ScanAll hands every stored case to fn in ascending ID order. The order is not
+// part of the interface contract, but making it deterministic here keeps the
+// consistency check's output identical across backends and across runs.
+func (r *caseRepository) ScanAll(_ context.Context, workspaceID string, fn func(*model.Case) error) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	ws := r.cases[workspaceID]
-	validSet := make(map[string]bool, len(validValues))
-	for _, v := range validValues {
-		validSet[v] = true
+	ids := make([]int64, 0, len(ws))
+	for id := range ws {
+		ids = append(ids, id)
 	}
+	slices.Sort(ids)
 
-	var total, valid int64
-	for _, c := range ws {
-		fv, ok := c.FieldValues[fieldID]
-		if !ok || fv.Type != fieldType {
-			continue
-		}
-		total++
-		if fv.IsValueInSet(fieldType, validSet) {
-			valid++
+	for _, id := range ids {
+		if err := fn(copyCase(ws[id])); err != nil {
+			return err
 		}
 	}
 
-	return total, valid, nil
-}
-
-func (r *caseRepository) FindCaseWithInvalidFieldValue(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	ws := r.cases[workspaceID]
-	validSet := make(map[string]bool, len(validValues))
-	for _, v := range validValues {
-		validSet[v] = true
-	}
-
-	for _, c := range ws {
-		fv, ok := c.FieldValues[fieldID]
-		if !ok || fv.Type != fieldType {
-			continue
-		}
-		if !fv.IsValueInSet(fieldType, validSet) {
-			return copyCase(c), nil
-		}
-	}
-
-	return nil, nil
+	return nil
 }

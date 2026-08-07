@@ -400,147 +400,33 @@ func (r *caseRepository) GetByRequestKey(ctx context.Context, workspaceID string
 	return &c, nil
 }
 
-func (r *caseRepository) CountFieldValues(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
-	// Earlier this method ran two independent aggregation queries — one
-	// counting documents whose `FieldValues.<id>.Type == fieldType`, the
-	// other counting documents whose `FieldValues.<id>.Value` was in the
-	// validValues list. The second query did not constrain Type, so a
-	// text-typed field whose value collided with a valid select option
-	// was counted as `valid` even though the corresponding `total` did
-	// not include it. Adding a composite index to chain
-	// `Where("Type", "==").Where("Value", "in")` is forbidden by
-	// firestore.md, so the repo now iterates the type-filtered documents
-	// once and counts valid entries in Go using the model's
-	// IsValueInSet logic — which already handles the `[]interface{}`
-	// vs `[]string` shape mismatch the Firestore decoder produces.
-	//
-	// Two micro-optimisations keep per-document cost low so the O(N)
-	// scan does not become a wire-bandwidth or CPU hot path:
-	//   1. `Select(fieldTypePath, fieldValuePath)` so Firestore only
-	//      returns the two map entries the count needs — not the entire
-	//      case document.
-	//   2. The receiver of `DataTo` is a minimal local struct that
-	//      decodes only `FieldValues`. Decoding the full `model.Case`
-	//      pulls in title / description / assignees / channel members
-	//      that the count does not look at.
-	// (Document-count scaling is still O(workspace size); analytical
-	// counts that need true O(1) would have to relax the firestore.md
-	// composite-index ban, which is a project-policy decision.)
-	col := r.casesCollection(workspaceID)
-	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
-	fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
-
-	validSet := make(map[string]bool, len(validValues))
-	for _, v := range validValues {
-		validSet[v] = true
-	}
-
-	iter := col.
-		Where(fieldTypePath, "==", string(fieldType)).
-		Select(fieldTypePath, fieldValuePath).
-		Documents(ctx)
+// ScanAll walks the workspace's whole cases collection. The query carries no
+// Where clause, so it needs no index at all — List / ListDrafts filter on Status
+// and between them would skip any document holding an unexpected Status value,
+// which is exactly the kind of drift the consistency check exists to surface.
+func (r *caseRepository) ScanAll(ctx context.Context, workspaceID string, fn func(*model.Case) error) error {
+	iter := r.casesCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()
-
-	// fieldValuesOnly is a minimal projection target so DataTo does not
-	// allocate the full Case. The map only carries the entries the
-	// Select() above requested.
-	type fieldValuesOnly struct {
-		FieldValues map[string]model.FieldValue
-	}
-
-	var totalCount, validCount int64
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return 0, 0, goerr.Wrap(err, "failed to iterate cases for field-value count",
-				goerr.V("field_id", fieldID))
-		}
-
-		var partial fieldValuesOnly
-		if err := doc.DataTo(&partial); err != nil {
-			return 0, 0, goerr.Wrap(err, "failed to decode case for field-value count",
-				goerr.V("field_id", fieldID))
-		}
-		fv, ok := partial.FieldValues[fieldID]
-		if !ok || fv.Type != fieldType {
-			continue
-		}
-		totalCount++
-		if fv.IsValueInSet(fieldType, validSet) {
-			validCount++
-		}
-	}
-
-	return totalCount, validCount, nil
-}
-
-func (r *caseRepository) FindCaseWithInvalidFieldValue(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error) {
-	col := r.casesCollection(workspaceID)
-
-	// For select with <= 10 options: use not-in for exact match
-	if fieldType == types.FieldTypeSelect && len(validValues) <= 10 {
-		fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
-		validIface := make([]interface{}, len(validValues))
-		for i, v := range validValues {
-			validIface[i] = v
-		}
-
-		iter := col.Where(fieldValuePath, "not-in", validIface).Limit(1).Documents(ctx)
-		defer iter.Stop()
-
-		docSnap, err := iter.Next()
-		if err == iterator.Done {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to query invalid field values",
-				goerr.V("field_id", fieldID))
-		}
-
-		var found model.Case
-		if err := docSnap.DataTo(&found); err != nil {
-			return nil, goerr.Wrap(err, "failed to decode case",
-				goerr.V("field_id", fieldID))
-		}
-		return &found, nil
-	}
-
-	// For select > 10 options or multi-select: stream and check
-	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
-	iter := col.Where(fieldTypePath, "==", string(fieldType)).Documents(ctx)
-	defer iter.Stop()
-
-	validSet := make(map[string]bool, len(validValues))
-	for _, v := range validValues {
-		validSet[v] = true
-	}
 
 	for {
 		docSnap, err := iter.Next()
 		if err == iterator.Done {
-			return nil, nil
+			return nil
 		}
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to iterate cases for field validation",
-				goerr.V("field_id", fieldID))
+			return goerr.Wrap(err, "failed to iterate cases for scan",
+				goerr.V("workspace_id", workspaceID))
 		}
 
-		var found model.Case
-		if err := docSnap.DataTo(&found); err != nil {
-			return nil, goerr.Wrap(err, "failed to decode case",
-				goerr.V("field_id", fieldID))
+		var c model.Case
+		if err := docSnap.DataTo(&c); err != nil {
+			return goerr.Wrap(err, "failed to decode case",
+				goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
-		fv, ok := found.FieldValues[fieldID]
-		if !ok {
-			continue
-		}
-
-		if !fv.IsValueInSet(fieldType, validSet) {
-			return &found, nil
+		// Propagated unwrapped so the caller's errors.Is / errors.As still work.
+		if err := fn(&c); err != nil {
+			return err
 		}
 	}
 }

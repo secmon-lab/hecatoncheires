@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +63,63 @@ func (v *FieldValidator) ValidateCaseFieldsAll(fieldValues map[string]FieldValue
 // workspace does not define.
 func (v *FieldValidator) ValidateCaseFieldsPartialStrict(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
 	return v.validateCaseFieldsStrict(fieldValues, false)
+}
+
+// FieldViolation is one field-level violation reported by ValidateStored.
+type FieldViolation struct {
+	FieldID string
+	Err     error
+}
+
+// ValidateStored checks values that are ALREADY persisted against the current
+// schema and returns every violation instead of failing fast. It is the read
+// path used by the `validate --check-db` consistency check, and it differs from
+// the write-path variants in two deliberate ways:
+//
+//   - A field id the schema does not define is SKIPPED, not reported. Removing a
+//     field from the workspace config leaves its stored values orphaned, and the
+//     project accepts that rather than treating it as corruption.
+//   - A schema field marked Required with no stored value is NOT reported.
+//     Required is enforced when writing; adding required=true later would
+//     otherwise flag every pre-existing entity at once.
+//
+// On top of the per-type checks it compares the persisted FieldValue.Type with
+// the schema type (ErrStoredFieldTypeMismatch), which catches a config type
+// change whose stored values happen to still have an acceptable shape. An empty
+// stored Type predates that bookkeeping and is not comparable, so it is skipped.
+//
+// Violations come back ordered by field id so callers get a stable report; a
+// single field can yield more than one violation.
+func (v *FieldValidator) ValidateStored(fieldValues map[string]FieldValue) []FieldViolation {
+	defByID := make(map[string]config.FieldDefinition, len(v.schema.Fields))
+	for _, fd := range v.schema.Fields {
+		defByID[fd.ID] = fd
+	}
+
+	var violations []FieldViolation
+	for _, fieldID := range slices.Sorted(maps.Keys(fieldValues)) {
+		fieldDef, ok := defByID[fieldID]
+		if !ok {
+			continue
+		}
+		fv := fieldValues[fieldID]
+
+		if fv.Type != "" && fv.Type != fieldDef.Type {
+			violations = append(violations, FieldViolation{
+				FieldID: fieldID,
+				Err: goerr.Wrap(ErrStoredFieldTypeMismatch, "stored field type does not match schema type",
+					goerr.V(FieldIDKey, fieldID),
+					goerr.V(ExpectedTypeKey, fieldDef.Type),
+					goerr.V(ActualTypeKey, fv.Type)),
+			})
+		}
+
+		if err := v.validateFieldValue(fieldDef, fv); err != nil {
+			violations = append(violations, FieldViolation{FieldID: fieldID, Err: err})
+		}
+	}
+
+	return violations
 }
 
 // validateCaseFieldsStrict is the shared accumulate-all-violations core behind

@@ -600,3 +600,150 @@ func TestFieldValidator_ValidateCaseFieldsPartialStrict(t *testing.T) {
 		gt.String(t, msg).Contains("ghost")
 	})
 }
+
+func buildStoredValidatorSchema() *config.FieldSchema {
+	return &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{ID: "note", Name: "Note", Type: types.FieldTypeText},
+			{ID: "body", Name: "Body", Type: types.FieldTypeMarkdown},
+			{ID: "score", Name: "Score", Type: types.FieldTypeNumber},
+			{
+				ID: "severity", Name: "Severity", Type: types.FieldTypeSelect,
+				Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}},
+			},
+			{
+				ID: "tags", Name: "Tags", Type: types.FieldTypeMultiSelect,
+				Options: []config.FieldOption{{ID: "net", Name: "Net"}},
+			},
+			{ID: "owner", Name: "Owner", Type: types.FieldTypeUser},
+			{ID: "watchers", Name: "Watchers", Type: types.FieldTypeMultiUser},
+			{ID: "due", Name: "Due", Type: types.FieldTypeDate},
+			{ID: "link", Name: "Link", Type: types.FieldTypeURL},
+			{ID: "parent", Name: "Parent", Type: types.FieldTypeCaseRef, ReferenceWorkspace: "ws-other"},
+			{ID: "related", Name: "Related", Type: types.FieldTypeMultiCaseRef, ReferenceWorkspace: "ws-other"},
+			{ID: "mandatory", Name: "Mandatory", Type: types.FieldTypeText, Required: true},
+		},
+		Labels: config.EntityLabels{Case: "Case"},
+	}
+}
+
+func TestFieldValidator_ValidateStored(t *testing.T) {
+	v := model.NewFieldValidator(buildStoredValidatorSchema())
+
+	t.Run("every field type accepts a well-formed stored value", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"note":      {FieldID: "note", Type: types.FieldTypeText, Value: "text"},
+			"body":      {FieldID: "body", Type: types.FieldTypeMarkdown, Value: "# heading"},
+			"score":     {FieldID: "score", Type: types.FieldTypeNumber, Value: float64(3)},
+			"severity":  {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			"tags":      {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"net"}},
+			"owner":     {FieldID: "owner", Type: types.FieldTypeUser, Value: "U1"},
+			"watchers":  {FieldID: "watchers", Type: types.FieldTypeMultiUser, Value: []string{"U1", "U2"}},
+			"due":       {FieldID: "due", Type: types.FieldTypeDate, Value: "2026-08-07T00:00:00Z"},
+			"link":      {FieldID: "link", Type: types.FieldTypeURL, Value: "https://example.com"},
+			"parent":    {FieldID: "parent", Type: types.FieldTypeCaseRef, Value: "12"},
+			"related":   {FieldID: "related", Type: types.FieldTypeMultiCaseRef, Value: []string{"12", "13"}},
+			"mandatory": {FieldID: "mandatory", Type: types.FieldTypeText, Value: "set"},
+		})
+		gt.Array(t, violations).Length(0)
+	})
+
+	t.Run("a field id the schema no longer defines is skipped", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"removed-field": {FieldID: "removed-field", Type: types.FieldTypeSelect, Value: "anything"},
+		})
+		gt.Array(t, violations).Length(0)
+	})
+
+	t.Run("a required field with no stored value is not reported", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"note": {FieldID: "note", Type: types.FieldTypeText, Value: "text"},
+		})
+		gt.Array(t, violations).Length(0)
+	})
+
+	t.Run("number holding a string is an invalid field type", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"score": {FieldID: "score", Type: types.FieldTypeNumber, Value: "three"},
+		})
+		gt.Array(t, violations).Length(1).Required()
+		gt.Value(t, violations[0].FieldID).Equal("score")
+		gt.Error(t, violations[0].Err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("date outside RFC3339 is an invalid field type", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"due": {FieldID: "due", Type: types.FieldTypeDate, Value: "2026/08/07"},
+		})
+		gt.Array(t, violations).Length(1).Required()
+		gt.Value(t, violations[0].FieldID).Equal("due")
+		gt.Error(t, violations[0].Err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("select value outside the option list is an invalid option id", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "medium"},
+		})
+		gt.Array(t, violations).Length(1).Required()
+		gt.Value(t, violations[0].FieldID).Equal("severity")
+		gt.Error(t, violations[0].Err).Is(model.ErrInvalidOptionID)
+	})
+
+	t.Run("multi_case_ref holding a non-numeric id is an invalid field type", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"related": {FieldID: "related", Type: types.FieldTypeMultiCaseRef, Value: []string{"12", "not-a-number"}},
+		})
+		gt.Array(t, violations).Length(1).Required()
+		gt.Value(t, violations[0].FieldID).Equal("related")
+		gt.Error(t, violations[0].Err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("stored type that drifted from the schema is reported even when the shape fits", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"body": {FieldID: "body", Type: types.FieldTypeText, Value: "still a string"},
+		})
+		gt.Array(t, violations).Length(1).Required()
+		gt.Value(t, violations[0].FieldID).Equal("body")
+		gt.Error(t, violations[0].Err).Is(model.ErrStoredFieldTypeMismatch)
+	})
+
+	t.Run("an empty stored type is not treated as drift", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"body": {FieldID: "body", Value: "still a string"},
+		})
+		gt.Array(t, violations).Length(0)
+	})
+
+	t.Run("drift and a bad value on one field yield two violations", func(t *testing.T) {
+		violations := v.ValidateStored(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "medium"},
+		})
+		gt.Array(t, violations).Length(2).Required()
+		gt.Value(t, violations[0].FieldID).Equal("severity")
+		gt.Value(t, violations[1].FieldID).Equal("severity")
+		gt.Error(t, violations[0].Err).Is(model.ErrStoredFieldTypeMismatch)
+		gt.Error(t, violations[1].Err).Is(model.ErrInvalidOptionID)
+	})
+
+	t.Run("violations are ordered by field id", func(t *testing.T) {
+		values := map[string]model.FieldValue{
+			"score":    {FieldID: "score", Type: types.FieldTypeNumber, Value: "three"},
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "medium"},
+			"due":      {FieldID: "due", Type: types.FieldTypeDate, Value: "2026/08/07"},
+		}
+		violations := v.ValidateStored(values)
+		gt.Array(t, violations).Length(3).Required()
+		gt.Value(t, violations[0].FieldID).Equal("due")
+		gt.Value(t, violations[1].FieldID).Equal("score")
+		gt.Value(t, violations[2].FieldID).Equal("severity")
+
+		// Same input, same order: the report must not depend on map iteration.
+		// Compare the field ids rather than the violations themselves — each
+		// goerr value carries its own stack trace and never compares equal.
+		second := v.ValidateStored(values)
+		gt.Array(t, second).Length(len(violations)).Required()
+		for i := range violations {
+			gt.Value(t, second[i].FieldID).Equal(violations[i].FieldID)
+		}
+	})
+}
