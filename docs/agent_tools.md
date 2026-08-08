@@ -127,7 +127,7 @@ at least one memo field.
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
-| `memo__list_memos` | R | List the case's memos (optional archive scope, default ACTIVE; optional creation-time window `created_after` / `created_before`, RFC3339). |
+| `memo__list_memos` | R | List one page of the case's memos, newest first. Archived memos are never returned. `limit` (default 10, max 50) and `offset` (default 0) page the result; the response carries `offset`, `total_count`, `returned_count`, `has_more`. Optional creation-time window `created_after` / `created_before` (RFC3339). |
 | `memo__get_memo` | R | Fetch a memo by id. |
 | `memo__create_memo` | W | Create a memo (title + field values). |
 | `memo__update_memo` | W | Update a memo's title / fields (omit to preserve). |
