@@ -8,6 +8,7 @@ package memo
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -78,6 +79,17 @@ func memoToMap(m *model.Memo) map[string]any {
 	return out
 }
 
+// listMemosDefaultLimit is how many memos memo__list_memos returns when the
+// caller does not ask for a specific limit. A tool response stays in the message
+// history for the rest of the run and is re-sent on every later model call, so
+// the default is deliberately small; an agent that needs more asks for the next
+// page.
+const listMemosDefaultLimit = 10
+
+// listMemosMaxLimit is the largest page a caller may ask for. A larger request
+// is capped rather than rejected so an over-eager model still gets a result.
+const listMemosMaxLimit = 50
+
 type listMemosTool struct {
 	deps Deps
 }
@@ -85,15 +97,17 @@ type listMemosTool struct {
 func (t *listMemosTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name: "memo__list_memos",
-		Description: "List the memos of the current case. By default archived memos are " +
-			"excluded (an archived memo is a soft-deleted memory). Pass include_archived=true " +
-			"to include them. Narrow the result to a creation-time window with created_after / " +
-			"created_before. Returns id, title and field values for each memo.",
+		Description: "List the memos of the current case, newest first. Archived memos are " +
+			"never returned: archiving is how a memory is deliberately dropped, so an archived " +
+			"memo stays out of scope even when you are looking for earlier context. Narrow the " +
+			"result to a creation-time window with created_after / created_before. One page of " +
+			"at most `limit` memos is returned (default 10); total_count reports how many " +
+			"matched and has_more says whether older ones were left out, which you can fetch by " +
+			"advancing offset. Returns id, title and field values for each memo. This response " +
+			"stays in the conversation and is re-sent on every later model call, so ask for the " +
+			"narrowest window and limit that answers your question instead of paging through " +
+			"everything.",
 		Parameters: map[string]*gollem.Parameter{
-			"include_archived": {
-				Type:        gollem.TypeBoolean,
-				Description: "When true, include archived memos. Default false.",
-			},
 			"created_after": {
 				Type: gollem.TypeString,
 				Description: "RFC3339 lower bound (inclusive) on the memo creation time. Subtract " +
@@ -105,18 +119,25 @@ func (t *listMemosTool) Spec() gollem.ToolSpec {
 				Description: "RFC3339 upper bound (exclusive) on the memo creation time. Omit for " +
 					"no upper bound.",
 			},
+			"limit": {
+				Type: gollem.TypeInteger,
+				Description: "Maximum number of memos to return in one page, newest first. " +
+					"Defaults to 10; a value above 50 is capped at 50 and a value below 1 " +
+					"falls back to the default.",
+			},
+			"offset": {
+				Type: gollem.TypeInteger,
+				Description: "How many of the newest matching memos to skip before the page " +
+					"starts. Defaults to 0. Pass offset + returned_count of the previous " +
+					"response to read the next page. Memos created between two calls shift the " +
+					"list, so a memo can repeat across pages.",
+			},
 		},
 	}
 }
 
 func (t *listMemosTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	tool.Update(ctx, "Listing memos...")
-	scope := interfaces.MemoArchiveScopeActiveOnly
-	if v, ok := args["include_archived"]; ok {
-		if b, ok := v.(bool); ok && b {
-			scope = interfaces.MemoArchiveScopeAll
-		}
-	}
 	createdAfter, err := optionalTime(args, "created_after")
 	if err != nil {
 		return nil, err
@@ -125,11 +146,37 @@ func (t *listMemosTool) Run(ctx context.Context, args map[string]any) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	// The page-size policy lives here at the caller rather than inside the
+	// argument helper: a value below one means "unset", and an over-large one is
+	// capped instead of rejected so an over-eager model still gets a page.
+	limitArg, limitSet, err := optionalCount(args, "limit")
+	if err != nil {
+		return nil, err
+	}
+	limit := listMemosDefaultLimit
+	if limitSet && limitArg >= 1 {
+		limit = int(min(limitArg, int64(listMemosMaxLimit)))
+	}
+	// offset stays an int64 here and is narrowed below, only once it is known to
+	// be under the match count, so a value past the end cannot overflow int.
+	offsetArg, offsetSet, err := optionalCount(args, "offset")
+	if err != nil {
+		return nil, err
+	}
+	var offset int64
+	if offsetSet && offsetArg > 0 {
+		offset = offsetArg
+	}
+	// Archived memos are never listed. Archiving is how an agent drops a memory,
+	// so reading it back through the same tool would leave archiving without any
+	// effect on what the next run sees. memo__get_memo still resolves an archived
+	// memo for a caller that already holds its id.
+	//
 	// The window's own consistency (after < before) is checked by the
 	// repository's List, so a contradictory window surfaces as
 	// interfaces.ErrMemoListOptions through the wrap below.
 	opts := interfaces.MemoListOptions{
-		ArchiveScope:  scope,
+		ArchiveScope:  interfaces.MemoArchiveScopeActiveOnly,
 		CreatedAfter:  createdAfter,
 		CreatedBefore: createdBefore,
 	}
@@ -138,11 +185,67 @@ func (t *listMemosTool) Run(ctx context.Context, args map[string]any) (map[strin
 		return nil, goerr.Wrap(err, "failed to list memos",
 			goerr.V("workspace_id", t.deps.WorkspaceID), goerr.V("case_id", t.deps.CaseID))
 	}
-	items := make([]map[string]any, len(memos))
-	for i, m := range memos {
-		items[i] = memoToMap(m)
+
+	total := len(memos)
+	// Narrow the offset only once it is known to be below the match count, so a
+	// caller-supplied value near math.MaxInt64 cannot overflow int and produce a
+	// negative start index.
+	start := total
+	if offset < int64(total) {
+		start = int(offset)
 	}
-	return map[string]any{"memos": items}, nil
+	end := min(start+limit, total)
+	// List returns CreatedAt ascending; walk it backwards so index 0 of the page
+	// is the newest memo and a truncated page drops the oldest.
+	items := make([]map[string]any, 0, end-start)
+	for i := start; i < end; i++ {
+		items = append(items, memoToMap(memos[total-1-i]))
+	}
+	return map[string]any{
+		"memos":          items,
+		"offset":         start,
+		"total_count":    total,
+		"returned_count": len(items),
+		"has_more":       start+len(items) < total,
+	}, nil
+}
+
+// optionalCount parses an optional integer argument. The second result reports
+// whether the caller supplied a usable value; an absent key, a nil value, and an
+// empty string all mean "unset" — models routinely pass "" instead of omitting a
+// parameter, the same tolerance optionalTime already applies. Deciding what an
+// unset or out-of-range count means is the caller's job, not this helper's.
+//
+// An out-of-range float64 is saturated here instead of being handed to
+// tool.ExtractInt64. gollem decodes JSON numbers as float64, and converting an
+// out-of-range float64 to int64 is implementation-defined: on amd64 a huge
+// positive value lands on a negative int64, which would turn a far-past-the-end
+// offset back into the first page and an enormous limit back into the default.
+// Saturating preserves the sign, so an out-of-range request keeps meaning "past
+// the end" / "more than the maximum" on every target.
+func optionalCount(args map[string]any, key string) (int64, bool, error) {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return 0, false, nil
+	}
+	if s, isString := v.(string); isString && s == "" {
+		return 0, false, nil
+	}
+	if f, isFloat := v.(float64); isFloat {
+		switch {
+		case math.IsNaN(f):
+			return 0, false, goerr.New(key+" must be an integer", goerr.V(key, f))
+		case f >= math.MaxInt64:
+			return math.MaxInt64, true, nil
+		case f < math.MinInt64:
+			return math.MinInt64, true, nil
+		}
+	}
+	n, err := tool.ExtractInt64(args, key)
+	if err != nil {
+		return 0, false, goerr.Wrap(err, "invalid "+key)
+	}
+	return n, true, nil
 }
 
 type getMemoTool struct {

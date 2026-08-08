@@ -452,13 +452,31 @@ description = "Link to the primary source (log, dashboard, PR)."
   (`memo__list_memos`, `memo__get_memo`, `memo__create_memo`,
   `memo__update_memo`, `memo__archive_memo`), scoped to that Case. Create and
   update are validated against the memo field schema exactly like the WebUI
-  path (required fields enforced, unknown field ids rejected). `memo__list_memos`
-  excludes archived memos by default, and accepts an optional creation-time
-  window: `created_after` (RFC3339, inclusive) and `created_before` (RFC3339,
-  exclusive). Omitting a bound — or passing an empty string, which agents do in
-  place of omitting it — leaves that side unbounded; any other value that is not
-  RFC3339 is rejected. The agent combines the bounds with the current time given
-  in its system prompt to ask for e.g. the memos of the last 7 days.
+  path (required fields enforced, unknown field ids rejected).
+- **`memo__list_memos`**: returns one page of the Case's memos, newest first.
+  - **Archived memos are never returned.** Archiving is how an agent drops a
+    memory, so the list tool cannot read it back; `memo__get_memo` still
+    resolves an archived memo for a caller that already holds its id, and the
+    WebUI can restore it.
+  - **Paging**: `limit` defaults to 10 and is capped at 50 (a larger value is
+    capped, not rejected; a value below 1 falls back to the default). `offset`
+    defaults to 0 and skips that many of the newest matching memos. The response
+    carries `offset` (the value actually applied), `total_count` (matches before
+    `limit`/`offset`), `returned_count`, and `has_more` — pass
+    `offset + returned_count` back as the next `offset` to read the next page.
+    An `offset` at or beyond `total_count` yields an empty page rather than an
+    error. Because paging is offset-based, memos created between two calls shift
+    the list and a memo can repeat across pages.
+  - **Creation-time window**: `created_after` (RFC3339, inclusive) and
+    `created_before` (RFC3339, exclusive). Omitting a bound — or passing an empty
+    string, which agents do in place of omitting it — leaves that side unbounded;
+    any other value that is not RFC3339 is rejected. The same empty-string
+    tolerance applies to `limit` and `offset`. The agent combines the bounds with
+    the current time given in its system prompt to ask for e.g. the memos of the
+    last 7 days.
+  - The page size is deliberately small: a tool response stays in the agent's
+    message history for the rest of the run and is re-sent on every later model
+    call, so a full dump is paid for repeatedly.
 - **System prompt**: the `description` and the memo field schema are injected
   into the agent's system prompt, along with the id + title of up to 20 of the
   Case's active memos (and the total count when there are more). Full content is
