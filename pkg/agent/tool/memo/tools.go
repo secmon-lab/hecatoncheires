@@ -17,6 +17,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // MemoMutator is the narrow surface of MemoUseCase the memo tools depend on.
@@ -40,14 +41,17 @@ type Deps struct {
 	Schema *config.FieldSchema
 }
 
-// New builds the full memo tool set (read + create/update/archive).
+// New builds the full memo tool set: the two read tools plus the single batch
+// write tool. There is deliberately no per-memo create / update / archive tool
+// — writing one memo per call cost one LLM round trip each, and each round trip
+// re-sends the whole message history, so bookkeeping cost scaled with
+// (number of mutations x context size). Offering both shapes would leave that
+// path open, so the batch tool is the only way to write.
 func New(deps Deps) []gollem.Tool {
 	return []gollem.Tool{
 		&listMemosTool{deps: deps},
 		&getMemoTool{deps: deps},
-		&createMemoTool{deps: deps},
-		&updateMemoTool{deps: deps},
-		&archiveMemoTool{deps: deps},
+		&applyMemoChangesTool{deps: deps},
 	}
 }
 
@@ -177,148 +181,320 @@ func (t *getMemoTool) Run(ctx context.Context, args map[string]any) (map[string]
 	return memoToMap(m), nil
 }
 
-type createMemoTool struct {
+// memoOpKind discriminates the three operations memo__apply_memo_changes can
+// carry in one call.
+type memoOpKind string
+
+const (
+	memoOpCreate  memoOpKind = "create"
+	memoOpUpdate  memoOpKind = "update"
+	memoOpArchive memoOpKind = "archive"
+)
+
+// applyMemoChangesMaxOps bounds the total number of operations one
+// memo__apply_memo_changes call may carry. It is not advertised through
+// gollem.Parameter.MaxItems on purpose: gollem rejects the whole call on a
+// MaxItems violation, which would make an over-long batch behave differently
+// from every other input problem this tool reports.
+const applyMemoChangesMaxOps = 50
+
+// memoOp is one parsed entry of a memo__apply_memo_changes call. A non-nil
+// ParseErr means the entry never reaches MemoUC and is reported as a failed
+// item instead of aborting the whole batch.
+type memoOp struct {
+	// Kind selects which MemoMutator method applies this entry.
+	Kind memoOpKind
+	// Index is the 0-based position within its own input array, so the model
+	// can map a failure back onto the arguments it sent.
+	Index int
+	// MemoID is set for update / archive; empty for create.
+	MemoID model.MemoID
+	// Title is always non-nil for create. For update, nil means "preserve".
+	Title *string
+	// Fields nil means "no field change".
+	Fields   map[string]model.FieldValue
+	ParseErr error
+}
+
+type applyMemoChangesTool struct {
 	deps Deps
 }
 
-func (t *createMemoTool) Spec() gollem.ToolSpec {
+func (t *applyMemoChangesTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
-		Name: "memo__create_memo",
-		Description: "Create a new memo in the current case. A memo records a unit of memory " +
-			"(fact / observation / hypothesis / decision) about the case. Provide a concise title " +
-			"and the custom field values defined by the workspace memo schema (see the system prompt " +
-			"for the memo definition, field ids, types, and option ids). All required fields must be set.",
+		Name: "memo__apply_memo_changes",
+		Description: "Apply every memo change in ONE call: create new memos, update existing ones, " +
+			"and archive superseded ones together. This is the only way to write memos — settle on the " +
+			"full set of changes first, then submit them here in a single call instead of one call per " +
+			"memo. A memo records a unit of memory (fact / observation / hypothesis / decision) about " +
+			"the case; see the system prompt for the memo definition, field ids, types, and option ids. " +
+			"Entries are applied in order (every create, then every update, then every archive) and " +
+			"independently: the response reports each entry's outcome, so one bad entry does not " +
+			"discard the rest. Give every argument the type declared below, though — a mistyped " +
+			"value is rejected before any entry is applied. At most 50 entries per call.",
 		Parameters: map[string]*gollem.Parameter{
-			"title": {
-				Type:        gollem.TypeString,
-				Description: "A concise one-line title for the memo.",
-				Required:    true,
+			"creates": {
+				Type: gollem.TypeArray,
+				Description: "Memos to create. Each entry needs a title plus the custom field values " +
+					"defined by the workspace memo schema. All required fields must be set.",
+				Items: &gollem.Parameter{
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"title": {
+							Type:        gollem.TypeString,
+							Description: "Required. A concise one-line title for the new memo.",
+						},
+						"fields": fieldsParameter(),
+					},
+				},
 			},
-			"fields": fieldsParameter(),
+			"updates": {
+				Type: gollem.TypeArray,
+				Description: "Memos to update. Submit only what you intend to change; omitted custom " +
+					"fields are preserved and the merged result is fully validated, so required fields " +
+					"must remain satisfied. Each entry needs at least one of title / fields.",
+				Items: &gollem.Parameter{
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"memo_id": {
+							Type:        gollem.TypeString,
+							Description: "Required. The id (UUID) of the memo to update.",
+						},
+						"title": {
+							Type:        gollem.TypeString,
+							Description: "New title (full replacement). Omit to preserve the existing title.",
+						},
+						"fields": fieldsParameter(),
+					},
+				},
+			},
+			"archives": {
+				Type: gollem.TypeArray,
+				Description: "Ids (UUIDs) of memos to archive (soft-delete). An archived memo is not " +
+					"destroyed and can be restored from the WebUI; it no longer appears in the default " +
+					"memo list.",
+				Items: &gollem.Parameter{Type: gollem.TypeString},
+			},
 		},
 	}
 }
 
-func (t *createMemoTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	tool.Update(ctx, "Creating memo...")
+func (t *applyMemoChangesTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	if t.deps.MemoUC == nil {
 		return nil, goerr.New("memo: MemoUC is not configured")
 	}
-	title, err := requireString(args, "title")
-	if err != nil {
-		return nil, err
-	}
-	fields, err := t.coerceFields(args)
-	if err != nil {
-		return nil, err
-	}
-	created, err := t.deps.MemoUC.CreateMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, title, fields)
-	if err != nil {
-		return nil, goerr.Wrap(err, "create memo",
-			goerr.V("workspace_id", t.deps.WorkspaceID), goerr.V("case_id", t.deps.CaseID))
-	}
-	return memoToMap(created), nil
-}
 
-func (t *createMemoTool) coerceFields(args map[string]any) (map[string]model.FieldValue, error) {
-	return coerceFieldsArg(args, t.deps.Schema)
-}
-
-type updateMemoTool struct {
-	deps Deps
-}
-
-func (t *updateMemoTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name: "memo__update_memo",
-		Description: "Update a memo in the current case. Submit only the fields you intend to " +
-			"change; omitted custom fields are preserved. Title is a full replacement when provided. " +
-			"The merged result is fully validated, so required fields must remain satisfied.",
-		Parameters: map[string]*gollem.Parameter{
-			"memo_id": {
-				Type:        gollem.TypeString,
-				Description: "The id (UUID) of the memo to update.",
-				Required:    true,
-			},
-			"title": {
-				Type:        gollem.TypeString,
-				Description: "New title (full replacement). Omit to preserve the existing title.",
-			},
-			"fields": fieldsParameter(),
-		},
-	}
-}
-
-func (t *updateMemoTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	tool.Update(ctx, "Updating memo...")
-	if t.deps.MemoUC == nil {
-		return nil, goerr.New("memo: MemoUC is not configured")
-	}
-	id, err := extractMemoID(args)
+	ops, err := parseApplyMemoChanges(args, t.deps.Schema)
 	if err != nil {
 		return nil, err
 	}
 
-	var titlePtr *string
-	if v, ok := args["title"]; ok && v != nil {
+	tool.Update(ctx, fmt.Sprintf("Applying %d memo change(s)...", len(ops)))
+
+	results := make([]map[string]any, 0, len(ops))
+	applied, failed := 0, 0
+	for _, op := range ops {
+		item := map[string]any{"op": string(op.Kind), "index": op.Index}
+
+		if op.ParseErr != nil {
+			// A malformed entry is the model's own mistake and it can repair it
+			// by re-emitting the call, so it is reported back to the model but
+			// deliberately NOT escalated through errutil — that path reaches the
+			// operator's Sentry, where an argument typo is pure noise.
+			item["ok"] = false
+			item["error"] = op.ParseErr.Error()
+			results = append(results, item)
+			failed++
+			continue
+		}
+
+		m, err := t.applyOne(ctx, op)
+		if err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "apply memo change",
+				goerr.V("workspace_id", t.deps.WorkspaceID),
+				goerr.V("case_id", t.deps.CaseID),
+				goerr.V("op", string(op.Kind)),
+				goerr.V("index", op.Index),
+				goerr.V("memo_id", op.MemoID)), "memo apply item failed")
+			item["ok"] = false
+			item["error"] = err.Error()
+			results = append(results, item)
+			failed++
+			continue
+		}
+
+		item["ok"] = true
+		item["memo"] = memoToMap(m)
+		results = append(results, item)
+		applied++
+	}
+
+	// Returned with a nil error even when every entry failed. The per-entry
+	// reasons are what let the model repair its input, and collapsing them into
+	// a single tool error would also throw away the successes of a partial
+	// batch. No error is swallowed: each one is reported here and, when it came
+	// from a write, also sent through errutil above.
+	return map[string]any{
+		"results": results,
+		"applied": applied,
+		"failed":  failed,
+	}, nil
+}
+
+func (t *applyMemoChangesTool) applyOne(ctx context.Context, op memoOp) (*model.Memo, error) {
+	switch op.Kind {
+	case memoOpCreate:
+		return t.deps.MemoUC.CreateMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, *op.Title, op.Fields)
+	case memoOpUpdate:
+		return t.deps.MemoUC.UpdateMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, op.MemoID, op.Title, op.Fields)
+	case memoOpArchive:
+		return t.deps.MemoUC.ArchiveMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, op.MemoID)
+	default:
+		return nil, goerr.New("unknown memo operation", goerr.V("op", string(op.Kind)))
+	}
+}
+
+// parseApplyMemoChanges turns the tool arguments into the ordered operation
+// list. Problems with an individual entry are recorded on that entry's
+// ParseErr rather than returned, so one bad entry cannot discard the rest;
+// only problems that make the batch as a whole unreadable are returned.
+//
+// The applied order is every create, then every update, then every archive.
+// A memo created in this call cannot be referenced by the same call (its id is
+// only known from the response), so grouping never breaks a dependency, and
+// putting archives last makes "revise, then retire the same memo" work.
+func parseApplyMemoChanges(args map[string]any, schema *config.FieldSchema) ([]memoOp, error) {
+	creates, err := optionalArray(args, "creates")
+	if err != nil {
+		return nil, err
+	}
+	updates, err := optionalArray(args, "updates")
+	if err != nil {
+		return nil, err
+	}
+	archives, err := optionalArray(args, "archives")
+	if err != nil {
+		return nil, err
+	}
+
+	total := len(creates) + len(updates) + len(archives)
+	if total == 0 {
+		return nil, goerr.New("at least one of creates / updates / archives must be non-empty")
+	}
+	if total > applyMemoChangesMaxOps {
+		return nil, goerr.New("too many memo changes in one call",
+			goerr.V("count", total), goerr.V("max", applyMemoChangesMaxOps))
+	}
+
+	ops := make([]memoOp, 0, total)
+	for i, entry := range creates {
+		ops = append(ops, parseCreateOp(i, entry, schema))
+	}
+	for i, entry := range updates {
+		ops = append(ops, parseUpdateOp(i, entry, schema))
+	}
+	for i, entry := range archives {
+		ops = append(ops, parseArchiveOp(i, entry))
+	}
+	return ops, nil
+}
+
+// optionalArray reads an optional array argument. An absent key and a nil value
+// both mean "no entries"; any other non-array value is a whole-call error,
+// because entries that cannot be enumerated cannot be reported per entry.
+func optionalArray(args map[string]any, key string) ([]any, error) {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, goerr.New(key+" must be an array", goerr.V("type", typeOf(v)))
+	}
+	return arr, nil
+}
+
+func parseCreateOp(index int, entry any, schema *config.FieldSchema) memoOp {
+	op := memoOp{Kind: memoOpCreate, Index: index}
+	m, ok := entry.(map[string]any)
+	if !ok {
+		op.ParseErr = goerr.New("each create entry must be an object", goerr.V("type", typeOf(entry)))
+		return op
+	}
+	title, err := requireString(m, "title")
+	if err != nil {
+		op.ParseErr = err
+		return op
+	}
+	fields, err := coerceFieldsArg(m, schema)
+	if err != nil {
+		op.ParseErr = err
+		return op
+	}
+	op.Title = &title
+	op.Fields = fields
+	return op
+}
+
+func parseUpdateOp(index int, entry any, schema *config.FieldSchema) memoOp {
+	op := memoOp{Kind: memoOpUpdate, Index: index}
+	m, ok := entry.(map[string]any)
+	if !ok {
+		op.ParseErr = goerr.New("each update entry must be an object", goerr.V("type", typeOf(entry)))
+		return op
+	}
+	id, err := extractMemoID(m)
+	if err != nil {
+		op.ParseErr = err
+		return op
+	}
+	op.MemoID = id
+
+	if v, ok := m["title"]; ok && v != nil {
 		s, ok := v.(string)
 		if !ok {
-			return nil, goerr.New("title must be a string", goerr.V("type", typeOf(v)))
+			op.ParseErr = goerr.New("title must be a string",
+				goerr.V("memo_id", id), goerr.V("type", typeOf(v)))
+			return op
 		}
-		titlePtr = &s
+		op.Title = &s
 	}
 
-	fields, err := coerceFieldsArg(args, t.deps.Schema)
+	fields, err := coerceFieldsArg(m, schema)
 	if err != nil {
-		return nil, err
+		op.ParseErr = err
+		return op
 	}
+	op.Fields = fields
 
-	updated, err := t.deps.MemoUC.UpdateMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, id, titlePtr, fields)
-	if err != nil {
-		return nil, goerr.Wrap(err, "update memo",
-			goerr.V("workspace_id", t.deps.WorkspaceID), goerr.V("case_id", t.deps.CaseID), goerr.V("memo_id", id))
+	// An update carrying neither is a write that only moves UpdatedAt, so it is
+	// rejected rather than spent.
+	if op.Title == nil && len(op.Fields) == 0 {
+		op.ParseErr = goerr.New("update requires at least one of title, fields", goerr.V("memo_id", id))
 	}
-	return memoToMap(updated), nil
+	return op
 }
 
-type archiveMemoTool struct {
-	deps Deps
-}
-
-func (t *archiveMemoTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name: "memo__archive_memo",
-		Description: "Archive (soft-delete) a memo in the current case. The memo is not destroyed " +
-			"and can be restored from the WebUI; archived memos no longer appear in the default memo list.",
-		Parameters: map[string]*gollem.Parameter{
-			"memo_id": {
-				Type:        gollem.TypeString,
-				Description: "The id (UUID) of the memo to archive.",
-				Required:    true,
-			},
-		},
+func parseArchiveOp(index int, entry any) memoOp {
+	op := memoOp{Kind: memoOpArchive, Index: index}
+	s, ok := entry.(string)
+	if !ok || s == "" {
+		op.ParseErr = goerr.New("each archive entry must be a non-empty memo id",
+			goerr.V("type", typeOf(entry)))
+		return op
 	}
-}
-
-func (t *archiveMemoTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	tool.Update(ctx, "Archiving memo...")
-	if t.deps.MemoUC == nil {
-		return nil, goerr.New("memo: MemoUC is not configured")
-	}
-	id, err := extractMemoID(args)
-	if err != nil {
-		return nil, err
-	}
-	archived, err := t.deps.MemoUC.ArchiveMemo(ctx, t.deps.WorkspaceID, t.deps.CaseID, id)
-	if err != nil {
-		return nil, goerr.Wrap(err, "archive memo",
-			goerr.V("workspace_id", t.deps.WorkspaceID), goerr.V("case_id", t.deps.CaseID), goerr.V("memo_id", id))
-	}
-	return memoToMap(archived), nil
+	op.MemoID = model.MemoID(s)
+	return op
 }
 
 // fieldsParameter returns the shared `fields` parameter spec used by the
-// create / update tools.
+// create / update entries of memo__apply_memo_changes.
+//
+// field_id deliberately does NOT set Required. gollem runs ToolSpec.ValidateArgs
+// before Run and rejects the WHOLE call on the first nested Required violation,
+// which would discard every other entry in the batch. Requiredness is enforced
+// per entry in parseFieldInputs instead, so a single malformed field entry costs
+// only its own entry.
 func fieldsParameter() *gollem.Parameter {
 	return &gollem.Parameter{
 		Type: gollem.TypeArray,
@@ -328,7 +504,7 @@ func fieldsParameter() *gollem.Parameter {
 		Items: &gollem.Parameter{
 			Type: gollem.TypeObject,
 			Properties: map[string]*gollem.Parameter{
-				"field_id": {Type: gollem.TypeString, Description: "The field id from the workspace memo schema.", Required: true},
+				"field_id": {Type: gollem.TypeString, Description: "Required. The field id from the workspace memo schema."},
 				"value":    {Type: gollem.TypeString, Description: "Scalar value (text / number / url / date / single select option id / single user id)."},
 				"values":   {Type: gollem.TypeArray, Description: "Multi value (multi-select option ids / multi-user ids).", Items: &gollem.Parameter{Type: gollem.TypeString}},
 			},

@@ -133,6 +133,11 @@ Memos are this case's persistent memory, shared by humans and agents. Record
 facts / observations / hypotheses / decisions with the `memo__*` tools, and
 consult existing memos before acting. Each memo has a title and the custom
 fields below.
+
+Every memo write goes through `memo__apply_memo_changes`, which takes new
+memos, edits and archives together. Settle on the full set of memo changes
+first and submit them in a single call: a separate call per memo costs one
+round trip each, and every round trip re-sends this whole conversation.
 {{- if .Memo.Fields }}
 
 - memo fields:
