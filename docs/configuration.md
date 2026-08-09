@@ -450,20 +450,47 @@ description = "Link to the primary source (log, dashboard, PR)."
   restorable.
 - **Agents**: every agent running in a Case context is given memo tools
   (`memo__list_memos`, `memo__get_memo`, `memo__apply_memo_changes`), scoped to
-  that Case. Writes all go through `memo__apply_memo_changes`, which takes
-  `creates`, `updates` and `archives` together (up to 50 entries) so an agent
-  commits its whole set of memo changes in one call instead of one call per
-  memo. Entries are applied in order — creates, then updates, then archives —
-  and independently: the response reports each entry's outcome, so one bad
-  entry does not discard the rest. Create and update are validated against the
-  memo field schema exactly like the WebUI path (required fields enforced,
-  unknown field ids rejected). `memo__list_memos`
-  excludes archived memos by default, and accepts an optional creation-time
-  window: `created_after` (RFC3339, inclusive) and `created_before` (RFC3339,
-  exclusive). Omitting a bound — or passing an empty string, which agents do in
-  place of omitting it — leaves that side unbounded; any other value that is not
-  RFC3339 is rejected. The agent combines the bounds with the current time given
-  in its system prompt to ask for e.g. the memos of the last 7 days.
+  that Case. Create and update are validated against the memo field schema
+  exactly like the WebUI path (required fields enforced, unknown field ids
+  rejected).
+- **`memo__apply_memo_changes`**: the one and only write tool. It takes
+  `creates`, `updates` and `archives` together (up to 50 entries in total), so
+  an agent commits its whole set of memo changes in a single call instead of one
+  call per memo — every call is an LLM round trip that re-sends the whole
+  message history, so per-memo writes cost (number of mutations × context size).
+  - Entries are applied in order — every create, then every update, then every
+    archive — and independently: the response carries each entry's outcome in
+    `results[]` plus `applied` / `failed` counts, so one bad entry does not
+    discard the rest.
+  - The exception is a value whose **type** does not match the tool schema
+    (`creates` not an array, a numeric `title`): that is rejected before any
+    entry is applied and the whole call fails. See
+    [agent_tools.md](agent_tools.md) for the full per-entry vs whole-call split.
+  - An update entry must carry at least one of `title` / `fields`.
+- **`memo__list_memos`**: returns one page of the Case's memos, newest first.
+  - **Archived memos are never returned.** Archiving is how an agent drops a
+    memory, so the list tool cannot read it back; `memo__get_memo` still
+    resolves an archived memo for a caller that already holds its id, and the
+    WebUI can restore it.
+  - **Paging**: `limit` defaults to 10 and is capped at 50 (a larger value is
+    capped, not rejected; a value below 1 falls back to the default). `offset`
+    defaults to 0 and skips that many of the newest matching memos. The response
+    carries `offset` (the value actually applied), `total_count` (matches before
+    `limit`/`offset`), `returned_count`, and `has_more` — pass
+    `offset + returned_count` back as the next `offset` to read the next page.
+    An `offset` at or beyond `total_count` yields an empty page rather than an
+    error. Because paging is offset-based, memos created between two calls shift
+    the list and a memo can repeat across pages.
+  - **Creation-time window**: `created_after` (RFC3339, inclusive) and
+    `created_before` (RFC3339, exclusive). Omitting a bound — or passing an empty
+    string, which agents do in place of omitting it — leaves that side unbounded;
+    any other value that is not RFC3339 is rejected. The same empty-string
+    tolerance applies to `limit` and `offset`. The agent combines the bounds with
+    the current time given in its system prompt to ask for e.g. the memos of the
+    last 7 days.
+  - The page size is deliberately small: a tool response stays in the agent's
+    message history for the rest of the run and is re-sent on every later model
+    call, so a full dump is paid for repeatedly.
 - **System prompt**: the `description` and the memo field schema are injected
   into the agent's system prompt, along with the id + title of up to 20 of the
   Case's active memos (and the total count when there are more). Full content is

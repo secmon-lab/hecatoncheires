@@ -673,7 +673,7 @@ events.case = { on = ["created"] }
 	})
 
 	t.Run("broken prompt_file template surfaces through LoadWorkspaceConfigs", func(t *testing.T) {
-		// The full validate path (LoadWorkspaceConfigs → loadSingleWorkspaceConfig
+		// The full validate path (LoadWorkspaceConfigs → parseWorkspaceConfig
 		// → resolveJobs(configDir)) reads prompt_file with a real baseDir, so a
 		// broken template in the referenced markdown must fail validation just
 		// like an inline one — not slip through to the first Job run.

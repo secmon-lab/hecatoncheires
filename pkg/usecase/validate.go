@@ -200,18 +200,32 @@ func compareIssues(a, b ValidationIssue) int {
 	return strings.Compare(a.FieldID, b.FieldID)
 }
 
-// ValidateDB checks the persisted Cases, Actions and Memos of every registered
-// workspace against that workspace's configuration and reports the mismatches.
-// It reads only; nothing is repaired or rewritten.
+// ValidateDB checks the persisted Cases, Actions and Memos of every workspace
+// registered with this process against that workspace's configuration and
+// reports the mismatches. It reads only; nothing is repaired or rewritten.
 //
 // What it deliberately does NOT report: a field id stored under a definition the
 // config no longer has, and a required field with no stored value. Both are
 // consequences of editing the configuration that the project accepts. See
 // CLAUDE.md § "DB consistency checks".
 func (uc *UseCases) ValidateDB(ctx context.Context) (*ValidationResult, error) {
+	return uc.ValidateDBWithConfig(ctx, uc.workspaceRegistry)
+}
+
+// ValidateDBWithConfig runs the checks ValidateDB describes against a
+// caller-supplied configuration instead of the one this process was started
+// with. It exists for the HTTP check endpoint, where an operator submits
+// candidate workspace configuration and asks whether the persisted data would
+// still be consistent with it — the answer must not depend on what the running
+// process happens to have loaded.
+func (uc *UseCases) ValidateDBWithConfig(ctx context.Context, registry *model.WorkspaceRegistry) (*ValidationResult, error) {
+	if registry == nil {
+		return nil, goerr.New("workspace registry is required for the consistency check")
+	}
+
 	result := &ValidationResult{}
 
-	for _, entry := range uc.workspaceRegistry.List() {
+	for _, entry := range registry.List() {
 		issues, err := uc.validateWorkspaceData(ctx, entry)
 		if err != nil {
 			return nil, err

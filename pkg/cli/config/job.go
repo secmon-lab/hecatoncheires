@@ -136,7 +136,7 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 	// the model invariant's prompt-non-empty arm would wrongly fail. Identity,
 	// strategy, and events are already validated above; the complete
 	// model.Job.Validate (including the prompt) runs once the file is read in
-	// loadSingleWorkspaceConfig.
+	// parseWorkspaceConfig.
 	if deferred {
 		return job, nil
 	}
@@ -165,7 +165,8 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 // no position to read files. There a prompt_file reference is accepted
 // without touching the filesystem and deferred is returned true, signalling
 // that the prompt content is intentionally unresolved. The real read happens
-// later in loadSingleWorkspaceConfig where the config path is known.
+// later in parseWorkspaceConfig, and only for a source that carries a BaseDir —
+// a configuration document submitted over HTTP deliberately has none.
 func (s *JobSection) resolvePrompt(baseDir string) (prompt string, deferred bool, err error) {
 	hasInline := s.Prompt != ""
 	hasFile := s.PromptFile != ""
