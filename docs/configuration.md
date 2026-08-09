@@ -449,10 +449,24 @@ description = "Link to the primary source (log, dashboard, PR)."
   create, edit, and archive memos. Deletion is a soft delete (archive) and is
   restorable.
 - **Agents**: every agent running in a Case context is given memo tools
-  (`memo__list_memos`, `memo__get_memo`, `memo__create_memo`,
-  `memo__update_memo`, `memo__archive_memo`), scoped to that Case. Create and
-  update are validated against the memo field schema exactly like the WebUI
-  path (required fields enforced, unknown field ids rejected).
+  (`memo__list_memos`, `memo__get_memo`, `memo__apply_memo_changes`), scoped to
+  that Case. Create and update are validated against the memo field schema
+  exactly like the WebUI path (required fields enforced, unknown field ids
+  rejected).
+- **`memo__apply_memo_changes`**: the one and only write tool. It takes
+  `creates`, `updates` and `archives` together (up to 50 entries in total), so
+  an agent commits its whole set of memo changes in a single call instead of one
+  call per memo — every call is an LLM round trip that re-sends the whole
+  message history, so per-memo writes cost (number of mutations × context size).
+  - Entries are applied in order — every create, then every update, then every
+    archive — and independently: the response carries each entry's outcome in
+    `results[]` plus `applied` / `failed` counts, so one bad entry does not
+    discard the rest.
+  - The exception is a value whose **type** does not match the tool schema
+    (`creates` not an array, a numeric `title`): that is rejected before any
+    entry is applied and the whole call fails. See
+    [agent_tools.md](agent_tools.md) for the full per-entry vs whole-call split.
+  - An update entry must carry at least one of `title` / `fields`.
 - **`memo__list_memos`**: returns one page of the Case's memos, newest first.
   - **Archived memos are never returned.** Archiving is how an agent drops a
     memory, so the list tool cannot read it back; `memo__get_memo` still

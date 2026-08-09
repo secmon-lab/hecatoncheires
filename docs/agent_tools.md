@@ -129,9 +129,33 @@ at least one memo field.
 |------|-----|---------|
 | `memo__list_memos` | R | List one page of the case's memos, newest first. Archived memos are never returned. `limit` (default 10, max 50) and `offset` (default 0) page the result; the response carries `offset`, `total_count`, `returned_count`, `has_more`. Optional creation-time window `created_after` / `created_before` (RFC3339). |
 | `memo__get_memo` | R | Fetch a memo by id. |
-| `memo__create_memo` | W | Create a memo (title + field values). |
-| `memo__update_memo` | W | Update a memo's title / fields (omit to preserve). |
-| `memo__archive_memo` | W | Archive a memo (soft-delete, recoverable). |
+| `memo__apply_memo_changes` | W | Apply every memo change in one call: `creates` (title + field values), `updates` (title / fields, omit to preserve; at least one required), and `archives` (ids to soft-delete, recoverable). Up to 50 entries per call. |
+
+There is deliberately no per-memo write tool. Each tool call is one LLM round
+trip and every round trip re-sends the whole message history, so writing memos
+one at a time cost (number of mutations × context size). Batching them removes
+that multiplier.
+
+Entries are applied in order — every create, then every update, then every
+archive — and independently: the response carries a per-entry outcome
+(`results[]` with `op` / `index` / `ok` and either `memo` or `error`, plus
+`applied` / `failed` counts). A failed write is additionally reported through
+`errutil.Handle`; a malformed argument is not, since the model can repair it by
+re-sending the call.
+
+Whether a bad entry costs only itself depends on where it is caught. gollem
+validates the arguments against the tool schema *before* the tool runs, and
+rejects the whole call on the first violation it finds:
+
+| Failure | Effect |
+|---------|--------|
+| Missing `title` / `memo_id` / `field_id`, an empty archive id, an update with neither `title` nor `fields`, an unknown field id or option value, a missing memo, an inaccessible case, a failed write | Only that entry fails; every other entry is still applied |
+| A value whose **type** does not match the schema (`creates` not an array, a numeric `title`, a non-string archive id) | The whole call fails as a tool error and the model has to re-send it |
+| Every array absent or empty, or more than 50 entries in total | The whole call fails as a tool error |
+
+Requiredness is enforced while parsing each entry rather than through the
+schema's `Required` flag, which is what keeps the first row per-entry: a nested
+`Required` violation would make gollem reject the batch as a whole.
 
 ### Notion tools (`notion`)
 

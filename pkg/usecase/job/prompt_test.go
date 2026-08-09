@@ -921,6 +921,10 @@ func TestBuildSystemPrompt_MemoSection(t *testing.T) {
 		mustContain(t, got, "Current memos (2 total)")
 		mustContain(t, got, "`m-1` first memory")
 		mustContain(t, got, "`m-2` second memory")
+		// The batching instruction must ship with the batch tool: without it
+		// the model falls back to one write call per memo.
+		mustContain(t, got, "memo__apply_memo_changes")
+		mustContain(t, got, "submit them in a single call")
 	})
 
 	t.Run("caps preview at 20 and reports overflow", func(t *testing.T) {
