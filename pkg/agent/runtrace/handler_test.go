@@ -526,6 +526,47 @@ func TestHandler_NSerialToolExecs_MonotonicSeq(t *testing.T) {
 	gt.Number(t, events[4].ParentSequence).Equal(2)
 }
 
+// TestHandler_ToolCallLinksToAParentFromAnEarlierHandler pins the recovery a
+// durable run needs: the LLM call and the tool calls it asked for are separate
+// checkpointed transitions, so a claim can begin between them with a fresh
+// Handler that never saw the response. Without the lookup the tool event would
+// carry ParentSequence 0, which JobRunEvent.Validate rejects — the row would be
+// dropped from the timeline rather than merely unlinked.
+func TestHandler_ToolCallLinksToAParentFromAnEarlierHandler(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	routing := runtrace.Routing{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+		RunID: "run-split", TraceID: "trace-split",
+	}
+	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A"}
+
+	// First claim: the LLM asks for a tool.
+	first := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+	first.EndLLMCall(first.StartLLMCall(ctx), llmCallOfferingTools(10, 5, "probe__ping"), nil)
+
+	events, err := repo.JobRunEvent().List(ctx, key, "run-split")
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	responseSeq := events[1].Sequence
+
+	// Second claim, a fresh Handler: the tool runs here.
+	second := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+	second.EndToolExec(second.StartToolExec(ctx, "probe__ping", map[string]any{}),
+		map[string]any{"ok": true}, nil)
+
+	events, err = repo.JobRunEvent().List(ctx, key, "run-split")
+	gt.NoError(t, err).Required()
+	// The tool call was recorded, not dropped.
+	gt.Array(t, events).Length(3).Required()
+	toolEv := events[2]
+	gt.Value(t, toolEv.Kind).Equal(model.JobRunEventKindToolCall)
+	// And it points at the response from the earlier claim.
+	gt.Value(t, toolEv.ParentSequence).Equal(responseSeq)
+	gt.Bool(t, toolEv.ParentSequence < toolEv.Sequence).True()
+}
+
 // TestHandler_EmitRunError_OrdersAfterTheCallsItFollows pins that the owner's
 // RUN_ERROR lands after the per-call events it followed. The two appenders no
 // longer share a counter — the repository allocates — so this is what stands in

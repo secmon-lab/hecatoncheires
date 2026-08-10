@@ -515,6 +515,10 @@ func (failingJobRunEventRepository) Append(context.Context, *model.JobRunEvent) 
 
 func (failingJobRunEventRepository) AppendNext(context.Context, *model.JobRunEvent) error { return nil }
 
+func (failingJobRunEventRepository) LatestLLMResponseSequence(context.Context, model.JobRunKey, string) (int64, error) {
+	return 0, nil
+}
+
 func (failingJobRunEventRepository) List(context.Context, model.JobRunKey, string) ([]*model.JobRunEvent, error) {
 	return nil, errors.New("injected job run event read failure")
 }

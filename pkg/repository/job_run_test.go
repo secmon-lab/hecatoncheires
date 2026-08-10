@@ -654,6 +654,58 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.String(t, got[2].EventID).Equal("ev-alloc-2")
 	})
 
+	// A run whose events predate the allocator must not have its numbers reissued.
+	// This is the case a suspended run hits when it resumes across the deploy that
+	// introduced the counter: its events exist, its counter does not. Restarting at
+	// 1 would write a second event with a number the run already used, and because
+	// each event has its own id nothing would reject it — List would simply have no
+	// defined order between the two.
+	t.Run("AppendNext continues past sequences that were assigned directly", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		runID := fmt.Sprintf("run-migrated-%d", time.Now().UnixNano())
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		// Two events written the pre-allocator way, with the caller choosing the
+		// number and no counter being created.
+		for i, seq := range []int64{1, 2} {
+			gt.NoError(t, repo.JobRunEvent().Append(ctx, &model.JobRunEvent{
+				WorkspaceID: key.WorkspaceID,
+				CaseID:      key.CaseID,
+				JobID:       key.JobID,
+				RunID:       runID,
+				TraceID:     "trace-migrated",
+				EventID:     fmt.Sprintf("ev-old-%d", i),
+				Sequence:    seq,
+				OccurredAt:  now,
+				Kind:        model.JobRunEventKindLLMResponse,
+				Phase:       "execute",
+				LLMResponse: &model.LLMResponsePayload{Model: "claude-opus-4-7"},
+			})).Required()
+		}
+
+		ev := &model.JobRunEvent{
+			WorkspaceID: key.WorkspaceID,
+			CaseID:      key.CaseID,
+			JobID:       key.JobID,
+			RunID:       runID,
+			TraceID:     "trace-migrated",
+			EventID:     "ev-resumed",
+			OccurredAt:  now.Add(time.Millisecond),
+			Kind:        model.JobRunEventKindLLMResponse,
+			Phase:       "execute",
+			LLMResponse: &model.LLMResponsePayload{Model: "claude-opus-4-7"},
+		}
+		gt.NoError(t, repo.JobRunEvent().AppendNext(ctx, ev)).Required()
+		gt.Value(t, ev.Sequence).Equal(int64(3))
+
+		got, err := repo.JobRunEvent().List(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(3).Required()
+		gt.Value(t, got[2].Sequence).Equal(int64(3))
+		gt.String(t, got[2].EventID).Equal("ev-resumed")
+	})
+
 	// Each run has its own counter. Sharing one across runs would interleave two
 	// timelines and make List's ordering meaningless for both.
 	t.Run("AppendNext counts each run separately", func(t *testing.T) {

@@ -327,7 +327,7 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 
 	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
 	h.mu.Lock()
-	ev.ParentSequence = h.lastLLMResponseSeq
+	ev.ParentSequence = h.parentSequenceLocked(ctx)
 	// Counted here rather than at Start so a tool that never returned (the
 	// process died mid-execution) is not billed as a completed step.
 	h.totals.ToolCalls++
@@ -337,6 +337,41 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 
 	ev.ToolCall = h.truncator.ToolCallFromTrace(toolName, args, result, err, startedAt, endedAt)
 	h.append(ctx, ev)
+}
+
+// parentSequenceLocked returns the Sequence of the LLM_RESPONSE this tool call
+// carries out. The caller MUST hold h.mu.
+//
+// A durable run's LLM call and the tool calls it asked for are separate
+// checkpointed transitions, so a claim can start between them — and this Handler,
+// built for that claim, never saw the response. Reading it back from the run is
+// what keeps the parent link intact across that boundary; without it the event
+// would carry ParentSequence 0, which JobRunEvent.Validate rejects, and the tool
+// call would be dropped from the timeline instead of merely being unlinked.
+//
+// The lookup happens at most once per claim, because the answer is then cached in
+// lastLLMResponseSeq and every later response overwrites it locally.
+func (h *Handler) parentSequenceLocked(ctx context.Context) int64 {
+	if h.lastLLMResponseSeq != 0 {
+		return h.lastLLMResponseSeq
+	}
+	seq, err := h.eventRepo.LatestLLMResponseSequence(ctx,
+		model.JobRunKey{
+			WorkspaceID: h.routing.WorkspaceID,
+			CaseID:      h.routing.CaseID,
+			JobID:       h.routing.JobID,
+		}, h.routing.RunID)
+	if err != nil {
+		// Non-fatal, like every other trace failure: report it and leave the
+		// parent unset. The append that follows will be rejected and reported in
+		// turn, which is the honest outcome — a tool call whose parent cannot be
+		// established is not something to invent a link for.
+		errutil.Handle(ctx, goerr.Wrap(err, "look up the parent llm response",
+			goerr.V("run_id", h.routing.RunID)), "runtrace: resolve tool call parent")
+		return 0
+	}
+	h.lastLLMResponseSeq = seq
+	return seq
 }
 
 // addToolStatsLocked folds one execution into the per-tool tally. The caller

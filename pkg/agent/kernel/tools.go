@@ -229,11 +229,17 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 		}
 	}
 
-	// Actions exist only in channel-mode cases. A thread-mode case tracks its
-	// progress through the board status instead, and the usecase boundary
+	// Actions exist only in channel-mode WORKSPACES. A thread-mode workspace
+	// tracks progress through the board status instead, and the usecase boundary
 	// rejects action writes there, so the whole core toolset is withheld rather
 	// than offered as tools that can only fail.
-	if target != nil && target.IsThreadBound() {
+	//
+	// The workspace's mode decides it, not the case's SlackThreadTS. The two are
+	// not equivalent: a thread-mode workspace can hold a case whose thread is not
+	// set yet, and keying on the case would hand that case action tools its
+	// workspace does not support. The pre-agentkit hosts keyed on the workspace
+	// for the same reason.
+	if entry != nil && entry.IsThreadMode() {
 		deps.OmitCore = true
 	}
 

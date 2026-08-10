@@ -117,6 +117,35 @@ func TestScopeValidate(t *testing.T) {
 		"job run with job": {
 			mutate: func(s kernel.Scope) kernel.Scope { s.JobID = "job-1"; s.JobRunID = "run-1"; return s },
 		},
+		// A gated run whose identifiers are incomplete would be refused capacity on
+		// every claim without ever spending its retry budget — it would wait for
+		// ever. Catching it at Spawn makes that a readable error instead.
+		"slot gated without a job": {
+			mutate:  func(s kernel.Scope) kernel.Scope { s.SlotGated = true; return s },
+			wantErr: true,
+		},
+		"slot gated without a case": {
+			mutate: func(s kernel.Scope) kernel.Scope {
+				s.SlotGated = true
+				s.JobID = "job-1"
+				s.CaseID = 0
+				return s
+			},
+			wantErr: true,
+		},
+		"slot gated without a workspace": {
+			mutate: func(s kernel.Scope) kernel.Scope {
+				s.SlotGated = true
+				s.JobID = "job-1"
+				s.WorkspaceID = ""
+				s.CaseID = 0
+				return s
+			},
+			wantErr: true,
+		},
+		"slot gated fully identified": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.SlotGated = true; s.JobID = "job-1"; return s },
+		},
 	}
 
 	for name, tc := range testCases {

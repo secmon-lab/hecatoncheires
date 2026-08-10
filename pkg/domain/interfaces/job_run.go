@@ -170,6 +170,19 @@ type JobRunEventRepository interface {
 	// Ordering is the contract; density is not.
 	AppendNext(ctx context.Context, ev *model.JobRunEvent) error
 
+	// LatestLLMResponseSequence returns the Sequence of the run's most
+	// recent LLM_RESPONSE event, or 0 when it has none.
+	//
+	// A TOOL_CALL event must point at the LLM_RESPONSE whose tool_use it
+	// carries out (JobRunEvent.ParentSequence). A durable run's LLM call
+	// and the tool calls it asked for are separate checkpointed
+	// transitions, so they may be driven by different claims — and a
+	// claim that starts mid-sequence has no in-memory record of the
+	// response that preceded it. This is how it recovers the link.
+	//
+	// It is ordered on Sequence alone, so it needs no composite index.
+	LatestLLMResponseSequence(ctx context.Context, key model.JobRunKey, runID string) (int64, error)
+
 	// List returns events for (key, runID) in ascending Sequence order
 	// (not doc-ID order — doc IDs are UUIDv7 and may diverge under
 	// clock skew).

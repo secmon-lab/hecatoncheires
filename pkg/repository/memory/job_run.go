@@ -416,6 +416,14 @@ func (r *jobRunEventRepository) Append(ctx context.Context, ev *model.JobRunEven
 			goerr.V("event_id", ev.EventID))
 	}
 	r.events[key] = copyJobRunEvent(ev)
+	// A caller-assigned Sequence still moves the allocator's high-water mark, so a
+	// later AppendNext on the same run cannot re-issue a number already used. The
+	// Firestore backend gets the same property by seeding its counter from the
+	// highest stored Sequence.
+	seqKey := jobRunSeqKey{K: key.K, RunID: ev.RunID}
+	if ev.Sequence > r.eventSeq[seqKey] {
+		r.eventSeq[seqKey] = ev.Sequence
+	}
 	return nil
 }
 
@@ -448,6 +456,29 @@ func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRun
 	r.events[key] = copyJobRunEvent(ev)
 	r.eventSeq[seqKey] = next
 	return nil
+}
+
+// LatestLLMResponseSequence returns the highest Sequence among the run's
+// LLM_RESPONSE events, or 0 when it has none.
+func (r *jobRunEventRepository) LatestLLMResponseSequence(_ context.Context, key model.JobRunKey, runID string) (int64, error) {
+	if err := key.Validate(); err != nil {
+		return 0, goerr.Wrap(err, "invalid job run key")
+	}
+	if runID == "" {
+		return 0, goerr.New("run id is empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest int64
+	for k, v := range r.events {
+		if k.K != key || k.RunID != runID {
+			continue
+		}
+		if v.Kind == model.JobRunEventKindLLMResponse && v.Sequence > latest {
+			latest = v.Sequence
+		}
+	}
+	return latest, nil
 }
 
 func (r *jobRunEventRepository) List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error) {

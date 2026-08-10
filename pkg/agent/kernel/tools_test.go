@@ -35,6 +35,15 @@ func channelWorkspace() *model.WorkspaceEntry {
 	return &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1", Name: "Workspace One"}}
 }
 
+// threadWorkspace is the same workspace configured thread-per-case, which is what
+// withholds the Action toolset.
+func threadWorkspace() *model.WorkspaceEntry {
+	return &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-1", Name: "Workspace One"},
+		CaseMode:  model.CaseModeThread,
+	}
+}
+
 func toolNames(tools []gollem.Tool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tl := range tools {
@@ -254,20 +263,23 @@ func TestToolFactoryHonoursAnExplicitSubset(t *testing.T) {
 	gt.Array(t, toolNames(tools)).Equal([]string{"core__get_action", "core__list_actions"})
 }
 
-// TestToolFactoryWithdrawsActionToolsForAThreadBoundCase pins the rule that a
-// thread-mode case has no Actions: offering the tools would hand the agent
-// something that can only return an error.
-func TestToolFactoryWithdrawsActionToolsForAThreadBoundCase(t *testing.T) {
+// TestToolFactoryWithdrawsActionToolsInAThreadModeWorkspace pins the rule that a
+// thread-mode workspace manages no Actions: offering the tools would hand the
+// agent something that can only return an error.
+//
+// The WORKSPACE decides it, not the case's SlackThreadTS. Keying on the case
+// would give action tools to a thread-mode case whose thread is not set yet —
+// which the pre-agentkit hosts never did, because they read the workspace mode.
+func TestToolFactoryWithdrawsActionToolsInAThreadModeWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
-	ctx = seedCase(t, ctx, repo, &model.Case{
-		Title:         "thread bound",
-		SlackThreadTS: "1700000000.000100",
-	})
+	// Deliberately WITHOUT SlackThreadTS: the workspace's mode is what must
+	// withhold the tools.
+	ctx = seedCase(t, ctx, repo, &model.Case{Title: "thread mode, no thread yet"})
 
 	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
 		Repo:     repo,
-		Registry: testRegistry(channelWorkspace()),
+		Registry: testRegistry(threadWorkspace()),
 	})
 	gt.NoError(t, err).Required()
 

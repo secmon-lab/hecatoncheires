@@ -114,6 +114,17 @@ func (s Scope) Validate() error {
 		return goerr.New("job id is required when a job run id is set",
 			goerr.V("job_run_id", s.JobRunID))
 	}
+	// A gated run must be fully identified, because the gate records WHICH run
+	// holds a slot. Without that the gate rejects the acquisition, the claim is
+	// refused, and — since a refusal deliberately does not spend the retry budget
+	// — the Process waits forever for capacity it can never be granted. Catching
+	// it at Spawn turns a run that never starts into an error someone can read.
+	if s.SlotGated && (s.WorkspaceID == "" || s.CaseID == 0 || s.JobID == "") {
+		return goerr.New("a slot-gated run must name its workspace, case and job",
+			goerr.V("workspace_id", s.WorkspaceID),
+			goerr.V("case_id", s.CaseID),
+			goerr.V("job_id", s.JobID))
+	}
 	return nil
 }
 

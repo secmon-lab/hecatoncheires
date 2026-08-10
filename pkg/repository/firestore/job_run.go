@@ -499,6 +499,45 @@ func (r *jobRunEventRepository) eventSeqDoc(key model.JobRunKey, runID string) *
 		Collection(jobRunCountersCollection).Doc(jobRunEventCounterDoc)
 }
 
+// eventsQuery is the run's event collection, which both List and the
+// highest-Sequence lookup read.
+func (r *jobRunEventRepository) eventsQuery(key model.JobRunKey, runID string) firestore.Query {
+	return r.client.
+		Collection("workspaces").Doc(key.WorkspaceID).
+		Collection("cases").Doc(fmt.Sprintf("%d", key.CaseID)).
+		Collection(jobRunsCollection).Doc(key.JobID).
+		Collection(jobRunLogsCollection).Doc(runID).
+		Collection(jobRunEventsCollection).
+		Query
+}
+
+// highestSequenceInTx returns the largest Sequence already stored for the run, or
+// 0 when it has no events.
+//
+// Ordering on Sequence alone uses the automatic single-field index, so this adds
+// no composite index (which the project's Firestore policy prohibits).
+func (r *jobRunEventRepository) highestSequenceInTx(
+	tx *firestore.Transaction, key model.JobRunKey, runID string,
+) (int64, error) {
+	iter := tx.Documents(r.eventsQuery(key, runID).OrderBy("Sequence", firestore.Desc).Limit(1))
+	defer iter.Stop()
+
+	snap, err := iter.Next()
+	if err == iterator.Done {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, goerr.Wrap(err, "read the highest job run event sequence",
+			goerr.V("run_id", runID))
+	}
+	var ev model.JobRunEvent
+	if derr := snap.DataTo(&ev); derr != nil {
+		return 0, goerr.Wrap(derr, "decode the highest job run event",
+			goerr.V("run_id", runID))
+	}
+	return ev.Sequence, nil
+}
+
 // AppendNext allocates the Sequence and writes the event in one transaction, so
 // two instances appending to the same run cannot receive the same number.
 //
@@ -518,7 +557,7 @@ func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRun
 
 	counterRef := r.eventSeqDoc(key, ev.RunID)
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		var next int64 = 1
+		var next int64
 		snap, err := tx.Get(counterRef)
 		switch {
 		case err == nil:
@@ -528,7 +567,20 @@ func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRun
 			}
 			next = c.Next + 1
 		case status.Code(err) == codes.NotFound:
-			// First event of this run.
+			// No counter yet. That is either a run's first event, or a run whose
+			// events were written before the counter existed — a suspended run
+			// resuming across the deploy that introduced it. Starting at 1 in the
+			// second case would re-issue numbers the run already used, and since
+			// each event has its own id the duplicate would be written without
+			// complaint, leaving List with no defined order between them.
+			//
+			// Seeding from the highest Sequence already stored is what the removed
+			// high-water scan used to do for the same data.
+			highest, herr := r.highestSequenceInTx(tx, key, ev.RunID)
+			if herr != nil {
+				return herr
+			}
+			next = highest + 1
 		default:
 			return goerr.Wrap(err, "load the job run event counter")
 		}
@@ -558,6 +610,43 @@ func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRun
 			goerr.V("event_id", ev.EventID))
 	}
 	return nil
+}
+
+// LatestLLMResponseSequence walks the run's events newest-first and returns the
+// first LLM_RESPONSE it finds.
+//
+// It scans rather than filtering on Kind because a Kind + Sequence query needs a
+// composite index, which this project does not add. The scan is short in practice:
+// an LLM_RESPONSE is followed only by the tool calls it asked for, so the newest
+// one is a few documents from the top, and the iterator reads lazily.
+func (r *jobRunEventRepository) LatestLLMResponseSequence(ctx context.Context, key model.JobRunKey, runID string) (int64, error) {
+	if err := key.Validate(); err != nil {
+		return 0, goerr.Wrap(err, "invalid job run key")
+	}
+	if runID == "" {
+		return 0, goerr.New("run id is empty")
+	}
+
+	iter := r.eventsQuery(key, runID).OrderBy("Sequence", firestore.Desc).Documents(ctx)
+	defer iter.Stop()
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, goerr.Wrap(err, "scan for the latest llm response",
+				goerr.V("run_id", runID))
+		}
+		var ev model.JobRunEvent
+		if derr := snap.DataTo(&ev); derr != nil {
+			return 0, goerr.Wrap(derr, "decode a job run event",
+				goerr.V("run_id", runID))
+		}
+		if ev.Kind == model.JobRunEventKindLLMResponse {
+			return ev.Sequence, nil
+		}
+	}
 }
 
 func (r *jobRunEventRepository) List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error) {

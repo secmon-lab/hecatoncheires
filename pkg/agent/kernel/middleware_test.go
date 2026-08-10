@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
@@ -263,6 +266,121 @@ func TestTokensAreMeteredOntoTheProcess(t *testing.T) {
 	gt.Value(t, proc.Metrics.OutputTokens).Equal(int64(7))
 	gt.Value(t, proc.Metrics.LLMCalls).Equal(int64(1))
 	gt.Value(t, proc.Metrics.ToolCalls).Equal(int64(1))
+}
+
+// TestRunTimelineLinksAToolCallAcrossAClaimBoundary drives a real ReAct run with
+// ONE transition per claim, which is the arrangement the timeline has to survive:
+// the LLM call and the tool call it asked for land in different claims, each with
+// its own Handler. A Handler that only remembered the response in memory would
+// emit ParentSequence 0 here, and JobRunEvent.Validate would drop the tool row
+// from the timeline altogether.
+func TestRunTimelineLinksAToolCallAcrossAClaimBoundary(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	seedCase(t, ctx, repo, &model.Case{Title: "timeline target"})
+
+	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	reg := agentkit.NewRegistry()
+	handle, err := react.Register(reg, kernel.AgentCaseChannel, 1, cfg.Limiter(),
+		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
+	gt.NoError(t, err).Required()
+
+	// One tool call, then an answer.
+	var calls atomic.Int32
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					if calls.Add(1) == 1 {
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{
+								{ID: "c1", Name: "probe__ping", Arguments: map[string]any{}},
+							},
+							InputToken: 10, OutputToken: 5,
+						}, nil
+					}
+					return &gollem.Response{Texts: []string{"done"}, InputToken: 3, OutputToken: 2}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+
+	k, err := kernel.Build(kernel.Deps{
+		Repo:    agentprocmemory.New(),
+		History: agentarchive.NewMemoryHistoryStore(),
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Agents:  reg,
+		Tools: kernel.ToolDeps{
+			Repo:      repo,
+			Registry:  testRegistry(channelWorkspace()),
+			JiraTools: []gollem.Tool{probeTool{}},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-mention", JobRunID: "run-mention",
+	}
+
+	serveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() {
+		served <- k.Serve(serveCtx,
+			agentkit.WithPollInterval(5*time.Millisecond),
+			// One transition per claim, so every LLM call and every tool call gets
+			// its own claim — and its own Handler.
+			agentkit.WithMaxStepsPerClaim(1),
+		)
+	}()
+
+	pid, err := handle.Spawn(ctx, k, react.Input{SystemPrompt: "be helpful", Prompt: "ping it"},
+		agentkit.WithMetadata(sc.Metadata()))
+	gt.NoError(t, err).Required()
+
+	for {
+		proc, gerr := k.GetProcess(serveCtx, pid)
+		gt.NoError(t, gerr).Required()
+		if proc.Status.Terminal() {
+			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+			break
+		}
+		select {
+		case <-serveCtx.Done():
+			gt.NoError(t, serveCtx.Err()).Required()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-served
+
+	events, err := repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-mention"}, "run-mention")
+	gt.NoError(t, err).Required()
+
+	// Two LLM calls (request + response each) and one tool call.
+	var toolEvents []*model.JobRunEvent
+	responses := map[int64]bool{}
+	for _, ev := range events {
+		switch ev.Kind {
+		case model.JobRunEventKindLLMResponse:
+			responses[ev.Sequence] = true
+		case model.JobRunEventKindToolCall:
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	gt.Array(t, toolEvents).Length(1).Required()
+	gt.String(t, toolEvents[0].ToolCall.ToolName).Equal("probe__ping")
+	// The link survived the claim boundary and points at a real LLM_RESPONSE.
+	gt.Number(t, toolEvents[0].ParentSequence).GreaterOrEqual(1)
+	gt.Bool(t, responses[toolEvents[0].ParentSequence]).True()
 }
 
 // spanKinds collects the span kinds recorded in a trace, at any depth.

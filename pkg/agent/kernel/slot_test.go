@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,9 @@ import (
 
 // countingGate hands out at most `limit` slots at a time and records what it was
 // asked for, so a test can assert who was gated rather than only how often.
+//
+// Every attempt is also announced on `attempts`, which is how the tests wait for
+// the worker to reach the gate instead of sleeping until it probably has.
 type countingGate struct {
 	limit int
 
@@ -31,21 +35,66 @@ type countingGate struct {
 	refusals int
 	asked    []kernel.SlotRef
 	err      error
+
+	// attempts receives one value per Acquire. Buffered generously and dropped
+	// when full, so the gate never blocks the worker it is measuring.
+	attempts chan struct{}
+}
+
+func newCountingGate(limit int) *countingGate {
+	return &countingGate{limit: limit, attempts: make(chan struct{}, 256)}
 }
 
 func (g *countingGate) Acquire(_ context.Context, ref kernel.SlotRef) (kernel.SlotHold, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	g.asked = append(g.asked, ref)
-	if g.err != nil {
-		return nil, g.err
+	err := g.err
+	full := g.held >= g.limit
+	if err == nil && !full {
+		g.held++
 	}
-	if g.held >= g.limit {
+	if err != nil || full {
 		g.refusals++
+	}
+	g.mu.Unlock()
+
+	select {
+	case g.attempts <- struct{}{}:
+	default:
+	}
+
+	switch {
+	case err != nil:
+		return nil, err
+	case full:
+		// An untyped nil: a typed nil in a non-nil interface would read as
+		// "admitted" to the caller.
 		return nil, nil
 	}
-	g.held++
 	return &countingHold{gate: g}, nil
+}
+
+// waitForAttempts blocks until the gate has been asked n times.
+func (g *countingGate) waitForAttempts(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for range n {
+		select {
+		case <-g.attempts:
+		case <-deadline:
+			asked, _, _ := g.stats()
+			gt.Number(t, len(asked)).GreaterOrEqual(n).Required()
+			return
+		}
+	}
+}
+
+// setLimit changes the capacity mid-test, so a delayed run can be observed
+// completing once room appears.
+func (g *countingGate) setLimit(n int) {
+	g.mu.Lock()
+	g.limit = n
+	g.mu.Unlock()
 }
 
 func (g *countingGate) stats() (asked []kernel.SlotRef, refusals, held int) {
@@ -126,28 +175,59 @@ func (rt *slotRuntime) spawn(t *testing.T, ctx context.Context, sc kernel.Scope)
 	return pid
 }
 
-// runUntilTerminal drives the worker until pid finishes, or fails the test.
-func (rt *slotRuntime) runUntilTerminal(t *testing.T, pid agentkit.ProcessID) *agentkit.Process {
+// serve starts the worker and returns the function that stops it and waits for it
+// to let go. Registered with t.Cleanup as well, so a failing assertion cannot
+// leave the goroutine running into the next test.
+func (rt *slotRuntime) serve(t *testing.T) func() {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- rt.kernel.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			err := <-served
+			// Serve returns the context error it stopped on; anything else is a
+			// worker failure the test should not hide.
+			if err != nil && !errors.Is(err, context.Canceled) {
+				gt.NoError(t, err)
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
+// awaitTerminal waits for pid to reach want.
+func (rt *slotRuntime) awaitTerminal(t *testing.T, pid agentkit.ProcessID, want agentkit.ProcessStatus) *agentkit.Process {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	served := make(chan error, 1)
-	go func() { served <- rt.kernel.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
 	for {
 		proc, err := rt.kernel.GetProcess(ctx, pid)
 		gt.NoError(t, err).Required()
 		if proc.Status.Terminal() {
-			cancel()
-			<-served
+			gt.Value(t, proc.Status).Equal(want)
 			return proc
 		}
 		select {
 		case <-ctx.Done():
 			gt.NoError(t, ctx.Err()).Required()
-		case <-time.After(5 * time.Millisecond):
+			return proc
+		case <-time.After(2 * time.Millisecond):
 		}
 	}
+}
+
+// runUntilTerminal starts the worker, waits for pid to finish, and stops it.
+func (rt *slotRuntime) runUntilTerminal(t *testing.T, pid agentkit.ProcessID) *agentkit.Process {
+	t.Helper()
+	stop := rt.serve(t)
+	proc := rt.awaitTerminal(t, pid, agentkit.ProcessSucceeded)
+	stop()
+	return proc
 }
 
 // slotCaseID is the id the seeded case gets from the per-workspace counter.
@@ -165,7 +245,7 @@ func gatedScope() kernel.Scope {
 // the run, which is what lets an operator see which job holds capacity.
 func TestSlotGateAdmitsAGatedRun(t *testing.T) {
 	ctx := context.Background()
-	gate := &countingGate{limit: 1}
+	gate := newCountingGate(1)
 	rt := newSlotRuntime(t, gate)
 
 	pid := rt.spawn(t, ctx, gatedScope())
@@ -184,7 +264,7 @@ func TestSlotGateAdmitsAGatedRun(t *testing.T) {
 // queue behind a batch would make a person wait for a scheduled job.
 func TestSlotGateIgnoresAnUngatedRun(t *testing.T) {
 	ctx := context.Background()
-	gate := &countingGate{limit: 0} // would refuse everything it was asked about
+	gate := newCountingGate(0) // would refuse everything it was asked about
 	rt := newSlotRuntime(t, gate)
 
 	sc := gatedScope()
@@ -202,50 +282,29 @@ func TestSlotGateIgnoresAnUngatedRun(t *testing.T) {
 // would turn a busy deployment into a stream of failed jobs.
 func TestSlotGateDelaysARunItCannotAdmit(t *testing.T) {
 	ctx := context.Background()
-	gate := &countingGate{limit: 0}
+	gate := newCountingGate(0)
 	rt := newSlotRuntime(t, gate)
 
 	pid := rt.spawn(t, ctx, gatedScope())
+	stop := rt.serve(t)
 
-	serveCtx, cancel := context.WithCancel(ctx)
-	served := make(chan error, 1)
-	go func() { served <- rt.kernel.Serve(serveCtx, agentkit.WithPollInterval(5*time.Millisecond)) }()
-
-	// Wait until the gate has refused at least twice, which shows the run is
-	// being retried rather than dropped.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		_, refusals, _ := gate.stats()
-		if refusals >= 2 {
-			break
-		}
-		gt.Bool(t, time.Now().Before(deadline)).True().Required()
-		time.Sleep(5 * time.Millisecond)
-	}
+	// Two refusals is the evidence the run is being RETRIED rather than dropped.
+	// Waiting on the gate's own signal rather than sleeping keeps the test's
+	// outcome independent of machine load.
+	gate.waitForAttempts(t, 2)
 
 	proc, err := rt.kernel.GetProcess(ctx, pid)
 	gt.NoError(t, err).Required()
 	gt.Bool(t, proc.Status.Terminal()).False()
 	// Refusing must not spend the retry budget — no Step ran.
 	gt.Number(t, proc.StepAttempts).Equal(0)
+	_, refusals, _ := gate.stats()
+	gt.Number(t, refusals).GreaterOrEqual(2)
 
 	// Free capacity; the same run now completes without being re-spawned.
-	gate.mu.Lock()
-	gate.limit = 1
-	gate.mu.Unlock()
-
-	for {
-		proc, err := rt.kernel.GetProcess(ctx, pid)
-		gt.NoError(t, err).Required()
-		if proc.Status.Terminal() {
-			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
-			break
-		}
-		gt.Bool(t, time.Now().Before(deadline)).True().Required()
-		time.Sleep(5 * time.Millisecond)
-	}
-	cancel()
-	<-served
+	gate.setLimit(1)
+	rt.awaitTerminal(t, pid, agentkit.ProcessSucceeded)
+	stop()
 }
 
 // A gate that cannot report its own state must fail CLOSED. Proceeding would
@@ -253,26 +312,14 @@ func TestSlotGateDelaysARunItCannotAdmit(t *testing.T) {
 // prevent — so the run waits instead.
 func TestSlotGateFailsClosedWhenItCannotBeRead(t *testing.T) {
 	ctx := context.Background()
-	gate := &countingGate{limit: 10, err: goerr.New("slot backend unavailable")}
+	gate := newCountingGate(10)
+	gate.err = goerr.New("slot backend unavailable")
 	rt := newSlotRuntime(t, gate)
 
 	pid := rt.spawn(t, ctx, gatedScope())
-
-	serveCtx, cancel := context.WithCancel(ctx)
-	served := make(chan error, 1)
-	go func() { served <- rt.kernel.Serve(serveCtx, agentkit.WithPollInterval(5*time.Millisecond)) }()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		asked, _, _ := gate.stats()
-		if len(asked) >= 2 {
-			break
-		}
-		gt.Bool(t, time.Now().Before(deadline)).True().Required()
-		time.Sleep(5 * time.Millisecond)
-	}
-	cancel()
-	<-served
+	stop := rt.serve(t)
+	gate.waitForAttempts(t, 2)
+	stop()
 
 	proc, err := rt.kernel.GetProcess(ctx, pid)
 	gt.NoError(t, err).Required()
