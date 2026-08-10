@@ -2,397 +2,395 @@ package casebound
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/gollem-dev/gollem"
-	"github.com/gollem-dev/gollem/trace"
+	"github.com/gollem-dev/agentkit"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
-	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
-	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
-	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
-	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
-	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
-// UseCase runs a single case-bound agent turn (a Slack mention in a Case
-// channel). It owns the gollem invocation, system prompt assembly, and
-// session lock lifecycle; the Slack-side host is responsible for fetching
-// the conversation, posting trace updates, and posting the final reply.
+// agentVersion is the strategy state version stamped on every Process this agent
+// creates. Bump it only alongside a DecodeState that still reads the older
+// shape — a running deployment always has in-flight processes on the old one.
+const agentVersion = 1
+
+// UseCase starts and finishes case-channel agent turns.
+//
+// A turn is a durable process: StartTurn builds the prompts and spawns it, then
+// returns. The run is driven by the agent worker one checkpointed transition at a
+// time, and its answer is posted by onFinish.
 type UseCase struct {
-	deps *agent.CommonDeps
+	repo    interfaces.Repository
+	host    Host
+	locator agentkernel.Locator
+
+	// agent and kernel are filled by Register and Bind. They cannot be
+	// constructor arguments: registering the agent needs this UseCase as its
+	// completion handler, and building the Kernel needs the registry that
+	// registration fills, so the three are necessarily wired in that order.
+	agent  agentkit.Agent[react.Input]
+	kernel *agentkit.Kernel
 }
 
-// New builds a casebound UseCase wired against the shared agent deps.
-func New(deps *agent.CommonDeps) (*UseCase, error) {
-	if deps == nil {
-		return nil, goerr.New("CommonDeps is required")
+// New builds a casebound UseCase. locator is used only to describe the run
+// holding a thread when a turn is refused as busy; a nil locator leaves that
+// description empty rather than failing the turn.
+func New(repo interfaces.Repository, host Host, locator agentkernel.Locator) (*UseCase, error) {
+	if repo == nil {
+		return nil, goerr.New("repository is required")
 	}
-	if deps.LLMClient == nil {
-		return nil, goerr.New("LLMClient is required")
+	if host == nil {
+		return nil, goerr.New("host is required")
 	}
-	if deps.HistoryRepo == nil {
-		return nil, goerr.New("HistoryRepo is required")
-	}
-	if deps.TraceRepo == nil {
-		return nil, goerr.New("TraceRepo is required")
-	}
-	return &UseCase{deps: deps}, nil
+	return &UseCase{repo: repo, host: host, locator: locator}, nil
 }
 
-// TurnRequest collects the inputs the host has already resolved before
-// handing control to the casebound runtime. The casebound runtime never
-// touches the Slack service directly; everything Slack-related is either
-// pre-built (system / delta messages) or delegated via Handler.
+// Register registers the case-channel agent and wires this UseCase as its
+// completion handler. Call it before building the Kernel, and Bind after.
+func (uc *UseCase) Register(reg *agentkit.Registry, limiter agentkit.Limiter, store agentkit.HistoryStore) error {
+	if uc == nil {
+		return goerr.New("casebound usecase is nil")
+	}
+	handle, err := react.Register(reg, agentkernel.AgentCaseChannel, agentVersion, limiter,
+		agentkit.WithHistoryStore[react.Output](store),
+		agentkit.WithOnFinish(uc.onFinish),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "register the case-channel agent")
+	}
+	uc.agent = handle
+	return nil
+}
+
+// Bind hands over the Kernel the registered agent runs on.
+func (uc *UseCase) Bind(k *agentkit.Kernel) { uc.kernel = k }
+
+// TurnRequest collects what the host resolved before handing control over. The
+// runtime never touches the Slack service: the conversation is pre-fetched and
+// everything user-facing goes back through Host.
 type TurnRequest struct {
-	// Session is the active turn's Session, with TurnOwnerID etc. already
-	// populated by the upstream lock acquire. The runtime updates
-	// LastMentionTS / LastAction at the end of the turn and persists.
+	// Session is the persisted Session for this thread. It must already exist:
+	// its ID is the turn-lock subject, so the row has to be claimed before a
+	// turn can be spawned.
 	Session *model.Session
 
-	// Mention metadata (channel / thread / user / mention text) that drives
-	// the prompt body and trace metadata.
 	ChannelID   string
 	ThreadTS    string
 	MentionTS   string
 	MentionText string
-	BotUserID   string
+	// MentionUserID is the Slack user who mentioned the bot. It becomes the
+	// access actor for the whole run, so tools see exactly what that person may
+	// see. A turn without it is refused: a run with no actor is read by the
+	// usecase layer as a system context and would bypass private-case access
+	// control entirely.
+	MentionUserID string
+	BotUserID     string
 
-	// Resolved domain state.
 	Workspace     *model.WorkspaceEntry
 	Case          *model.Case
 	Actions       []*model.Action
 	CurrentAction *model.Action
 
-	// Pre-fetched conversation context. SystemMessages is non-empty only
-	// for fresh sessions (Session.LastMentionTS == ""). DeltaMessages is
-	// the unprocessed-since-last-mention slice for continuing sessions.
+	// SystemMessages is the conversation snapshot inlined into the system
+	// prompt; it is non-empty only for a fresh session. DeltaMessages is what
+	// arrived since the previous mention.
 	SystemMessages []ConversationMessage
 	DeltaMessages  []ConversationMessage
 
-	// TriggerTS is the Slack TS used both as the trace ID and as the lock
-	// trigger key (to detect duplicate event delivery).
+	// TriggerTS is the Slack TS of the event that started this turn. It is the
+	// idempotency key, which is what makes a re-delivered Slack event resolve to
+	// the run it already started instead of starting a second one.
 	TriggerTS string
-
-	// Handler receives progressive trace updates while gollem runs.
-	Handler Handler
 }
 
-// Result is the outcome of RunTurn. Status discriminates the three terminal
-// shapes the host needs to act on.
-type Result struct {
-	// Status is one of the constants below.
-	Status Status
-	// FinalText is the agent's final reply (only when Status==StatusCompleted).
-	FinalText string
-	// BusyOwner exposes the live owner's session when Status==StatusBusy.
-	BusyOwner *model.Session
-}
-
-// Status values returned by RunTurn.
+// Status discriminates what StartTurn did.
 type Status int
 
 const (
-	// StatusCompleted indicates the turn ran end-to-end and FinalText is set.
-	StatusCompleted Status = iota
-	// StatusBusy indicates another turn was already running on this session;
-	// the host should post a busy notification and drop the trigger.
+	// StatusStarted means a run was spawned; its answer arrives later.
+	StatusStarted Status = iota
+	// StatusBusy means another turn holds this thread.
 	StatusBusy
-	// StatusIdempotent indicates the trigger duplicates a turn already in
-	// flight; the host should drop silently with no Slack post.
-	StatusIdempotent
+	// StatusDuplicate means this trigger already started a run; drop it
+	// silently, with no Slack post.
+	StatusDuplicate
 )
 
-// RunTurn executes one case-bound mention turn. It acquires the per-thread
-// turn lock (Phase A, §5.3), runs the gollem ReAct loop, persists the
-// updated Session.LastMentionTS, and returns the gollem final text for the
-// host to post to Slack.
-func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error) {
+// Result is the outcome of StartTurn.
+type Result struct {
+	Status Status
+	// ProcessID names the run. Set for StatusStarted, and for StatusDuplicate
+	// where it names the run the earlier delivery started.
+	ProcessID agentkit.ProcessID
+	// Busy describes the run holding the thread, when it could still be read.
+	Busy *agentkernel.BusyTurn
+}
+
+// StartTurn spawns one case-channel turn and returns as soon as the run is
+// recorded. The LLM calls, the tool calls and the reply all happen afterwards on
+// the agent worker.
+func (uc *UseCase) StartTurn(ctx context.Context, req TurnRequest) (*Result, error) {
+	if err := uc.ready(); err != nil {
+		return nil, err
+	}
 	if err := validateRequest(&req); err != nil {
 		return nil, err
 	}
-	if req.Handler == nil {
-		req.Handler = HandlerFunc(func(context.Context, string) {})
-	}
 
-	handle, err := uc.deps.StartTurn(ctx, req.Session, req.TriggerTS)
-	if err != nil {
-		return nil, goerr.Wrap(err, "start casebound turn")
-	}
-	if handle.Idempotent {
-		return &Result{Status: StatusIdempotent}, nil
-	}
-	if !handle.Acquired {
-		return &Result{Status: StatusBusy, BusyOwner: handle.BusyOwner}, nil
-	}
-	defer handle.Release(ctx)
-
-	turnCtx := handle.Ctx
-	req.Session = handle.Session
-
-	// Build trace recorder for the durable trace artifact.
-	actionIDStr := ""
-	if req.Session.ActionID != 0 {
-		actionIDStr = fmt.Sprintf("%d", req.Session.ActionID)
-	}
-	wsID := ""
-	caseID := ""
-	if req.Workspace != nil {
-		wsID = req.Workspace.Workspace.ID
-	}
-	if req.Case != nil {
-		caseID = fmt.Sprintf("%d", req.Case.ID)
-	}
-	recorder := trace.New(
-		trace.WithRepository(uc.deps.TraceRepo),
-		trace.WithTraceID(handle.OwnerID),
-		trace.WithMetadata(trace.TraceMetadata{
-			Labels: map[string]string{
-				labelSessionID:        req.Session.ID,
-				labelWorkspaceID:      wsID,
-				labelCaseID:           caseID,
-				labelThreadTS:         req.Session.ThreadTS,
-				labelActionID:         actionIDStr,
-				labelTriggerMentionTS: req.MentionTS,
-			},
-		}),
-	)
-	defer func() {
-		// Use the parent ctx (not turnCtx) so the final trace flush
-		// still runs even when the turn was cancelled by lock loss /
-		// heartbeat staleness — that's exactly when the trace is most
-		// valuable for debugging.
-		if err := recorder.Finish(ctx); err != nil {
-			errutil.Handle(ctx, err, "casebound: persist agent trace")
-		}
-	}()
-
-	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID, time.Now().UTC(), req.CurrentAction, req.Actions, req.SystemMessages)
+	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID,
+		time.Now().UTC(), req.CurrentAction, req.Actions, req.SystemMessages)
 	userInput := buildUserInput(req.DeltaMessages, req.MentionText, req.MentionTS)
 
-	// Record this mention turn as a JobRunLog + JobRunEvent trail so the case
-	// agent page lists it alongside Job runs. It is a mention-triggered run, not
-	// a configured Job, so it gets its own fresh per-turn JobID and is tagged
-	// EventType=mention (the discriminator the read path keys the display on).
-	// The TraceID is shared with the Cloud Storage recorder above so both trace
-	// sinks correlate. Opening the log is observability, not part of the turn's
-	// success contract: a failure here is non-fatal and the turn still runs
-	// (untraced on the Firestore side).
-	var runErr error
-	rec, recOpenErr := runtrace.Open(turnCtx, runtrace.OpenParams{
-		Repo:         uc.deps.Repo,
-		WorkspaceID:  wsID,
-		CaseID:       req.Case.ID,
-		JobID:        uuid.Must(uuid.NewV7()).String(),
-		RunID:        uuid.Must(uuid.NewV7()).String(),
-		TraceID:      handle.OwnerID,
+	scope := uc.scope(ctx, req)
+	if err := agentkernel.ValidateSpawn(agentkernel.AgentCaseChannel, scope); err != nil {
+		return nil, goerr.Wrap(err, "validate the case-channel turn scope")
+	}
+
+	// The idempotency key is resolved before the subject by agentkit, so a
+	// re-delivered Slack event comes back as the run it already started rather
+	// than as "busy" — the precedence the previous turn lock applied. Asking the
+	// store first is what lets this tell the two apart, because Spawn returns an
+	// existing id without saying that it did.
+	if existing := uc.existingRun(ctx, req); existing != "" {
+		return &Result{Status: StatusDuplicate, ProcessID: existing}, nil
+	}
+
+	// The run record is opened before the spawn so the case agent page lists the
+	// turn while it is still running. It is observability: a failure here leaves
+	// the turn untraced but does not stop it.
+	uc.openRunLog(ctx, scope, systemPrompt)
+
+	pid, err := uc.agent.Spawn(ctx, uc.kernel,
+		react.Input{SystemPrompt: systemPrompt, Prompt: userInput},
+		agentkit.WithSubject(agentkernel.ThreadSubject(req.Session.ID)),
+		agentkit.WithIdempotencyKey(agentkernel.TriggerKey(req.ChannelID, req.ThreadTS, req.TriggerTS)),
+		agentkit.WithMetadata(scope.Metadata()),
+	)
+	switch {
+	case errors.Is(err, agentkit.ErrSubjectBusy):
+		return &Result{Status: StatusBusy, Busy: uc.lookupBusy(ctx, req.Session.ID)}, nil
+	case err != nil:
+		return nil, goerr.Wrap(err, "spawn the case-channel agent",
+			goerr.V("session_id", req.Session.ID))
+	}
+
+	// The mention this turn processes is what the next turn's delta scan starts
+	// after. It is stamped now rather than at the end because a second mention
+	// arriving mid-run must not re-read messages this run already holds.
+	uc.stampMention(ctx, req.Session, req.MentionTS)
+
+	return &Result{Status: StatusStarted, ProcessID: pid}, nil
+}
+
+func (uc *UseCase) ready() error {
+	if uc == nil {
+		return goerr.New("casebound usecase is nil")
+	}
+	if uc.kernel == nil || uc.agent.Name() == "" {
+		return goerr.New("casebound usecase is not bound to an agent runtime")
+	}
+	return nil
+}
+
+// scope describes the run to the runtime: what it acts on, whose access it acts
+// under, and which tools it may build.
+func (uc *UseCase) scope(ctx context.Context, req TurnRequest) agentkernel.Scope {
+	return agentkernel.Scope{
+		WorkspaceID: req.Workspace.Workspace.ID,
+		CaseID:      req.Case.ID,
+		ChannelID:   req.ChannelID,
+		ThreadTS:    req.ThreadTS,
+		SessionID:   req.Session.ID,
+		ActorUserID: req.MentionUserID,
+		Lang:        string(i18n.LangFromContext(ctx)),
+		// The channel-mode case agent runs one ReAct loop and is handed its
+		// whole palette at once; there is no planner to choose a subset.
+		ToolSets:    []string{agentkernel.ToolSetsAll},
+		PrivateCase: req.Case.IsPrivate,
+		// Each mention turn gets its own JobID because it is not a configured
+		// Job. That is what keeps it out of the Automated Jobs list while still
+		// appearing in the case's run history.
+		JobID:     uuid.Must(uuid.NewV7()).String(),
+		JobRunID:  uuid.Must(uuid.NewV7()).String(),
+		EventType: model.EventTypeMention,
+	}
+}
+
+// existingRun returns the run a previous delivery of this same Slack event
+// already started, or "" when this is the first delivery.
+func (uc *UseCase) existingRun(ctx context.Context, req TurnRequest) agentkit.ProcessID {
+	if uc.locator == nil {
+		return ""
+	}
+	key := agentkernel.TriggerKey(req.ChannelID, req.ThreadTS, req.TriggerTS)
+	pid, err := uc.locator.ByTrigger(ctx, key)
+	if err != nil {
+		// Not knowing means treating it as a fresh delivery. Dropping a real
+		// mention is worse than the duplicate the wrong guess would cause, and
+		// the idempotency key still stops a second run from being created.
+		errutil.Handle(ctx, goerr.Wrap(err, "look up the run for this trigger"),
+			"look up the run for this trigger")
+		return ""
+	}
+	return pid
+}
+
+func (uc *UseCase) openRunLog(ctx context.Context, sc agentkernel.Scope, systemPrompt string) {
+	if _, err := runtrace.Open(ctx, runtrace.OpenParams{
+		Repo:         uc.repo,
+		WorkspaceID:  sc.WorkspaceID,
+		CaseID:       sc.CaseID,
+		JobID:        sc.JobID,
+		RunID:        sc.JobRunID,
+		TraceID:      sc.JobRunID,
 		EventType:    model.EventTypeMention,
 		ExecutorKind: model.ExecutorKindSingleLoop,
 		SystemPrompt: systemPrompt,
 		StartedAt:    time.Now().UTC(),
-	})
-	if recOpenErr != nil {
-		errutil.Handle(turnCtx, recOpenErr, "casebound: open mention run trace")
+	}); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "open the mention run log",
+			goerr.V("session_id", sc.SessionID)), "open the mention run log")
 	}
-	defer func() {
-		// Use the parent ctx (not turnCtx) so the terminal log write still runs
-		// when the turn was cancelled by lock loss — mirroring the trace flush.
-		rec.Finish(ctx, runErr)
-	}()
-
-	// Per-tool activity is ephemeral: route it through TraceReplace so each
-	// "Searching…/Fetching…" line overwrites the previous one in place rather
-	// than piling up in the thread.
-	turnCtx = tool.WithUpdate(turnCtx, func(innerCtx context.Context, message string) {
-		req.Handler.TraceReplace(innerCtx, message)
-	})
-
-	// The Cloud Storage recorder captures the durable trace artifact; the
-	// runtrace handler streams the per-call JobRunEvent timeline. Feed both via
-	// trace.Multi. When the log failed to open (rec == nil), degrade to the
-	// archive recorder alone.
-	traced := trace.Handler(recorder)
-	if rec != nil {
-		traced = trace.Multi(recorder, rec.Handler())
-	}
-
-	allTools := uc.buildTools(req)
-	gollemAgent := gollem.New(uc.deps.LLMClient,
-		gollem.WithSystemPrompt(systemPrompt),
-		gollem.WithTools(allTools...),
-		gollem.WithHistoryRepository(uc.deps.HistoryRepo, req.Session.ID),
-		gollem.WithTrace(traced),
-		gollem.WithPromptCache(true),
-		gollem.WithToolMiddleware(
-			func(next gollem.ToolHandler) gollem.ToolHandler {
-				return func(ctx context.Context, tr *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
-					// The "running this tool" notice is transient activity; the
-					// error is a milestone worth keeping in the history.
-					req.Handler.TraceReplace(ctx, fmt.Sprintf("🔧 `%s`", tr.Tool.Name))
-					resp, err := next(ctx, tr)
-					if resp != nil && resp.Error != nil {
-						req.Handler.TraceAppend(ctx, "❌ Error: "+resp.Error.Error())
-					}
-					return resp, err
-				}
-			},
-		),
-	)
-
-	resp, execErr := gollemAgent.Execute(turnCtx, gollem.Text(userInput))
-	if execErr != nil {
-		// Surface the failure onto the recorded run (deferred Close reads runErr).
-		runErr = execErr
-		return nil, goerr.Wrap(execErr, "execute casebound agent")
-	}
-
-	// Persist the just-processed mention TS so the next mention starts its
-	// delta scan strictly after this one.
-	req.Session.LastMentionTS = req.MentionTS
-	req.Session.LastAction = model.SessionEndedWithCaseBoundReply
-	req.Session.UpdatedAt = time.Now().UTC()
-	if err := uc.deps.Repo.Session().Put(turnCtx, req.Session); err != nil {
-		errutil.Handle(turnCtx, err, "casebound: persist session lastMentionTS")
-	}
-
-	finalText := strings.Join(resp.Texts, "\n")
-	return &Result{Status: StatusCompleted, FinalText: finalText}, nil
 }
 
-// buildTools assembles the gollem tool slice for a case-bound turn. The
-// case-bound mode uses the *full* mutating action tool set so the agent can
-// create / update / archive Actions on behalf of the user.
-func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
-	d := uc.deps
-	var statusSet *model.ActionStatusSet
-	if req.Workspace != nil {
-		statusSet = req.Workspace.ActionStatusSet
+func (uc *UseCase) lookupBusy(ctx context.Context, sessionID string) *agentkernel.BusyTurn {
+	if uc.locator == nil {
+		return nil
 	}
-	wsID := ""
-	caseID := int64(0)
-	if req.Workspace != nil {
-		wsID = req.Workspace.Workspace.ID
+	busy, err := uc.locator.Busy(ctx, agentkernel.ThreadSubject(sessionID))
+	if err != nil {
+		errutil.Handle(ctx, err, "read the run holding this thread")
+		return nil
 	}
-	if req.Case != nil {
-		caseID = req.Case.ID
-	}
-	// Action tools exist only where Actions exist: channel-mode cases. A
-	// thread-mode case (bound to a Slack thread) tracks progress via its board
-	// status and has no Actions, so the usecase boundary rejects action writes
-	// there (ErrCaseThreadModeNoActions). Withhold the whole core toolset for
-	// thread-mode rather than offer tools that can only error — mirroring the
-	// Job runtime's exclusion. case_ref read tools live in the core toolset too,
-	// so thread-mode forgoes them along with the action tools.
-	var coreTools []gollem.Tool
-	if req.Case == nil || !req.Case.IsThreadBound() {
-		coreTools = core.New(core.Deps{
-			Repo:         d.Repo,
-			WorkspaceID:  wsID,
-			CaseID:       caseID,
-			StatusSet:    statusSet,
-			ActionUC:     d.ActionUC,
-			ActionStepUC: d.ActionStepUC,
-			CaseRefUC:    d.CaseRefUC,
-		})
-	}
-	slackTools := slacktool.NewReadOnly(slacktool.Deps{
-		Bot:       d.SlackBot,
-		Search:    d.SlackSearch,
-		Retriever: d.SlackRetriever,
-	})
-	notionTools := notiontool.New(notiontool.Deps{Client: d.NotionClient})
-	githubTools := githubtool.New(d.GitHubClient)
-	webfetchTools := webfetch.New(d.WebFetchClient)
-	jiraTools := d.JiraTools
-
-	// Case-editing tools (title / description / assignees / custom fields and,
-	// for thread-mode workspaces, board status). Only wired when a CaseUC is
-	// configured; the schema / status set come from the workspace so the tool
-	// specs and the system prompt advertise the same field ids and status ids.
-	var caseTools []gollem.Tool
-	if d.CaseUC != nil {
-		var fieldSchema *config.FieldSchema
-		var caseStatusSet *model.ActionStatusSet
-		if req.Workspace != nil {
-			fieldSchema = req.Workspace.FieldSchema
-			caseStatusSet = req.Workspace.CaseStatusSet
-		}
-		caseTools = casewriter.New(casewriter.Deps{
-			CaseUC:      d.CaseUC,
-			WorkspaceID: wsID,
-			CaseID:      caseID,
-			Schema:      fieldSchema,
-			StatusSet:   caseStatusSet,
-		})
-	}
-
-	// Case-scoped memo tools (memo__list/get/create/update/archive). Wired only
-	// when a MemoUC is configured and the workspace has a memo schema; the schema
-	// drives the field coercion in the create/update tools.
-	var memoTools []gollem.Tool
-	if d.MemoUC != nil && req.Workspace != nil && req.Workspace.MemoConfig.Enabled() {
-		memoTools = memotool.New(memotool.Deps{
-			Repo:        d.Repo,
-			WorkspaceID: wsID,
-			CaseID:      caseID,
-			MemoUC:      d.MemoUC,
-			Schema:      req.Workspace.MemoConfig.FieldSchema,
-		})
-	}
-
-	// Workspace-wide knowledge tools (knowledge__*). Read tools are always
-	// offered when an accessor is configured; the write tools (create/update)
-	// are withheld while processing a PRIVATE case, because shared knowledge is
-	// visible to the whole workspace and a private case's contents must not leak
-	// into it through an agent write.
-	var knowledgeTools []gollem.Tool
-	if d.KnowledgeAccessor != nil {
-		kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: d.KnowledgeAccessor}
-		if d.KnowledgeMutator != nil && req.Case != nil && !req.Case.IsPrivate {
-			kdeps.Mutator = d.KnowledgeMutator
-			knowledgeTools = knowledgetool.New(kdeps)
-		} else {
-			knowledgeTools = knowledgetool.NewReadOnly(kdeps)
-		}
-	}
-
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(jiraTools)+len(caseTools)+len(memoTools)+len(knowledgeTools))
-	all = append(all, coreTools...)
-	all = append(all, slackTools...)
-	all = append(all, notionTools...)
-	all = append(all, githubTools...)
-	all = append(all, webfetchTools...)
-	all = append(all, jiraTools...)
-	all = append(all, caseTools...)
-	all = append(all, memoTools...)
-	all = append(all, knowledgeTools...)
-	return all
+	return busy
 }
 
-// validateRequest enforces the minimum invariants RunTurn needs.
+// onFinish posts the answer and closes the run record. agentkit calls it once,
+// after the terminal transition committed, on whichever instance committed it.
+//
+// Delivery is best-effort by design (agentkit ADR-0014): it never fires twice,
+// but a crash between the commit and the call loses it. That matches what the
+// previous runtime offered — it posted in-process, so the same crash lost the
+// reply — and it avoids the alternative, which is posting from inside the
+// transition and double-posting on a replay.
+func (uc *UseCase) onFinish(ctx context.Context, pid agentkit.ProcessID, res agentkit.FinishResult[react.Output]) error {
+	proc, err := uc.kernel.GetProcess(ctx, pid)
+	if err != nil {
+		return goerr.Wrap(err, "read the finished run", goerr.V("process", pid))
+	}
+	sc := agentkernel.ScopeFrom(proc.Metadata)
+
+	var runErr error
+	switch {
+	case res.Status == agentkit.ProcessSucceeded && res.Output != nil:
+		if perr := uc.host.Reply(ctx, sc.ChannelID, sc.ThreadTS, res.Output.Text()); perr != nil {
+			runErr = goerr.Wrap(perr, "post the agent reply")
+			errutil.Handle(ctx, runErr, "post the agent reply")
+		}
+	case res.Status == agentkit.ProcessFailed:
+		runErr = failureError(res.Failure)
+		if perr := uc.host.ReportFailure(ctx, sc.ChannelID, sc.ThreadTS, runErr.Error()); perr != nil {
+			errutil.Handle(ctx, perr, "report the agent failure")
+		}
+	case res.Status == agentkit.ProcessCancelled:
+		// A cancelled turn was stopped deliberately; whoever cancelled it knows.
+		runErr = goerr.New("run cancelled")
+	}
+
+	uc.finishRunLog(ctx, sc, proc.Metrics, runErr)
+	uc.markAnswered(ctx, sc)
+	return nil
+}
+
+func failureError(f *agentkit.Failure) error {
+	if f == nil {
+		return goerr.New("run failed")
+	}
+	return goerr.New(f.Message, goerr.V("code", string(f.Code)))
+}
+
+// finishRunLog closes the run record with the usage agentkit metered on the
+// Process. The Process is the authority: a durable run's transitions spread
+// across claims and instances, so only the row accumulating them holds the total.
+func (uc *UseCase) finishRunLog(ctx context.Context, sc agentkernel.Scope, m agentkit.Metrics, runErr error) {
+	if sc.JobRunID == "" || sc.WorkspaceID == "" || sc.CaseID == 0 {
+		return
+	}
+	runtrace.FinishRun(ctx, uc.repo,
+		model.JobRunKey{WorkspaceID: sc.WorkspaceID, CaseID: sc.CaseID, JobID: sc.JobID},
+		sc.JobRunID,
+		runtrace.Usage{
+			InputTokens:              m.InputTokens,
+			OutputTokens:             m.OutputTokens,
+			CacheCreationInputTokens: m.CacheCreationInputTokens,
+			CacheReadInputTokens:     m.CacheReadInputTokens,
+			LLMCalls:                 m.LLMCalls,
+			ToolCalls:                m.ToolCalls,
+		},
+		runErr, time.Now().UTC())
+}
+
+// markAnswered records what ended the turn. The Slack dispatcher reads it to
+// decide whether a plain thread reply should start another one.
+func (uc *UseCase) markAnswered(ctx context.Context, sc agentkernel.Scope) {
+	if sc.ChannelID == "" || sc.ThreadTS == "" {
+		return
+	}
+	ssn, err := uc.repo.Session().GetByThread(ctx, sc.ChannelID, sc.ThreadTS)
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "load the session to record the turn end"),
+			"load the session to record the turn end")
+		return
+	}
+	if ssn == nil {
+		return
+	}
+	ssn.LastAction = model.SessionEndedWithCaseBoundReply
+	ssn.UpdatedAt = time.Now().UTC()
+	if err := uc.repo.Session().Put(ctx, ssn); err != nil {
+		errutil.Handle(ctx, err, "record the turn end on the session")
+	}
+}
+
+// stampMention records the mention this turn is processing.
+func (uc *UseCase) stampMention(ctx context.Context, ssn *model.Session, mentionTS string) {
+	if mentionTS == "" {
+		return
+	}
+	ssn.LastMentionTS = mentionTS
+	ssn.UpdatedAt = time.Now().UTC()
+	if err := uc.repo.Session().Put(ctx, ssn); err != nil {
+		errutil.Handle(ctx, err, "persist the session mention position")
+	}
+}
+
+// validateRequest enforces the minimum invariants StartTurn needs.
 func validateRequest(req *TurnRequest) error {
 	if req == nil {
 		return goerr.New("request is nil")
 	}
-	if req.Session == nil {
-		return goerr.New("Session is required")
+	if req.Session == nil || req.Session.ID == "" {
+		return goerr.New("a persisted Session is required")
 	}
 	if req.MentionTS == "" {
 		return goerr.New("MentionTS is required")
 	}
 	if req.TriggerTS == "" {
 		return goerr.New("TriggerTS is required")
+	}
+	if req.MentionUserID == "" {
+		return goerr.New("MentionUserID is required (it is the access actor for the run)")
 	}
 	if req.Case == nil {
 		return goerr.New("Case is required")
@@ -403,10 +401,9 @@ func validateRequest(req *TurnRequest) error {
 	return nil
 }
 
-// buildUserInput assembles the user-facing text passed to gollem. Unprocessed
+// buildUserInput assembles the user-facing text handed to the agent. Unprocessed
 // thread messages are prepended in chronological order with a header so the
-// agent can distinguish them from the new prompt. The current mention text
-// is always appended last.
+// agent can tell them from the new prompt; the current mention is always last.
 func buildUserInput(delta []ConversationMessage, mentionText, mentionTS string) string {
 	if len(delta) == 0 {
 		return mentionText
@@ -428,15 +425,3 @@ func buildUserInput(delta []ConversationMessage, mentionText, mentionTS string) 
 	b.WriteString(mentionText)
 	return b.String()
 }
-
-// Trace metadata labels keyed off the SessionIDLabel exported by agentarchive.
-// Kept verbatim from the legacy agent.go so existing trace consumers keep
-// working without re-indexing.
-const (
-	labelSessionID        = "session_id"
-	labelWorkspaceID      = "workspace_id"
-	labelCaseID           = "case_id"
-	labelThreadTS         = "thread_ts"
-	labelActionID         = "action_id"
-	labelTriggerMentionTS = "trigger_mention_ts"
-)

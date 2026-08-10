@@ -3,107 +3,247 @@ package casebound_test
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 )
 
-// fakeCaseMutator satisfies casewriter.CaseMutator for tool-wiring tests.
-type fakeCaseMutator struct{}
-
-func (fakeCaseMutator) UpdateCase(context.Context, string, int64, casewriter.CaseUpdate) (*model.Case, error) {
-	return &model.Case{}, nil
+// hostCall records one Slack-facing call the finished turn made.
+type hostCall struct {
+	Kind      string // "reply" or "failure"
+	ChannelID string
+	ThreadTS  string
+	Text      string
 }
 
-func (fakeCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) (*model.Case, error) {
-	return &model.Case{}, nil
+// recordingHost captures every Host call so a test can assert what the user
+// actually saw, not merely that the turn ended without an error.
+type recordingHost struct {
+	mu    sync.Mutex
+	calls []hostCall
 }
 
-func (fakeCaseMutator) CloseCase(context.Context, string, int64) (*model.Case, error) {
-	return &model.Case{}, nil
+func (h *recordingHost) Reply(_ context.Context, channelID, threadTS, text string) error {
+	h.record(hostCall{Kind: "reply", ChannelID: channelID, ThreadTS: threadTS, Text: text})
+	return nil
 }
 
-func (fakeCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
-	return &model.Case{}, nil
+func (h *recordingHost) ReportFailure(_ context.Context, channelID, threadTS, reason string) error {
+	h.record(hostCall{Kind: "failure", ChannelID: channelID, ThreadTS: threadTS, Text: reason})
+	return nil
 }
 
-func (fakeCaseMutator) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
-	return &model.Case{}, nil
+func (h *recordingHost) record(c hostCall) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, c)
 }
 
-// singleReplyLLM returns a mock LLM whose first response is the given final
-// text with no tool calls, so a casebound gollem turn completes in one pass.
-func singleReplyLLM(text string) gollem.LLMClient {
+func (h *recordingHost) Calls() []hostCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]hostCall, len(h.calls))
+	copy(out, h.calls)
+	return out
+}
+
+// scriptedLLM answers with responses[i] on the i-th Generate. An extra call
+// beyond the script fails rather than silently repeating the last answer.
+func scriptedLLM(responses ...*gollem.Response) gollem.LLMClient {
+	var n atomic.Int32
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
-					return &gollem.Response{Texts: []string{text}}, nil
+					i := int(n.Add(1)) - 1
+					if i >= len(responses) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return responses[i], nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
 				},
 			}, nil
 		},
 	}
 }
 
-// A casebound mention turn must record a JobRunLog under the reserved mention
-// JobID (EventType=mention, single-loop executor) so the case agent page lists
-// it, and materialise the JobRun summary that the page's ListByCase reads.
-func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.New()
-	deps := &agent.CommonDeps{
-		Repo:                repo,
-		LLMClient:           singleReplyLLM("Here is the answer."),
-		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
-		TraceRepo:           agentarchive.NewMemoryTraceRepository(),
-		HeartbeatInterval:   200 * time.Millisecond,
-		HeartbeatStaleAfter: 5 * time.Second,
-	}
-	uc, err := casebound.New(deps)
-	gt.NoError(t, err).Required()
-
-	res, err := uc.RunTurn(ctx, casebound.TurnRequest{
-		Session: &model.Session{
-			ID:          "s-cb-1",
-			ChannelID:   "C-CASE",
-			ThreadTS:    "1700000000.000001",
-			WorkspaceID: "ws-1",
-			CaseID:      55,
+// failingLLM refuses every Generate, which is how a turn reaches ProcessFailed.
+func failingLLM() gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return nil, goerr.New("the model is unreachable")
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
 		},
-		Workspace:   &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1", Name: "WS"}},
-		Case:        &model.Case{ID: 55, Title: "Case", Status: types.CaseStatusOpen, SlackChannelID: "C-CASE"},
-		ChannelID:   "C-CASE",
-		ThreadTS:    "1700000000.000001",
-		MentionTS:   "1700000001.000001",
-		MentionText: "<@bot> what's up?",
-		TriggerTS:   "1700000001.000001",
-	})
-	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(casebound.StatusCompleted)
-	gt.String(t, res.FinalText).Equal("Here is the answer.")
+	}
+}
 
-	// The mention turn records exactly one run under its own fresh per-turn
-	// JobID (no shared sentinel), discovered via the same read path the case
-	// agent page uses.
-	runs, err := repo.JobRun().ListByCase(ctx, "ws-1", 55)
+const (
+	testChannelID = "C-CASE"
+	testThreadTS  = "1700000000.000001"
+)
+
+type harness struct {
+	uc     *casebound.UseCase
+	repo   *memory.Memory
+	host   *recordingHost
+	kernel *agentkit.Kernel
+}
+
+// newHarness wires the UseCase against a real agentkit Kernel with an
+// in-process Process store. The Kernel is built directly rather than through
+// agentkernel.Build so this test isolates the host's own contract — spawn,
+// turn lock, completion — from the tool factory, which pkg/agent/kernel covers.
+func newHarness(t *testing.T, llm gollem.LLMClient, tools ...gollem.Tool) *harness {
+	t.Helper()
+
+	repo := memory.New()
+	host := &recordingHost{}
+	procRepo := agentprocmemory.New()
+	locator, err := agentkernel.NewLocator(procRepo)
+	gt.NoError(t, err).Required()
+
+	uc, err := casebound.New(repo, host, locator)
+	gt.NoError(t, err).Required()
+
+	reg := agentkit.NewRegistry()
+	limiter := budget.Config{
+		MaxSteps: 32, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
+	}.Limiter()
+	gt.NoError(t, uc.Register(reg, limiter, agentarchive.NewMemoryHistoryStore())).Required()
+
+	k, err := agentkit.New(procRepo, llm, reg,
+		agentkit.WithToolFactory(func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return tools, nil
+		}))
+	gt.NoError(t, err).Required()
+	uc.Bind(k)
+
+	return &harness{uc: uc, repo: repo, host: host, kernel: k}
+}
+
+// session persists the Session a turn locks on and returns it.
+func (h *harness) session(t *testing.T, ctx context.Context) *model.Session {
+	t.Helper()
+	ssn := &model.Session{
+		ID:          "s-cb-1",
+		ChannelID:   testChannelID,
+		ThreadTS:    testThreadTS,
+		WorkspaceID: "ws-1",
+		CaseID:      55,
+		Kind:        model.SessionKindCase,
+	}
+	gt.NoError(t, h.repo.Session().Put(ctx, ssn)).Required()
+	return ssn
+}
+
+func (h *harness) request(ssn *model.Session, triggerTS string) casebound.TurnRequest {
+	return casebound.TurnRequest{
+		Session:       ssn,
+		ChannelID:     testChannelID,
+		ThreadTS:      testThreadTS,
+		MentionTS:     triggerTS,
+		MentionText:   "<@bot> what's up?",
+		MentionUserID: "U-HUMAN",
+		BotUserID:     "U-BOT",
+		Workspace:     &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1", Name: "WS"}},
+		Case:          &model.Case{ID: 55, Title: "Case", Status: types.CaseStatusOpen, SlackChannelID: testChannelID},
+		TriggerTS:     triggerTS,
+	}
+}
+
+// drive runs the worker until pid reaches a terminal state and returns it.
+func (h *harness) drive(t *testing.T, pid agentkit.ProcessID, opts ...agentkit.ServeOption) *agentkit.Process {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opts = append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, opts...)
+	served := make(chan error, 1)
+	go func() { served <- h.kernel.Serve(ctx, opts...) }()
+
+	for {
+		proc, err := h.kernel.GetProcess(ctx, pid)
+		gt.NoError(t, err).Required()
+		if proc.Status.Terminal() {
+			cancel()
+			<-served
+			return proc
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// A finished turn must post its answer to the thread it came from, close the
+// JobRunLog the case agent page lists, and advance the session's mention
+// position — all from the completion handler, since StartTurn returned long
+// before the model answered.
+func TestStartTurnPostsTheReplyAndRecordsTheRun(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, scriptedLLM(&gollem.Response{
+		Texts:       []string{"Here is the answer."},
+		InputToken:  120,
+		OutputToken: 34,
+	}))
+	ssn := h.session(t, ctx)
+
+	res, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000001.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(casebound.StatusStarted)
+	gt.Value(t, res.ProcessID).NotEqual(agentkit.ProcessID(""))
+
+	// StartTurn only records the run. Nothing has been said to the user yet.
+	gt.Array(t, h.host.Calls()).Length(0)
+
+	proc := h.drive(t, res.ProcessID)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	calls := h.host.Calls()
+	gt.Array(t, calls).Length(1).Required()
+	gt.String(t, calls[0].Kind).Equal("reply")
+	gt.String(t, calls[0].ChannelID).Equal(testChannelID)
+	gt.String(t, calls[0].ThreadTS).Equal(testThreadTS)
+	gt.String(t, calls[0].Text).Equal("Here is the answer.")
+
+	// The run is discovered through the same read path the case agent page uses:
+	// a fresh per-turn JobID, not a fixed sentinel.
+	runs, err := h.repo.JobRun().ListByCase(ctx, "ws-1", 55)
 	gt.NoError(t, err).Required()
 	gt.Array(t, runs).Length(1).Required()
-	gt.String(t, runs[0].JobID).NotEqual("") // an opaque per-turn id, not a fixed sentinel
+	gt.String(t, runs[0].JobID).NotEqual("")
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 
 	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: runs[0].JobID}
-	logs, err := repo.JobRunLog().List(ctx, key, 100)
+	logs, err := h.repo.JobRunLog().List(ctx, key, 100)
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	log := logs[0]
@@ -111,20 +251,156 @@ func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
 	gt.String(t, log.EventType).Equal(model.EventTypeMention)
 	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindSingleLoop)
 	gt.Number(t, log.CaseID).Equal(55)
-	gt.String(t, log.JobID).Equal(runs[0].JobID)
-	gt.String(t, log.RunID).NotEqual("")
-	gt.String(t, log.TraceID).NotEqual("")
-	// The per-call event stream (LLM/tool) is produced by the LLM client's trace
-	// hooks, which the scripted mock does not fire; that behaviour is covered in
-	// pkg/agent/runtrace. This test's contract is the JobRunLog lifecycle.
+	gt.String(t, log.Error).Equal("")
+	// The usage comes off the Process, which is the only place a durable run's
+	// total survives: its transitions span claims and possibly instances.
+	gt.Value(t, log.InputTokens).Equal(int64(120))
+	gt.Value(t, log.OutputTokens).Equal(int64(34))
+	gt.Value(t, log.LLMCallCount).Equal(int64(1))
+
+	stored, err := h.repo.Session().GetByThread(ctx, testChannelID, testThreadTS)
+	gt.NoError(t, err).Required()
+	gt.String(t, stored.LastMentionTS).Equal("1700000001.000001")
+	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithCaseBoundReply)
 }
 
-func toolNames(tools []gollem.Tool) map[string]bool {
-	out := make(map[string]bool, len(tools))
-	for _, tl := range tools {
-		out[tl.Spec().Name] = true
+// A failed turn must tell the user, and record the failure on the run so the
+// case agent page shows why rather than a run that merely never finished.
+func TestStartTurnReportsAFailedTurn(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, failingLLM())
+	ssn := h.session(t, ctx)
+
+	res, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000002.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(casebound.StatusStarted)
+
+	proc := h.drive(t, res.ProcessID, agentkit.WithMaxStepAttempts(1))
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessFailed)
+
+	calls := h.host.Calls()
+	gt.Array(t, calls).Length(1).Required()
+	gt.String(t, calls[0].Kind).Equal("failure")
+	gt.String(t, calls[0].ChannelID).Equal(testChannelID)
+	gt.String(t, calls[0].Text).Contains("the model is unreachable")
+
+	runs, err := h.repo.JobRun().ListByCase(ctx, "ws-1", 55)
+	gt.NoError(t, err).Required()
+	gt.Array(t, runs).Length(1).Required()
+	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusFailed)
+
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: runs[0].JobID}
+	logs, err := h.repo.JobRunLog().List(ctx, key, 100)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)
+	gt.String(t, logs[0].Error).Contains("the model is unreachable")
+}
+
+// A second mention arriving while a turn is still running must be refused, and
+// the refusal must name the run holding the thread so the host can say what it
+// is waiting on. The worker is deliberately not started here: the first run
+// stays pending and therefore keeps the lock.
+func TestStartTurnRefusesASecondTurnOnTheSameThread(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, scriptedLLM(&gollem.Response{Texts: []string{"unused"}}))
+	ssn := h.session(t, ctx)
+
+	first, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000003.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, first.Status).Equal(casebound.StatusStarted)
+
+	second, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000004.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, second.Status).Equal(casebound.StatusBusy)
+	gt.Value(t, second.Busy).NotNil().Required()
+	gt.Value(t, second.Busy.ProcessID).Equal(first.ProcessID)
+	gt.Bool(t, second.Busy.StartedAt.IsZero()).False()
+
+	// The refused turn must not have opened a second run record, or the case
+	// agent page would list a run that never happened.
+	runs, err := h.repo.JobRun().ListByCase(ctx, "ws-1", 55)
+	gt.NoError(t, err).Required()
+	gt.Array(t, runs).Length(0)
+}
+
+// Slack re-delivers events. A re-delivery must resolve to the run the first
+// delivery started — reported as a duplicate so the host drops it silently
+// rather than posting a "busy" notice for the user's own single mention.
+func TestStartTurnDropsARedeliveredTrigger(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, scriptedLLM(&gollem.Response{Texts: []string{"unused"}}))
+	ssn := h.session(t, ctx)
+
+	first, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000005.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, first.Status).Equal(casebound.StatusStarted)
+
+	again, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000005.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, again.Status).Equal(casebound.StatusDuplicate)
+	gt.Value(t, again.ProcessID).Equal(first.ProcessID)
+	gt.Value(t, again.Busy).Nil()
+}
+
+// An unbound UseCase must refuse rather than panic: the Kernel is handed over
+// after registration, so a wiring order mistake is a real possibility.
+func TestStartTurnRefusesWhenUnbound(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	locator, err := agentkernel.NewLocator(agentprocmemory.New())
+	gt.NoError(t, err).Required()
+	uc, err := casebound.New(repo, &recordingHost{}, locator)
+	gt.NoError(t, err).Required()
+
+	_, err = uc.StartTurn(ctx, casebound.TurnRequest{})
+	gt.Error(t, err)
+}
+
+func TestNewRejectsMissingDependencies(t *testing.T) {
+	locator, err := agentkernel.NewLocator(agentprocmemory.New())
+	gt.NoError(t, err).Required()
+
+	_, err = casebound.New(nil, &recordingHost{}, locator)
+	gt.Error(t, err)
+
+	_, err = casebound.New(memory.New(), nil, locator)
+	gt.Error(t, err)
+}
+
+// validateRequest is the gate that keeps an actor-less run from being spawned.
+// A context with no actor is read by the usecase layer as a system context and
+// BYPASSES private-case access control, so this must be a refusal, not a
+// degraded run.
+func TestValidateRequestRequiresAnActor(t *testing.T) {
+	req := casebound.TurnRequest{
+		Session:   &model.Session{ID: "s-1", ChannelID: testChannelID, ThreadTS: testThreadTS},
+		MentionTS: "1700000006.000001",
+		TriggerTS: "1700000006.000001",
+		Case:      &model.Case{ID: 1},
+		Workspace: &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1"}},
 	}
-	return out
+	gt.Error(t, casebound.ValidateRequestForTest(&req))
+
+	req.MentionUserID = "U-HUMAN"
+	gt.NoError(t, casebound.ValidateRequestForTest(&req))
+}
+
+func TestValidateRequestRequiresAPersistedSession(t *testing.T) {
+	base := casebound.TurnRequest{
+		MentionTS:     "1700000007.000001",
+		TriggerTS:     "1700000007.000001",
+		MentionUserID: "U-HUMAN",
+		Case:          &model.Case{ID: 1},
+		Workspace:     &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1"}},
+	}
+
+	nilSession := base
+	gt.Error(t, casebound.ValidateRequestForTest(&nilSession))
+
+	unpersisted := base
+	unpersisted.Session = &model.Session{ChannelID: testChannelID, ThreadTS: testThreadTS}
+	gt.Error(t, casebound.ValidateRequestForTest(&unpersisted))
 }
 
 func TestBuildSystemPrompt_CaseAndFieldValues(t *testing.T) {
@@ -320,70 +596,4 @@ func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
 	// Status descriptions must reach the agent so it knows when to pick one.
 	gt.String(t, prompt).Contains("Work has not started")
 	gt.String(t, prompt).Contains("Work is fully resolved")
-}
-
-func TestBuildTools_CaseWriterWiring(t *testing.T) {
-	statusSet, err := model.NewActionStatusSet("open", []string{"closed"}, []model.ActionStatusDefinition{
-		{ID: "open", Name: "Open"},
-		{ID: "closed", Name: "Closed"},
-	})
-	gt.NoError(t, err).Required()
-
-	entry := &model.WorkspaceEntry{
-		Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		FieldSchema: &config.FieldSchema{
-			Fields: []config.FieldDefinition{{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect}},
-		},
-		CaseStatusSet: statusSet,
-	}
-	req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1}}
-
-	t.Run("no CaseUC means no case-write tools", func(t *testing.T) {
-		tools := casebound.BuildToolsForTest(&agent.CommonDeps{}, req)
-		names := toolNames(tools)
-		gt.Bool(t, names["case__update_case"]).False()
-		gt.Bool(t, names["case__update_case_status"]).False()
-	})
-
-	t.Run("with CaseUC and a status set, the board-status tool closes (no close tool)", func(t *testing.T) {
-		tools := casebound.BuildToolsForTest(&agent.CommonDeps{CaseUC: fakeCaseMutator{}}, req)
-		names := toolNames(tools)
-		gt.Bool(t, names["case__update_case"]).True()
-		gt.Bool(t, names["case__update_case_status"]).True()
-		gt.Bool(t, names["case__close_case"]).False()
-	})
-
-	t.Run("with CaseUC but no status set, close tool replaces the status tool", func(t *testing.T) {
-		noStatus := &model.WorkspaceEntry{
-			Workspace:   model.Workspace{ID: "ws-test", Name: "Test"},
-			FieldSchema: entry.FieldSchema,
-		}
-		reqNoStatus := casebound.TurnRequest{Workspace: noStatus, Case: &model.Case{ID: 1}}
-		tools := casebound.BuildToolsForTest(&agent.CommonDeps{CaseUC: fakeCaseMutator{}}, reqNoStatus)
-		names := toolNames(tools)
-		gt.Bool(t, names["case__update_case"]).True()
-		gt.Bool(t, names["case__update_case_status"]).False()
-		gt.Bool(t, names["case__close_case"]).True()
-	})
-}
-
-func TestBuildTools_ActionToolsByMode(t *testing.T) {
-	entry := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-test", Name: "Test"}}
-
-	t.Run("channel-mode case gets the action tools", func(t *testing.T) {
-		req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1}}
-		names := toolNames(casebound.BuildToolsForTest(&agent.CommonDeps{}, req))
-		gt.Bool(t, names["core__create_action"]).True()
-		gt.Bool(t, names["core__update_action"]).True()
-	})
-
-	t.Run("thread-mode case omits the action tools", func(t *testing.T) {
-		// Thread-mode cases have no Actions; offering tools the usecase boundary
-		// would reject (ErrCaseThreadModeNoActions) is withheld here, mirroring
-		// the Job runtime exclusion.
-		req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1, SlackThreadTS: "1700000000.000001"}}
-		names := toolNames(casebound.BuildToolsForTest(&agent.CommonDeps{}, req))
-		gt.Bool(t, names["core__create_action"]).False()
-		gt.Bool(t, names["core__update_action"]).False()
-	})
 }

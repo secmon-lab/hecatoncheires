@@ -1,17 +1,18 @@
-// Package casebound contains the agent runtime for case-bound channels —
-// Slack channels that already have an associated Case. The agent runs the
-// gollem ReAct loop with the full action mutator tool set, replying as a
-// thread message. Slack-side concerns (posting, fetching conversation,
-// trace UI) live in the host orchestrator at pkg/usecase/agent.go; this
-// package is Slack-independent.
+// Package casebound hosts the case-channel agent: a Slack mention in the
+// channel of a channel-mode Case. The turn runs as a durable agentkit process on
+// the ReAct strategy, so this package spawns it and finishes it; Slack SDK
+// imports are forbidden here and everything user-facing crosses the Host port as
+// plain text.
 package casebound
 
-import "context"
+import (
+	"context"
 
-// ConversationMessage is the Slack-independent shape passed to RunTurn for
-// the conversation snapshot. The host (pkg/usecase) converts its
-// pkg/service/slack.ConversationMessage into this type so casebound never
-// imports the Slack service.
+	"github.com/m-mizutani/goerr/v2"
+)
+
+// ConversationMessage is a single pre-fetched Slack message handed to the
+// runtime. The host resolves display names; the runtime only formats.
 type ConversationMessage struct {
 	UserID    string
 	UserName  string
@@ -19,62 +20,42 @@ type ConversationMessage struct {
 	Timestamp string
 }
 
-// Handler is the host-side interface casebound calls during a turn for the
-// progressive trace UI. It is intentionally minimal: the host handles all
-// Slack posting, conversation fetching, and final reply itself. The runtime
-// distinguishes two kinds of progress so the host can render them differently:
-// milestones that accumulate vs. ephemeral per-tool activity that overwrites.
-type Handler interface {
-	// TraceAppend records a milestone line that must stay visible (it is
-	// appended to the host's progress history).
-	TraceAppend(ctx context.Context, line string)
-	// TraceReplace overwrites the single transient activity line in place,
-	// so per-tool chatter ("Searching…", "Fetching…") does not accumulate.
-	TraceReplace(ctx context.Context, line string)
+// Host is the Slack-facing surface a finished turn needs.
+//
+// It exists because a turn no longer ends where it started: the run is a durable
+// process, so its answer is posted from the completion handler — on whichever
+// instance committed the terminal transition — rather than by the caller of
+// StartTurn.
+type Host interface {
+	// Reply posts the agent's answer to the thread.
+	Reply(ctx context.Context, channelID, threadTS, text string) error
+	// ReportFailure tells the user the turn could not finish. reason is the
+	// technical cause; the host decides how much of it to show.
+	ReportFailure(ctx context.Context, channelID, threadTS, reason string) error
 }
 
-// HandlerFunc is a convenience wrapper for callers that only care about the
-// milestone history. The supplied closure receives every milestone via
-// TraceAppend; TraceReplace is a no-op (transient activity is discarded).
-type HandlerFunc func(ctx context.Context, line string)
+// HostFuncs is a struct-of-funcs adapter for tests and minimal hosts. A missing
+// entry is an error rather than a no-op: silently dropping the answer to a
+// mention is indistinguishable from the agent having had nothing to say.
+type HostFuncs struct {
+	ReplyFn         func(ctx context.Context, channelID, threadTS, text string) error
+	ReportFailureFn func(ctx context.Context, channelID, threadTS, reason string) error
+}
 
-// TraceAppend satisfies Handler.
-func (f HandlerFunc) TraceAppend(ctx context.Context, line string) {
-	if f == nil {
-		return
+// Reply satisfies Host.
+func (h HostFuncs) Reply(ctx context.Context, channelID, threadTS, text string) error {
+	if h.ReplyFn == nil {
+		return goerr.New("casebound: Reply host is not configured")
 	}
-	f(ctx, line)
+	return h.ReplyFn(ctx, channelID, threadTS, text)
 }
 
-// TraceReplace satisfies Handler. The single-func wrapper has no place to put
-// a transient line, so it is dropped.
-func (f HandlerFunc) TraceReplace(context.Context, string) {}
-
-// HandlerFuncs is a struct-of-funcs adapter for hosts that render milestones
-// and transient activity differently. Nil entries are treated as no-ops.
-type HandlerFuncs struct {
-	TraceAppendFn  func(ctx context.Context, line string)
-	TraceReplaceFn func(ctx context.Context, line string)
-}
-
-// TraceAppend satisfies Handler.
-func (h HandlerFuncs) TraceAppend(ctx context.Context, line string) {
-	if h.TraceAppendFn == nil {
-		return
+// ReportFailure satisfies Host.
+func (h HostFuncs) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
+	if h.ReportFailureFn == nil {
+		return goerr.New("casebound: ReportFailure host is not configured")
 	}
-	h.TraceAppendFn(ctx, line)
+	return h.ReportFailureFn(ctx, channelID, threadTS, reason)
 }
 
-// TraceReplace satisfies Handler.
-func (h HandlerFuncs) TraceReplace(ctx context.Context, line string) {
-	if h.TraceReplaceFn == nil {
-		return
-	}
-	h.TraceReplaceFn(ctx, line)
-}
-
-// Compile-time assertions.
-var (
-	_ Handler = HandlerFunc(nil)
-	_ Handler = HandlerFuncs{}
-)
+var _ Host = HostFuncs{}

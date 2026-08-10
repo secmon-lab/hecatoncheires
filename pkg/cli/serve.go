@@ -559,17 +559,21 @@ func cmdServe() *cli.Command {
 					kernelTrace = agentarchive.NewMemoryTraceRepository()
 				}
 
+				// Registration must complete before the Kernel is built, and the
+				// Kernel must be bound before the first Spawn — so the three
+				// steps run in this order and nowhere else.
+				agentRegistry := agentkit.NewRegistry()
+				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo); rErr != nil {
+					return goerr.Wrap(rErr, "failed to register the agents")
+				}
+
 				k, kErr := agentkernel.Build(agentkernel.Deps{
 					Repo:    agentProcessRepo,
 					History: processHistory,
 					LLM:     llmClient,
 					Trace:   kernelTrace,
 					Budgets: budgets,
-					// No strategy is registered yet: the agent hosts move onto
-					// this runtime in the following changes. Serving an empty
-					// registry is harmless — the worker simply finds nothing to
-					// claim — and it keeps the wiring in one place.
-					Agents: agentkit.NewRegistry(),
+					Agents:  agentRegistry,
 					Tools: agentkernel.ToolDeps{
 						Repo:              repo,
 						Registry:          registry,
@@ -595,6 +599,7 @@ func cmdServe() *cli.Command {
 					return goerr.Wrap(kErr, "failed to build the agent runtime")
 				}
 				agentKernel = k
+				uc.Agent.BindAgentKernel(agentKernel)
 				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
 			}
 

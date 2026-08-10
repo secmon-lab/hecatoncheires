@@ -8,53 +8,39 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 )
 
-// TestHandlerFunc_RoutesAppendDropsReplace verifies the single-func adapter:
-// the supplied closure receives milestones via TraceAppend, while TraceReplace
-// (transient per-tool activity) is silently dropped because a single func has
-// nowhere to render an overwriting line.
-func TestHandlerFunc_RoutesAppendDropsReplace(t *testing.T) {
+// A HostFuncs entry that was never supplied must ERROR rather than no-op:
+// silently dropping the answer to a mention is indistinguishable, from the
+// user's side, from the agent having had nothing to say.
+func TestHostFuncsMissingEntriesAreErrors(t *testing.T) {
 	ctx := context.Background()
-	var got []string
-	var h casebound.Handler = casebound.HandlerFunc(func(_ context.Context, line string) {
-		got = append(got, line)
-	})
+	var h casebound.Host = casebound.HostFuncs{}
 
-	h.TraceAppend(ctx, "milestone-1")
-	h.TraceReplace(ctx, "activity-1")
-	h.TraceAppend(ctx, "milestone-2")
-
-	gt.Array(t, got).Equal([]string{"milestone-1", "milestone-2"})
+	gt.Error(t, h.Reply(ctx, "C1", "1700000000.000001", "answer"))
+	gt.Error(t, h.ReportFailure(ctx, "C1", "1700000000.000001", "reason"))
 }
 
-// TestHandlerFunc_NilIsNoOp verifies a nil HandlerFunc does not panic on
-// either method.
-func TestHandlerFunc_NilIsNoOp(t *testing.T) {
+func TestHostFuncsRoutesEachCall(t *testing.T) {
 	ctx := context.Background()
-	var h casebound.HandlerFunc
-	h.TraceAppend(ctx, "x")
-	h.TraceReplace(ctx, "y")
-}
+	type call struct {
+		kind, channelID, threadTS, text string
+	}
+	var got []call
 
-// TestHandlerFuncs_RoutesEachKind verifies the struct-of-funcs adapter routes
-// appends and replaces to their respective closures, and treats nil entries as
-// no-ops.
-func TestHandlerFuncs_RoutesEachKind(t *testing.T) {
-	ctx := context.Background()
-	var appended, replaced []string
-	h := casebound.HandlerFuncs{
-		TraceAppendFn:  func(_ context.Context, line string) { appended = append(appended, line) },
-		TraceReplaceFn: func(_ context.Context, line string) { replaced = append(replaced, line) },
+	h := casebound.HostFuncs{
+		ReplyFn: func(_ context.Context, channelID, threadTS, text string) error {
+			got = append(got, call{"reply", channelID, threadTS, text})
+			return nil
+		},
+		ReportFailureFn: func(_ context.Context, channelID, threadTS, reason string) error {
+			got = append(got, call{"failure", channelID, threadTS, reason})
+			return nil
+		},
 	}
 
-	h.TraceAppend(ctx, "m1")
-	h.TraceReplace(ctx, "a1")
-	h.TraceReplace(ctx, "a2")
+	gt.NoError(t, h.Reply(ctx, "C1", "1700000000.000001", "the answer"))
+	gt.NoError(t, h.ReportFailure(ctx, "C2", "1700000000.000002", "budget exhausted"))
 
-	gt.Array(t, appended).Equal([]string{"m1"})
-	gt.Array(t, replaced).Equal([]string{"a1", "a2"})
-
-	// Nil entries must not panic.
-	empty := casebound.HandlerFuncs{}
-	empty.TraceAppend(ctx, "x")
-	empty.TraceReplace(ctx, "y")
+	gt.Array(t, got).Length(2).Required()
+	gt.Value(t, got[0]).Equal(call{"reply", "C1", "1700000000.000001", "the answer"})
+	gt.Value(t, got[1]).Equal(call{"failure", "C2", "1700000000.000002", "budget exhausted"})
 }

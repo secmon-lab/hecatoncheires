@@ -7,10 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -146,16 +148,10 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}
-		cb, err := casebound.New(commonDeps)
-		if err != nil {
-			// casebound.New only fails on missing deps that we already
-			// guarded above, so reaching here means a wiring bug. Surface
-			// to Sentry and leave casebound nil; HandleAgentMention will
-			// short-circuit.
-			errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build casebound usecase"), "failed to build casebound usecase")
-		} else {
-			uc.casebound = cb
-		}
+		// The case-channel agent is NOT built here. It runs on the agentkit
+		// runtime, and wiring it needs the process store and the kernel — both
+		// of which are assembled after the usecases. RegisterAgents /
+		// BindAgentKernel below do it in the order agentkit requires.
 
 		// Build the thread-mode agent. It reuses the same backend deps and a
 		// dedicated planexec runner.
@@ -196,6 +192,43 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 var DefaultThreadcaseBudget = planexec.BudgetConfig{
 	PlannerLoopMax:  8,
 	SubAgentLoopMax: 20,
+}
+
+// RegisterAgents builds the agents that run on the agentkit runtime and
+// registers them in reg. Call it before agentkernel.Build — agentkit requires
+// every registration to complete before the first Spawn or Serve — and
+// BindAgentKernel afterwards.
+//
+// It is a separate step from NewAgentUseCase because both halves of the wiring
+// depend on the other: registering needs this usecase as the completion handler,
+// and building the Kernel needs the filled registry.
+func (uc *AgentUseCase) RegisterAgents(
+	reg *agentkit.Registry,
+	limiter agentkit.Limiter,
+	store agentkit.HistoryStore,
+	procRepo agentkit.Repository,
+) error {
+	locator, err := agentkernel.NewLocator(procRepo)
+	if err != nil {
+		return goerr.Wrap(err, "build the agent process locator")
+	}
+	cb, err := casebound.New(uc.deps.Repo, caseboundHost{uc: uc}, locator)
+	if err != nil {
+		return goerr.Wrap(err, "build the case-channel agent")
+	}
+	if err := cb.Register(reg, limiter, store); err != nil {
+		return goerr.Wrap(err, "register the case-channel agent")
+	}
+	uc.casebound = cb
+	return nil
+}
+
+// BindAgentKernel hands the built Kernel to every agent RegisterAgents
+// registered. Until it is called, a mention turn cannot be spawned.
+func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel) {
+	if uc.casebound != nil {
+		uc.casebound.Bind(k)
+	}
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
@@ -245,10 +278,13 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		threadTS = msg.ID()
 	}
 
-	// Look up (or create) the Session that ties this thread to the Case.
-	session, err := uc.loadOrCreateSession(ctx, entry.Workspace.ID, foundCase.ID, msg.ChannelID(), threadTS, model.SessionKindCase)
+	// Claim (and therefore persist) the Session that ties this thread to the
+	// Case. It is claimed rather than merely loaded because its ID is the turn
+	// lock's subject: a Session that exists only in memory cannot serialise a
+	// concurrent mention arriving on another instance.
+	session, err := uc.claimSession(ctx, entry.Workspace.ID, foundCase.ID, msg.ChannelID(), threadTS, model.SessionKindCase)
 	if err != nil {
-		return goerr.Wrap(err, "failed to load or create agent session")
+		return goerr.Wrap(err, "failed to claim agent session")
 	}
 
 	// Post the per-mention session start banner using the Session.ID so
@@ -289,15 +325,13 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		}
 	}
 
-	// Slack-side trace banner (per-mention; not persisted).
-	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
-
 	req := casebound.TurnRequest{
 		Session:        session,
 		ChannelID:      msg.ChannelID(),
 		ThreadTS:       threadTS,
 		MentionTS:      msg.ID(),
 		MentionText:    msg.Text(),
+		MentionUserID:  msg.UserID(),
 		BotUserID:      botUserID,
 		Workspace:      entry,
 		Case:           foundCase,
@@ -306,17 +340,16 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		SystemMessages: toCaseboundMessages(systemMessages),
 		DeltaMessages:  toCaseboundMessages(deltaMessages),
 		TriggerTS:      msg.ID(),
-		Handler: casebound.HandlerFuncs{
-			TraceAppendFn:  traceMsg.appendLine,
-			TraceReplaceFn: traceMsg.replaceLine,
-		},
 	}
 
-	result, runErr := uc.casebound.RunTurn(ctx, req)
+	// StartTurn returns as soon as the run is recorded; the LLM calls, the tool
+	// calls and the reply all happen afterwards on the agent worker, and the
+	// reply is posted from the completion handler (see caseboundHost).
+	result, runErr := uc.casebound.StartTurn(ctx, req)
 	if runErr != nil {
 		// replyUserError reports and posts the 3-part message; return nil so the
 		// async dispatcher does not re-Handle (double report) the same error.
-		uc.replyUserError(ctx, runErr, "casebound run turn", msg.ChannelID(), threadTS)
+		uc.replyUserError(ctx, runErr, "casebound start turn", msg.ChannelID(), threadTS)
 		return nil
 	}
 	switch result.Status {
@@ -326,16 +359,46 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 			errutil.Handle(ctx, postErr, "post busy notice")
 		}
 		return nil
-	case casebound.StatusIdempotent:
+	case casebound.StatusDuplicate:
+		// A re-delivery of an event whose run already exists. Dropping it
+		// silently is the point: the original run posts the only reply.
+		logger.Debug("dropping a duplicate mention delivery",
+			"process", string(result.ProcessID), "trigger_ts", msg.ID())
 		return nil
-	case casebound.StatusCompleted:
-		if err := traceMsg.finalize(ctx, result.FinalText); err != nil {
-			return goerr.Wrap(err, "failed to post final response")
-		}
+	case casebound.StatusStarted:
 		return nil
 	default:
 		return goerr.New("unexpected casebound status", goerr.V("status", int(result.Status)))
 	}
+}
+
+// caseboundHost is the Slack side of a finished case-channel turn. It is a
+// separate type rather than methods on AgentUseCase because the Host interface
+// needs exported method names, and Reply / ReportFailure are far too generic to
+// sit on the usecase's own surface.
+type caseboundHost struct {
+	uc *AgentUseCase
+}
+
+// Reply posts the agent's answer as a thread reply.
+func (h caseboundHost) Reply(ctx context.Context, channelID, threadTS, text string) error {
+	if text == "" {
+		return nil
+	}
+	if _, err := h.uc.deps.SlackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
+		return goerr.Wrap(err, "post the agent reply",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	return nil
+}
+
+// ReportFailure tells the user the turn could not finish. reason crossed the
+// durable process boundary as a string, so it is wrapped the same way a
+// planexec fallback reason is: the user sees the "couldn't finish this turn"
+// classification with the reason as the technical note.
+func (h caseboundHost) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
+	h.uc.replyUserError(ctx, fallbackReasonError(reason), "casebound agent turn", channelID, threadTS)
+	return nil
 }
 
 // toCaseboundMessages converts the Slack-service ConversationMessage shape
