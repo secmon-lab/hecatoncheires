@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
 	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -106,6 +107,13 @@ var ParseCaseThreadValueForTest = parseCaseThreadValue
 
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
+
+// SetAssistServeOptionsForTest overrides the Serve options the assist drain
+// uses, so a test that drives a deliberately failing run does not have to wait
+// out agentkit's default retry schedule.
+func SetAssistServeOptionsForTest(uc *AssistUseCase, opts ...agentkit.ServeOption) {
+	uc.serveOpts = opts
+}
 
 // AssistPromptData is exported for testing template rendering
 type AssistPromptData = assistPromptData

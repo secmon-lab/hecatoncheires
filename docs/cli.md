@@ -172,7 +172,23 @@ The `assist` command (alias: `a`) runs the AI assist agent for all open cases ac
 | `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client (e.g. `global`, `us-central1`) |
 | `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
 
+`assist` also accepts every `--agent-*` flag listed under [`serve`](#serve); they
+bound the assist agent's run the same way. See [Agent runtime budgets](#agent-runtime-budgets).
+
 The `[assist]` TOML section (prompt, language) is documented in [configuration.md](./configuration.md).
+
+### How an assist pass runs
+
+`assist` is one foreground pass. It spawns one agent run per open case, drives
+the agent worker itself until every run has finished, writes each run's
+`AssistLog`, and exits — so the command's exit is what tells its scheduler the
+pass is over.
+
+Its agent runs are held **in the process, not in Firestore**, unlike `serve`'s.
+The assist agent exists only inside this command, so a run left in the shared
+store would be picked up by a `serve` instance that cannot resolve it and would
+be failed outright. The consequence is that an interrupted `assist` pass is not
+resumable: the next invocation starts over, which is what it did before as well.
 
 ---
 

@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
@@ -85,6 +86,14 @@ func (stubKnowledgeMutator) UpdateKnowledge(context.Context, string, model.Knowl
 	return &model.Knowledge{}, nil
 }
 
+// stubSlackBot stands in for the Slack bot client. The embedded interface is
+// nil, so any method a test does not expect to be called panics rather than
+// silently succeeding — these tests assert which tools get BUILT and never run
+// one.
+type stubSlackBot struct {
+	slackservice.Service
+}
+
 func newProcess(name agentkit.AgentName, sc kernel.Scope) *agentkit.Process {
 	return &agentkit.Process{
 		ID:       "proc-1",
@@ -147,6 +156,68 @@ func TestToolFactoryExpandsTheAgentPalette(t *testing.T) {
 	})
 }
 
+// TestToolFactoryBuildsTheAssistPalette pins the assist agent's palette against
+// what the pre-agentkit assist flow assembled: the mutating action tools plus
+// Slack read AND post. The posting tool is the point of the whole command — an
+// assist run that cannot write back into the case channel does nothing visible —
+// and its channel comes from the case, not from the scope.
+func TestToolFactoryBuildsTheAssistPalette(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	ctx = seedCase(t, ctx, repo, &model.Case{
+		Title:          "assist target",
+		SlackChannelID: "C-ASSIST",
+	})
+
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:     repo,
+		Registry: testRegistry(channelWorkspace()),
+		SlackBot: stubSlackBot{},
+	})
+	gt.NoError(t, err).Required()
+
+	// No actor: assist is unattended, and RequiresActor excludes it precisely so
+	// this resolves to a full palette rather than to nothing.
+	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{kernel.ToolSetsAll}}
+	tools, err := factory(ctx, newProcess(kernel.AgentAssist, sc))
+	gt.NoError(t, err).Required()
+
+	names := toolNames(tools)
+	gt.Bool(t, slices.Contains(names, "core__create_action")).True()
+	gt.Bool(t, slices.Contains(names, "core__list_actions")).True()
+	gt.Bool(t, slices.Contains(names, "slack__get_messages")).True()
+	gt.Bool(t, slices.Contains(names, "slack__post_message")).True()
+	// Assist has never had the case writer, memo or knowledge tools.
+	gt.Bool(t, hasPrefixIn(names, "case__")).False()
+	gt.Bool(t, hasPrefixIn(names, "memo__")).False()
+	gt.Bool(t, hasPrefixIn(names, "knowledge__")).False()
+}
+
+// TestToolFactoryWithholdsTheAssistPostToolWithoutACaseChannel pins that the
+// posting tool is not built for a case with no Slack channel: it would post
+// nowhere, and a tool that can only fail is worse than an absent one.
+func TestToolFactoryWithholdsTheAssistPostToolWithoutACaseChannel(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	ctx = seedCase(t, ctx, repo, &model.Case{Title: "no channel"})
+
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:     repo,
+		Registry: testRegistry(channelWorkspace()),
+		SlackBot: stubSlackBot{},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{kernel.ToolSetsAll}}
+	tools, err := factory(ctx, newProcess(kernel.AgentAssist, sc))
+	gt.NoError(t, err).Required()
+
+	names := toolNames(tools)
+	gt.Bool(t, slices.Contains(names, "slack__post_message")).False()
+	// The read tool needs only the bot client, so it survives.
+	gt.Bool(t, slices.Contains(names, "slack__get_messages")).True()
+}
+
 // TestToolFactoryHonoursAnExplicitSubset pins that a sub-agent gets exactly the
 // toolsets its task was planned with, not the whole palette.
 func TestToolFactoryHonoursAnExplicitSubset(t *testing.T) {
@@ -192,7 +263,7 @@ func TestToolFactoryWithdrawsActionToolsForAThreadBoundCase(t *testing.T) {
 }
 
 // TestToolFactoryRefusesAnAgentWithNoPalette pins that an agent kind whose tool
-// set has not been established yet fails loudly. The Job and assist palettes are
+// set has not been established yet fails loudly. The Job palettes are
 // deliberately narrower than the case-channel one — core.NewWriterForJob
 // withholds archive / unarchive / delete_action_step from unattended runs — so a
 // permissive fallback would hand an unattended agent destructive tools.
@@ -205,7 +276,7 @@ func TestToolFactoryRefusesAnAgentWithNoPalette(t *testing.T) {
 	gt.NoError(t, err).Required()
 
 	sc := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{kernel.ToolSetsAll}}
-	for _, name := range []agentkit.AgentName{kernel.AgentJob, kernel.AgentJobSimple, kernel.AgentAssist} {
+	for _, name := range []agentkit.AgentName{kernel.AgentJob, kernel.AgentJobSimple} {
 		t.Run(string(name), func(t *testing.T) {
 			tools, err := factory(ctx, newProcess(name, sc))
 			gt.Value(t, err).NotNil()
