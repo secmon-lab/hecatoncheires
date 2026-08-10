@@ -12,6 +12,7 @@ require (
 	github.com/getsentry/sentry-go v0.48.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/goccy/go-yaml v1.19.2
+	github.com/gollem-dev/agentkit v0.2.0
 	github.com/gollem-dev/tools/jira v0.2.0
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0

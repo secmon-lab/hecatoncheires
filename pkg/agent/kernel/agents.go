@@ -1,0 +1,86 @@
+package kernel
+
+import (
+	"github.com/gollem-dev/agentkit"
+	"github.com/m-mizutani/goerr/v2"
+)
+
+// Agent names. These values are persisted on every Process row, so a running
+// deployment always has in-flight Processes referring to them by name. Renaming
+// one strands those Processes with ErrUnknownAgent and no way to finish, so the
+// names are fixed for good; a change in what an agent DOES is expressed by
+// bumping its strategy version, which DecodeState migrates.
+const (
+	// AgentCaseChannel is the ReAct agent behind a mention in a channel-mode
+	// case channel.
+	AgentCaseChannel agentkit.AgentName = "case-channel"
+	// AgentCaseThread is the plan-execute agent behind a mention in a
+	// thread-mode case thread.
+	AgentCaseThread agentkit.AgentName = "case-thread"
+	// AgentCaseThreadCreate is the plan-execute agent that materialises a new
+	// thread-mode case from the conversation that triggered it.
+	AgentCaseThreadCreate agentkit.AgentName = "case-thread-create"
+	// AgentWorkspace is the cross-case plan-execute agent in a workspace
+	// channel.
+	AgentWorkspace agentkit.AgentName = "workspace"
+	// AgentProposal is the plan-execute agent that drafts a case before one
+	// exists.
+	AgentProposal agentkit.AgentName = "proposal"
+	// AgentJob is the plan-execute agent behind a Job configured with the
+	// planexec strategy.
+	AgentJob agentkit.AgentName = "job"
+	// AgentJobSimple is the ReAct agent behind a Job configured with the simple
+	// strategy.
+	AgentJobSimple agentkit.AgentName = "job-simple"
+	// AgentAssist is the ReAct agent behind the assist batch command.
+	AgentAssist agentkit.AgentName = "assist"
+	// AgentTask is the ReAct sub-agent a plan-execute agent spawns per planned
+	// task.
+	AgentTask agentkit.AgentName = "task"
+)
+
+// RequiresActor reports whether an agent may only run with an identified Slack
+// user behind it.
+//
+// This is not a formality. A context with no auth token is read by the usecase
+// layer as a system context and BYPASSES private-case access control entirely
+// (see tokenActor in pkg/usecase/case_access.go). So for an agent working on a
+// person's request, a missing actor is not "reduced access" — it is full
+// access, and a private case becomes readable by someone who is not in its
+// channel.
+//
+// Every human-triggered agent is listed. The pre-agentkit hosts injected the
+// token only in the workspace agent, so the mention agents did read private
+// cases for a non-member; that is the behaviour being corrected, not preserved.
+//
+// The unattended agents are NOT listed. A Job and the assist batch run on a
+// schedule with nobody behind them, so there is no actor to name and their
+// system-context access is the intended one. A sub-agent inherits its parent's
+// metadata, so it carries whatever actor the parent was given.
+func RequiresActor(name agentkit.AgentName) bool {
+	switch name {
+	case AgentCaseChannel, AgentCaseThread, AgentCaseThreadCreate, AgentWorkspace, AgentProposal:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateSpawn checks a scope against the agent it is about to launch. A host
+// calls it before Spawn.
+//
+// This is the enforcing check, not the tool factory's. Spawn is the last point
+// where a bad scope can be reported to someone who can act on it: once the
+// Process exists, a claim that refuses to run it is put back as pending with a
+// backoff and never consumes the retry budget, so the row would requeue forever
+// and hold its Subject with it — no later turn on that thread could start.
+func ValidateSpawn(name agentkit.AgentName, sc Scope) error {
+	if err := sc.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid agent scope", goerr.V("agent", name))
+	}
+	if RequiresActor(name) && sc.ActorUserID == "" {
+		return goerr.New("this agent may only run with an identified actor",
+			goerr.V("agent", name))
+	}
+	return nil
+}

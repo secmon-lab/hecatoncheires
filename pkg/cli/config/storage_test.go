@@ -10,9 +10,7 @@ import (
 
 func TestStorage_ConfigureRequiresBucket(t *testing.T) {
 	var s config.Storage
-	historyRepo, traceRepo, cleanup, err := s.Configure(context.Background())
+	archive, err := s.Configure(context.Background())
 	gt.Error(t, err)
-	gt.Value(t, historyRepo).Nil()
-	gt.Value(t, traceRepo).Nil()
-	gt.Value(t, cleanup).Nil()
+	gt.Value(t, archive).Nil()
 }

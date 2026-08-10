@@ -4,10 +4,14 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentproc"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -71,6 +75,43 @@ func (r *Repository) LogAttrs() []slog.Attr {
 		)
 	}
 	return attrs
+}
+
+// ConfigureAgentProcess builds the agentkit Process store on the same backend
+// as the application repository. The returned cleanup closes the store's own
+// Firestore client and must be called on shutdown.
+//
+// It is a separate client from Configure's because the two implement different
+// contracts and are consumed by different layers; sharing one would put the
+// application repository's connection lifetime under the kernel's control.
+func (r *Repository) ConfigureAgentProcess(ctx context.Context) (agentkit.Repository, func(), error) {
+	switch r.backend {
+	case "firestore":
+		if r.projectID == "" {
+			return nil, nil, goerr.New("firestore-project-id is required when using firestore backend")
+		}
+		repo, err := agentproc.NewWithProject(ctx, r.projectID, r.databaseID)
+		if err != nil {
+			return nil, nil, goerr.Wrap(err, "failed to initialize the agent process repository")
+		}
+		cleanup := func() {
+			if err := repo.Close(); err != nil {
+				errutil.Handle(context.Background(),
+					goerr.Wrap(err, "failed to close the agent process repository"),
+					"failed to close the agent process repository")
+			}
+		}
+		return repo, cleanup, nil
+
+	case "memory":
+		// The in-memory store keeps agent processes in this instance only, so a
+		// crash loses every in-flight run. That matches what the memory backend
+		// already promises for every other entity.
+		return agentprocmemory.New(), func() {}, nil
+
+	default:
+		return nil, nil, goerr.New("invalid repository backend", goerr.V("backend", r.backend))
+	}
 }
 
 // Configure initializes and returns a repository based on the configured backend.
