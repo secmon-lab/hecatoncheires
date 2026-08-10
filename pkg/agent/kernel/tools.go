@@ -1,0 +1,238 @@
+package kernel
+
+import (
+	"context"
+	"slices"
+
+	"github.com/gollem-dev/agentkit"
+	"github.com/gollem-dev/gollem"
+	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+)
+
+// ToolDeps carries the clients and usecases every toolset is built from. It is
+// the kernel-side counterpart of the per-host dependency bundles the old
+// runtime assembled per turn: the kernel is built once at startup, and the
+// factory below narrows these down to one Process's scope on every claim.
+//
+// Optional fields may be nil; the corresponding toolset then resolves to
+// nothing, which is what lets one wiring serve deployments that configure
+// different integrations.
+type ToolDeps struct {
+	Repo     interfaces.Repository    // required
+	Registry *model.WorkspaceRegistry // required
+
+	SlackBot       slacktool.BotService
+	SlackSearch    slacktool.SearchService
+	SlackRetriever slacktool.MessageRetriever
+	NotionClient   notiontool.Client
+	GitHubClient   *githubtool.Client
+	WebFetchClient *webfetch.Client
+
+	// JiraTools carries the already-expanded Jira read tools. gollem exposes no
+	// helper to turn a ToolSet into []Tool, so the CLI expands it once at
+	// startup and hands the result through as a plain slice.
+	JiraTools []gollem.Tool
+
+	ActionUC     core.ActionMutator
+	ActionStepUC core.ActionStepMutator
+	CaseUC       casewriter.CaseMutator
+	CaseRefUC    core.CaseRefReader
+
+	CaseMultiUC       casemulti.CaseUsecase
+	CaseMultiActionUC casemulti.ActionUsecase
+
+	MemoUC memotool.MemoMutator
+
+	KnowledgeAccessor knowledgetool.KnowledgeAccessor
+	KnowledgeMutator  knowledgetool.KnowledgeMutator
+}
+
+// Validate enforces the required-field contract.
+func (d *ToolDeps) Validate() error {
+	if d == nil {
+		return goerr.New("tool deps is nil")
+	}
+	if d.Repo == nil {
+		return goerr.New("repository is required")
+	}
+	if d.Registry == nil {
+		return goerr.New("workspace registry is required")
+	}
+	return nil
+}
+
+// defaultToolSets is the full palette each agent kind is entitled to. It is
+// what Scope.ToolSets == ["*"] expands to.
+//
+// A sub-agent carries an explicit subset instead, chosen by the planner from
+// the same vocabulary, so this table is also the ceiling on what any task in a
+// run can ask for.
+func defaultToolSets(name agentkit.AgentName) []string {
+	switch name {
+	case AgentCaseChannel, AgentJobSimple, AgentAssist:
+		return agent.KnownToolSetIDsCaseChannel
+	case AgentCaseThread:
+		return agent.KnownToolSetIDsThreadWrite
+	case AgentCaseThreadCreate:
+		return agent.KnownToolSetIDsNoCore
+	case AgentWorkspace:
+		return agent.KnownToolSetIDsWorkspaceChannel
+	case AgentProposal, AgentTask:
+		return agent.KnownToolSetIDs
+	case AgentJob:
+		return agent.KnownToolSetIDsCaseChannel
+	default:
+		return agent.KnownToolSetIDs
+	}
+}
+
+// NewToolFactory returns the agentkit.ToolFactory the Kernel is built with. It
+// runs once per claim and narrows ToolDeps down to the Process's own scope.
+func NewToolFactory(d ToolDeps) (agentkit.ToolFactory, error) {
+	if err := d.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "validate tool deps")
+	}
+	return func(ctx context.Context, proc *agentkit.Process) ([]gollem.Tool, error) {
+		sc := ScopeFrom(proc.Metadata)
+
+		var entry *model.WorkspaceEntry
+		if sc.WorkspaceID != "" {
+			found, err := d.Registry.Get(sc.WorkspaceID)
+			if err != nil {
+				// The Process names a workspace this deployment does not
+				// configure. Failing the claim is right: handing the agent an
+				// empty tool set would let it run to a confident, tool-less
+				// conclusion instead of surfacing the misconfiguration.
+				return nil, goerr.Wrap(err, "resolve the process workspace",
+					goerr.V("process", proc.ID), goerr.V("workspace_id", sc.WorkspaceID))
+			}
+			entry = found
+		}
+
+		var target *model.Case
+		if sc.CaseID != 0 {
+			found, err := d.Repo.Case().Get(ctx, sc.WorkspaceID, sc.CaseID)
+			if err != nil {
+				return nil, goerr.Wrap(err, "load the process case",
+					goerr.V("process", proc.ID), goerr.V("case_id", sc.CaseID))
+			}
+			target = found
+		}
+
+		resolver := agent.NewToolSetResolver(buildToolSetDeps(d, sc, entry, target))
+
+		ids := sc.ToolSets
+		if slices.Contains(ids, ToolSetsAll) {
+			ids = defaultToolSets(proc.Agent)
+		}
+		return resolver.Resolve(ids), nil
+	}, nil
+}
+
+// buildToolSetDeps flavours every toolset for one Process's scope. It is the
+// single place the old per-host buildTools / buildToolResolver functions
+// collapsed into, so the tools an agent kind gets are decided in one table
+// rather than in five.
+func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target *model.Case) agent.ToolSetDeps {
+	deps := agent.ToolSetDeps{
+		Core: core.Deps{
+			Repo:         d.Repo,
+			WorkspaceID:  sc.WorkspaceID,
+			CaseID:       sc.CaseID,
+			ActionUC:     d.ActionUC,
+			ActionStepUC: d.ActionStepUC,
+			CaseRefUC:    d.CaseRefUC,
+		},
+		Slack: slacktool.Deps{
+			Bot:       d.SlackBot,
+			Search:    d.SlackSearch,
+			Retriever: d.SlackRetriever,
+		},
+		Notion:   notiontool.Deps{Client: d.NotionClient},
+		GitHub:   d.GitHubClient,
+		WebFetch: d.WebFetchClient,
+		Jira:     d.JiraTools,
+		Knowledge: knowledgetool.Deps{
+			WorkspaceID: sc.WorkspaceID,
+			Accessor:    d.KnowledgeAccessor,
+		},
+	}
+
+	if entry != nil {
+		deps.Core.StatusSet = entry.ActionStatusSet
+	}
+
+	// Actions exist only in channel-mode cases. A thread-mode case tracks its
+	// progress through the board status instead, and the usecase boundary
+	// rejects action writes there, so the whole core toolset is withheld rather
+	// than offered as tools that can only fail.
+	if target != nil && target.IsThreadBound() {
+		deps.OmitCore = true
+	}
+
+	// The single-case writer tools are pinned to the case this Process runs on;
+	// a Process without one (a draft, or a create turn) gets none.
+	if target != nil && entry != nil {
+		deps.CaseWrite = casewriter.Deps{
+			CaseUC:      d.CaseUC,
+			WorkspaceID: sc.WorkspaceID,
+			CaseID:      sc.CaseID,
+			Schema:      entry.FieldSchema,
+			StatusSet:   entry.CaseStatusSet,
+		}
+	}
+
+	// The cross-case tools take a case id at call time, so they need no pinned
+	// case — only the actor whose access they must respect.
+	if d.CaseMultiUC != nil && entry != nil {
+		multi := casemulti.Deps{
+			WorkspaceID: sc.WorkspaceID,
+			ActorID:     sc.ActorUserID,
+			CaseUC:      d.CaseMultiUC,
+			Schema:      entry.FieldSchema,
+		}
+		if entry.IsThreadMode() {
+			// A thread-mode workspace manages no Actions. Handing over the board
+			// status set both withholds the cross-case action tools and swaps
+			// case__close_case (which rejects a thread-bound case) for the
+			// status transition.
+			multi.StatusSet = entry.CaseStatusSet
+		} else {
+			multi.ActionUC = d.CaseMultiActionUC
+		}
+		deps.CaseMulti = multi
+	}
+
+	// Memo tools need the workspace's memo schema to coerce field values.
+	if entry != nil && entry.MemoConfig.Enabled() {
+		deps.Memo = memotool.Deps{
+			Repo:        d.Repo,
+			WorkspaceID: sc.WorkspaceID,
+			CaseID:      sc.CaseID,
+			MemoUC:      d.MemoUC,
+			Schema:      entry.MemoConfig.FieldSchema,
+		}
+	}
+
+	// Knowledge is workspace-wide and visible to everyone, so a run processing a
+	// private case gets the read tools only: a write would carry that case's
+	// contents into shared knowledge.
+	if !sc.PrivateCase {
+		deps.Knowledge.Mutator = d.KnowledgeMutator
+	}
+
+	return deps
+}

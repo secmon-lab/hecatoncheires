@@ -410,3 +410,10 @@ func (uc *UseCases) SlackMessageRetriever() slacktool.MessageRetriever {
 func (uc *UseCases) NotionToolClient() notiontool.Client {
 	return uc.notionTool
 }
+
+// GitHubToolClient returns the agent-tool GitHub client (nil when no GitHub App
+// was configured). Exposed so the agent runtime wiring can bind the GitHub read
+// tools into the agent tool set.
+func (uc *UseCases) GitHubToolClient() *github.Client {
+	return uc.githubClient
+}

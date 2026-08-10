@@ -9,6 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
@@ -24,6 +25,20 @@ const (
 	ToolSetGitHub   = "github"
 	ToolSetWebFetch = "webfetch"
 	ToolSetJira     = "jira"
+	// ToolSetCore is the FULL action toolset (create / update / archive), as
+	// opposed to the read-only core_ro handed to investigation sub-agents. Only
+	// the channel-mode case agent asks for it: a thread-mode workspace manages
+	// no Actions at all.
+	ToolSetCore = "core"
+	// ToolSetMemo is the Case-scoped memo toolset (memo__*). Built only when a
+	// memo mutator and a memo schema are configured for the workspace.
+	ToolSetMemo = "memo"
+	// ToolSetKnowledge is the workspace knowledge toolset INCLUDING the write
+	// tools. The read tools are always available to every agent regardless of
+	// what it requested (see Resolve); this ID is what additionally grants
+	// create/update, and a host withholds it while processing a private case so
+	// that case's contents cannot leak into workspace-wide knowledge.
+	ToolSetKnowledge = "knowledge"
 	// ToolSetCaseWrite is the writer toolset for the single case the turn is
 	// pinned to: the full casewriter set (case__update_case, case__assign,
 	// case__unassign, and the mode-appropriate case__update_case_status /
@@ -88,6 +103,23 @@ var KnownToolSetIDsWorkspaceChannel = []string{
 	ToolSetJira,
 }
 
+// KnownToolSetIDsCaseChannel is the full palette of the channel-mode case
+// agent: the mutating action tools, the single-case writer tools, memos,
+// knowledge writes, and every read-only auxiliary set. Unlike the planner-facing
+// lists above it is not a menu an LLM chooses from — the channel-mode agent runs
+// a single ReAct loop and is handed the whole set at once.
+var KnownToolSetIDsCaseChannel = []string{
+	ToolSetCore,
+	ToolSetSlackRO,
+	ToolSetNotion,
+	ToolSetGitHub,
+	ToolSetWebFetch,
+	ToolSetJira,
+	ToolSetCaseWrite,
+	ToolSetMemo,
+	ToolSetKnowledge,
+}
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -98,11 +130,20 @@ func IsKnownToolSetID(id string) bool {
 // vary per turn — workspace, case, slack/notion/github clients) and called
 // per sub-agent.
 type ToolSetResolver struct {
-	core     []gollem.Tool
-	slack    []gollem.Tool
-	notion   []gollem.Tool
-	github   []gollem.Tool
-	webfetch []gollem.Tool
+	core []gollem.Tool
+	// coreFull is the mutating action tool set (ToolSetCore). It is separate
+	// from core (read-only) rather than a superset flag because one resolver
+	// can be asked for either by different tasks in the same run.
+	coreFull []gollem.Tool
+	// memo is the Case-scoped memo tool set (ToolSetMemo).
+	memo []gollem.Tool
+	// knowledgeWrite is the knowledge tool set including create/update
+	// (ToolSetKnowledge). Empty unless a mutator is wired.
+	knowledgeWrite []gollem.Tool
+	slack          []gollem.Tool
+	notion         []gollem.Tool
+	github         []gollem.Tool
+	webfetch       []gollem.Tool
 	// jira is the already-expanded Jira read tool set (see
 	// pkg/agent/tool/jira). Unlike notion/github/webfetch this is not built
 	// from a client here: it is handed in pre-expanded via ToolSetDeps.Jira
@@ -161,6 +202,11 @@ type ToolSetDeps struct {
 	// CaseMulti.CaseUC is non-nil (the workspace-channel host wires it); a nil
 	// CaseUC leaves the toolset empty so requesting the ID resolves to nothing.
 	CaseMulti casemulti.Deps
+
+	// Memo backs the memo toolset. Built only when Memo.MemoUC and a memo
+	// schema are present; a zero value leaves the toolset empty so requesting
+	// the ID resolves to nothing.
+	Memo memotool.Deps
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -169,12 +215,27 @@ type ToolSetDeps struct {
 // case while a turn is forming.
 func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	var coreTools []gollem.Tool
+	var coreFullTools []gollem.Tool
 	if !d.OmitCore {
 		coreTools = core.NewReadOnly(d.Core)
+		coreFullTools = core.New(d.Core)
 	}
 	var knowledge []gollem.Tool
+	var knowledgeWrite []gollem.Tool
 	if d.Knowledge.Accessor != nil {
 		knowledge = knowledgetool.NewReadOnly(d.Knowledge)
+		// The write tools need a mutator. A host that wires none (or withholds
+		// it for a private case) leaves this empty, so requesting the knowledge
+		// id resolves to the read tools it already had.
+		if d.Knowledge.Mutator != nil {
+			knowledgeWrite = knowledgetool.New(d.Knowledge)
+		}
+	}
+	// Memo tools need both a mutator and the workspace's memo schema; the schema
+	// drives field coercion in create/update.
+	var memoTools []gollem.Tool
+	if d.Memo.MemoUC != nil && d.Memo.Schema != nil {
+		memoTools = memotool.New(d.Memo)
 	}
 	// The writer tools need a mutator and a concrete case to be pinned to. A
 	// create turn (no case yet) or a host that wires no CaseUC leaves the set
@@ -191,15 +252,18 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 		caseMulti = casemulti.New(d.CaseMulti)
 	}
 	return &ToolSetResolver{
-		core:      coreTools,
-		slack:     slacktool.NewReadOnly(d.Slack),
-		notion:    notiontool.New(d.Notion),
-		github:    githubtool.New(d.GitHub),
-		webfetch:  webfetch.New(d.WebFetch),
-		jira:      d.Jira,
-		caseWrite: caseWrite,
-		knowledge: knowledge,
-		caseMulti: caseMulti,
+		core:           coreTools,
+		coreFull:       coreFullTools,
+		memo:           memoTools,
+		knowledgeWrite: knowledgeWrite,
+		slack:          slacktool.NewReadOnly(d.Slack),
+		notion:         notiontool.New(d.Notion),
+		github:         githubtool.New(d.GitHub),
+		webfetch:       webfetch.New(d.WebFetch),
+		jira:           d.Jira,
+		caseWrite:      caseWrite,
+		knowledge:      knowledge,
+		caseMulti:      caseMulti,
 	}
 }
 
@@ -220,49 +284,57 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 		copy(out, r.knowledge)
 		return out
 	}
+	// The knowledge base set is read-only, and requesting ToolSetKnowledge
+	// REPLACES it with the read+write set rather than adding to it — the write
+	// set already contains the read tools, and offering a tool twice makes the
+	// model's tool list ambiguous.
+	base := r.knowledge
+	if slices.Contains(ids, ToolSetKnowledge) && len(r.knowledgeWrite) > 0 {
+		base = r.knowledgeWrite
+	}
+
 	// Pre-compute capacity to avoid repeated growth.
-	total := len(r.knowledge)
+	total := len(base)
 	for _, id := range ids {
-		switch id {
-		case ToolSetCoreRO:
-			total += len(r.core)
-		case ToolSetSlackRO:
-			total += len(r.slack)
-		case ToolSetNotion:
-			total += len(r.notion)
-		case ToolSetGitHub:
-			total += len(r.github)
-		case ToolSetWebFetch:
-			total += len(r.webfetch)
-		case ToolSetJira:
-			total += len(r.jira)
-		case ToolSetCaseWrite:
-			total += len(r.caseWrite)
-		case ToolSetCaseMulti:
-			total += len(r.caseMulti)
-		}
+		total += len(r.setFor(id))
 	}
 	out := make([]gollem.Tool, 0, total)
-	out = append(out, r.knowledge...)
+	out = append(out, base...)
 	for _, id := range ids {
-		switch id {
-		case ToolSetCoreRO:
-			out = append(out, r.core...)
-		case ToolSetSlackRO:
-			out = append(out, r.slack...)
-		case ToolSetNotion:
-			out = append(out, r.notion...)
-		case ToolSetGitHub:
-			out = append(out, r.github...)
-		case ToolSetWebFetch:
-			out = append(out, r.webfetch...)
-		case ToolSetJira:
-			out = append(out, r.jira...)
-		case ToolSetCaseWrite:
-			out = append(out, r.caseWrite...)
-		case ToolSetCaseMulti:
-			out = append(out, r.caseMulti...)
-		}
+		out = append(out, r.setFor(id)...)
 	}
 	return out
+}
+
+// setFor maps one toolset id to its built slice. Unknown ids resolve to nothing
+// so a stray id cannot crash a turn.
+//
+// ToolSetKnowledge resolves to nothing here on purpose: it selects which
+// knowledge set Resolve uses as its always-included base, so returning it again
+// would duplicate every knowledge tool.
+func (r *ToolSetResolver) setFor(id string) []gollem.Tool {
+	switch id {
+	case ToolSetCoreRO:
+		return r.core
+	case ToolSetCore:
+		return r.coreFull
+	case ToolSetSlackRO:
+		return r.slack
+	case ToolSetNotion:
+		return r.notion
+	case ToolSetGitHub:
+		return r.github
+	case ToolSetWebFetch:
+		return r.webfetch
+	case ToolSetJira:
+		return r.jira
+	case ToolSetCaseWrite:
+		return r.caseWrite
+	case ToolSetCaseMulti:
+		return r.caseMulti
+	case ToolSetMemo:
+		return r.memo
+	default:
+		return nil
+	}
 }

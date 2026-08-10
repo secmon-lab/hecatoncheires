@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"cloud.google.com/go/storage"
+	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
@@ -52,29 +53,44 @@ func (s *Storage) LogAttrs() []slog.Attr {
 	}
 }
 
-// Configure builds the gollem HistoryRepository and trace.Repository backed by
-// Cloud Storage. The returned cleanup function closes the underlying storage
-// client and must be called on shutdown. An error is returned when the bucket
-// flag is empty.
-func (s *Storage) Configure(ctx context.Context) (gollem.HistoryRepository, trace.Repository, func(), error) {
+// Archive bundles the Cloud Storage-backed stores the agent runtime writes to.
+// They share one client, which Close releases.
+type Archive struct {
+	// History is the per-session gollem history store used by the pre-agentkit
+	// agent runtime.
+	History gollem.HistoryRepository
+	// Trace is where each agent run's archive is written.
+	Trace trace.Repository
+	// ProcessHistory is the agentkit HistoryStore: one immutable version per
+	// committed transition, so a Process's conversation rolls back with its
+	// state.
+	ProcessHistory agentkit.HistoryStore
+	// Close releases the shared storage client and must be called on shutdown.
+	Close func()
+}
+
+// Configure builds the Cloud Storage-backed archive. An error is returned when
+// the bucket flag is empty.
+func (s *Storage) Configure(ctx context.Context) (*Archive, error) {
 	if s.bucket == "" {
-		return nil, nil, nil, goerr.New("--cloud-storage-bucket is required")
+		return nil, goerr.New("--cloud-storage-bucket is required")
 	}
 
 	client, err := storage.NewClient(ctx)
 	if err != nil {
-		return nil, nil, nil, goerr.Wrap(err, "failed to create Cloud Storage client",
+		return nil, goerr.Wrap(err, "failed to create Cloud Storage client",
 			goerr.V("bucket", s.bucket),
 		)
 	}
 
-	historyRepo := agentarchive.NewCloudStorageHistoryRepository(client, s.bucket, s.prefix)
-	traceRepo := agentarchive.NewCloudStorageTraceRepository(client, s.bucket, s.prefix)
-
-	cleanup := func() {
-		if err := client.Close(); err != nil {
-			errutil.Handle(context.Background(), goerr.Wrap(err, "failed to close Cloud Storage client"), "failed to close Cloud Storage client")
-		}
-	}
-	return historyRepo, traceRepo, cleanup, nil
+	return &Archive{
+		History:        agentarchive.NewCloudStorageHistoryRepository(client, s.bucket, s.prefix),
+		Trace:          agentarchive.NewCloudStorageTraceRepository(client, s.bucket, s.prefix),
+		ProcessHistory: agentarchive.NewCloudStorageHistoryStore(client, s.bucket, s.prefix),
+		Close: func() {
+			if err := client.Close(); err != nil {
+				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to close Cloud Storage client"), "failed to close Cloud Storage client")
+			}
+		},
+	}, nil
 }

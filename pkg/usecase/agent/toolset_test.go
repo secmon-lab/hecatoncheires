@@ -2,6 +2,9 @@ package agent_test
 
 import (
 	"context"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,10 +13,13 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
@@ -281,4 +287,194 @@ func TestKnownToolSetIDsThreadWrite(t *testing.T) {
 	// It is the no-core list plus exactly the case-write id, in order.
 	want := append(append([]string{}, agent.KnownToolSetIDsNoCore...), agent.ToolSetCaseWrite)
 	gt.Array(t, agent.KnownToolSetIDsThreadWrite).Equal(want)
+}
+
+// toolNames extracts the tool names so a test can assert on the exact set the
+// agent is handed, rather than on a count that hides which tools moved.
+func toolNames(tools []gollem.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tl := range tools {
+		names = append(names, tl.Spec().Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// stubMemoMutator is a no-op memotool.MemoMutator; the resolver tests only
+// assert which tools get built, never invoke them.
+type stubMemoMutator struct{}
+
+func (stubMemoMutator) CreateMemo(context.Context, string, int64, string, map[string]model.FieldValue) (*model.Memo, error) {
+	return &model.Memo{}, nil
+}
+
+func (stubMemoMutator) UpdateMemo(context.Context, string, int64, model.MemoID, *string, map[string]model.FieldValue) (*model.Memo, error) {
+	return &model.Memo{}, nil
+}
+
+func (stubMemoMutator) ArchiveMemo(context.Context, string, int64, model.MemoID) (*model.Memo, error) {
+	return &model.Memo{}, nil
+}
+
+// stubKnowledgeAccessor / stubKnowledgeMutator are no-op knowledge backends.
+type stubKnowledgeAccessor struct{}
+
+func (stubKnowledgeAccessor) SearchKnowledge(context.Context, string, string, []model.TagID, int) ([]*model.Knowledge, error) {
+	return nil, nil
+}
+
+func (stubKnowledgeAccessor) GetKnowledge(context.Context, string, model.KnowledgeID) (*model.Knowledge, error) {
+	return &model.Knowledge{}, nil
+}
+
+func (stubKnowledgeAccessor) ListTags(context.Context, string) ([]*model.Tag, error) {
+	return nil, nil
+}
+
+type stubKnowledgeMutator struct{}
+
+func (stubKnowledgeMutator) CreateTag(context.Context, string, string) (*model.Tag, error) {
+	return &model.Tag{}, nil
+}
+
+func (stubKnowledgeMutator) UpdateTag(context.Context, string, model.TagID, string) (*model.Tag, error) {
+	return &model.Tag{}, nil
+}
+
+func (stubKnowledgeMutator) DeleteTag(context.Context, string, model.TagID) error { return nil }
+
+func (stubKnowledgeMutator) CreateKnowledge(context.Context, string, string, string, []model.TagID) (*model.Knowledge, error) {
+	return &model.Knowledge{}, nil
+}
+
+func (stubKnowledgeMutator) UpdateKnowledge(context.Context, string, model.KnowledgeID, *string, *string, *[]model.TagID) (*model.Knowledge, error) {
+	return &model.Knowledge{}, nil
+}
+
+// TestToolSetResolver_ResolveCoreFull pins that the full (mutating) action set
+// is what ToolSetCore resolves to, and that it is a strict superset of what
+// core_ro resolves to.
+func TestToolSetResolver_ResolveCoreFull(t *testing.T) {
+	r := agent.NewToolSetResolver(agent.ToolSetDeps{
+		Core: core.Deps{WorkspaceID: "ws", CaseID: 1},
+	})
+
+	full := toolNames(r.Resolve([]string{agent.ToolSetCore}))
+	readOnly := toolNames(r.Resolve([]string{agent.ToolSetCoreRO}))
+
+	gt.Array(t, readOnly).Equal([]string{"core__get_action", "core__list_actions"})
+	gt.Array(t, full).Equal([]string{
+		"core__add_action_step",
+		"core__archive_action",
+		"core__create_action",
+		"core__delete_action_step",
+		"core__get_action",
+		"core__list_action_steps",
+		"core__list_actions",
+		"core__rename_action_step",
+		"core__set_action_assignee",
+		"core__set_action_step_done",
+		"core__unarchive_action",
+		"core__update_action",
+		"core__update_action_status",
+	})
+	for _, name := range readOnly {
+		gt.Bool(t, slices.Contains(full, name)).True()
+	}
+}
+
+// TestToolSetResolver_OmitCoreWithholdsBothCoreSets pins that a thread-mode
+// workspace, which manages no Actions, gets neither the read-only nor the
+// mutating action tools.
+func TestToolSetResolver_OmitCoreWithholdsBothCoreSets(t *testing.T) {
+	r := agent.NewToolSetResolver(agent.ToolSetDeps{
+		OmitCore: true,
+		Core:     core.Deps{WorkspaceID: "ws", CaseID: 1},
+	})
+	gt.Array(t, r.Resolve([]string{agent.ToolSetCore})).Length(0)
+	gt.Array(t, r.Resolve([]string{agent.ToolSetCoreRO})).Length(0)
+}
+
+// TestToolSetResolver_Memo pins that memo tools appear only when both the
+// mutator and the workspace's memo schema are wired, since the schema drives
+// field coercion in create/update.
+func TestToolSetResolver_Memo(t *testing.T) {
+	t.Run("absent without a mutator", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			Memo: memotool.Deps{WorkspaceID: "ws", CaseID: 1, Schema: &config.FieldSchema{}},
+		})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetMemo})).Length(0)
+	})
+
+	t.Run("absent without a schema", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			Memo: memotool.Deps{WorkspaceID: "ws", CaseID: 1, MemoUC: stubMemoMutator{}},
+		})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetMemo})).Length(0)
+	})
+
+	t.Run("present with both", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			Memo: memotool.Deps{
+				WorkspaceID: "ws", CaseID: 1,
+				MemoUC: stubMemoMutator{}, Schema: &config.FieldSchema{},
+			},
+		})
+		names := toolNames(r.Resolve([]string{agent.ToolSetMemo}))
+		gt.Bool(t, len(names) > 0).True()
+		for _, name := range names {
+			gt.Bool(t, strings.HasPrefix(name, "memo__")).True()
+		}
+	})
+}
+
+// TestToolSetResolver_Knowledge pins the read/write split: the read tools are
+// always offered, and requesting the knowledge id REPLACES them with the
+// read+write set rather than offering the read tools twice.
+func TestToolSetResolver_Knowledge(t *testing.T) {
+	deps := knowledgetool.Deps{WorkspaceID: "ws", Accessor: stubKnowledgeAccessor{}}
+
+	t.Run("read tools are offered without being requested", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{Knowledge: deps})
+		names := toolNames(r.Resolve([]string{agent.ToolSetSlackRO}))
+		gt.Bool(t, len(names) > 0).True()
+		for _, name := range names {
+			gt.Bool(t, strings.HasPrefix(name, "knowledge__")).True()
+		}
+	})
+
+	t.Run("without a mutator the knowledge id adds nothing", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{Knowledge: deps})
+		gt.Array(t, toolNames(r.Resolve([]string{agent.ToolSetKnowledge}))).
+			Equal(toolNames(r.Resolve(nil)))
+	})
+
+	t.Run("with a mutator the knowledge id widens the set without duplicating", func(t *testing.T) {
+		writable := deps
+		writable.Mutator = stubKnowledgeMutator{}
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{Knowledge: writable})
+
+		readOnly := toolNames(r.Resolve(nil))
+		full := toolNames(r.Resolve([]string{agent.ToolSetKnowledge}))
+
+		gt.Bool(t, len(full) > len(readOnly)).True()
+		gt.Array(t, full).Equal(slices.Compact(slices.Clone(full)))
+		for _, name := range readOnly {
+			gt.Bool(t, slices.Contains(full, name)).True()
+		}
+	})
+}
+
+func TestKnownToolSetIDsCaseChannel(t *testing.T) {
+	gt.Array(t, agent.KnownToolSetIDsCaseChannel).Equal([]string{
+		agent.ToolSetCore,
+		agent.ToolSetSlackRO,
+		agent.ToolSetNotion,
+		agent.ToolSetGitHub,
+		agent.ToolSetWebFetch,
+		agent.ToolSetJira,
+		agent.ToolSetCaseWrite,
+		agent.ToolSetMemo,
+		agent.ToolSetKnowledge,
+	})
 }

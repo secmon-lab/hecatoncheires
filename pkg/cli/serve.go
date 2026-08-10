@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -14,22 +15,26 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -171,6 +176,7 @@ func cmdServe() *cli.Command {
 	var sentryCfg config.Sentry
 	var mcpCfg config.MCP
 	var jobCfg config.JobConcurrency
+	var agentCfg config.Agent
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -236,6 +242,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, sentryCfg.Flags()...)
 	flags = append(flags, mcpCfg.Flags()...)
 	flags = append(flags, jobCfg.Flags()...)
+	flags = append(flags, agentCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -481,16 +488,18 @@ func cmdServe() *cli.Command {
 			var storageCleanup func()
 			var agentHistoryRepo gollem.HistoryRepository
 			var agentTraceRepo trace.Repository
+			var agentProcessHistory agentkit.HistoryStore
 			if slackSvc != nil {
-				historyRepo, traceRepo, cleanup, err := storageCfg.Configure(ctx)
+				archive, err := storageCfg.Configure(ctx)
 				if err != nil {
 					return goerr.Wrap(err, "failed to configure agent storage")
 				}
-				storageCleanup = cleanup
-				agentHistoryRepo = historyRepo
-				agentTraceRepo = traceRepo
-				ucOpts = append(ucOpts, usecase.WithHistoryRepository(historyRepo))
-				ucOpts = append(ucOpts, usecase.WithTraceRepository(traceRepo))
+				storageCleanup = archive.Close
+				agentHistoryRepo = archive.History
+				agentTraceRepo = archive.Trace
+				agentProcessHistory = archive.ProcessHistory
+				ucOpts = append(ucOpts, usecase.WithHistoryRepository(archive.History))
+				ucOpts = append(ucOpts, usecase.WithTraceRepository(archive.Trace))
 				logging.Default().Info("Agent session archive enabled", logAttrsToArgs(storageCfg.LogAttrs())...)
 			}
 			defer func() {
@@ -521,6 +530,74 @@ func cmdServe() *cli.Command {
 			if llmErr != nil {
 				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
 			}
+			// Build the agentkit runtime. It is skipped entirely without an LLM
+			// client, for the same reason the Job runtime is: there is nothing
+			// for an agent to run.
+			var agentKernel *agentkit.Kernel
+			if llmClient != nil {
+				agentProcessRepo, agentProcessCleanup, apErr := repoCfg.ConfigureAgentProcess(ctx)
+				if apErr != nil {
+					return goerr.Wrap(apErr, "failed to configure the agent process repository")
+				}
+				defer agentProcessCleanup()
+
+				budgets, bErr := agentCfg.Budgets()
+				if bErr != nil {
+					return bErr
+				}
+
+				// Without Cloud Storage (no Slack wired) the agent runtime falls
+				// back to in-process stores. Those hold nothing across instances,
+				// which is only acceptable because that configuration cannot
+				// deliver a Slack-driven agent turn in the first place.
+				processHistory := agentProcessHistory
+				if processHistory == nil {
+					processHistory = agentarchive.NewMemoryHistoryStore()
+				}
+				kernelTrace := agentTraceRepo
+				if kernelTrace == nil {
+					kernelTrace = agentarchive.NewMemoryTraceRepository()
+				}
+
+				k, kErr := agentkernel.Build(agentkernel.Deps{
+					Repo:    agentProcessRepo,
+					History: processHistory,
+					LLM:     llmClient,
+					Trace:   kernelTrace,
+					Budgets: budgets,
+					// No strategy is registered yet: the agent hosts move onto
+					// this runtime in the following changes. Serving an empty
+					// registry is harmless — the worker simply finds nothing to
+					// claim — and it keeps the wiring in one place.
+					Agents: agentkit.NewRegistry(),
+					Tools: agentkernel.ToolDeps{
+						Repo:              repo,
+						Registry:          registry,
+						SlackBot:          slackSvc,
+						SlackSearch:       uc.SlackSearchService(),
+						SlackRetriever:    uc.SlackMessageRetriever(),
+						NotionClient:      uc.NotionToolClient(),
+						GitHubClient:      uc.GitHubToolClient(),
+						WebFetchClient:    uc.WebFetchClient(),
+						JiraTools:         jiraTools,
+						ActionUC:          usecase.NewActionToolAdapter(uc.Action),
+						ActionStepUC:      usecase.NewActionStepToolAdapter(uc.ActionStep),
+						CaseUC:            usecase.NewCaseToolAdapter(uc.Case),
+						CaseRefUC:         uc.Case,
+						CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(uc.Case),
+						CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(uc.Action, uc.ActionStep),
+						MemoUC:            usecase.NewMemoToolAdapter(uc.Memo),
+						KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
+						KnowledgeMutator:  usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
+					},
+				})
+				if kErr != nil {
+					return goerr.Wrap(kErr, "failed to build the agent runtime")
+				}
+				agentKernel = k
+				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
+			}
+
 			jobUC, jobRunner, jobErr := buildJobRuntime(jobRuntimeDeps{
 				Repo:           repo,
 				Registry:       registry,
@@ -681,6 +758,37 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("MCP endpoint enabled", logAttrsToArgs(mcpCfg.LogAttrs())...)
 			} else {
 				logging.Default().Info("MCP endpoint disabled")
+			}
+
+			// Start the agent runtime worker. It claims runnable agent processes
+			// from the shared store and drives one transition at a time, and it
+			// is also what makes eager dispatch work: agentkit only dispatches a
+			// just-spawned process in-process while a Serve is running here.
+			//
+			// Its context is cancelled on shutdown, which stops new claims; a
+			// transition already in flight finishes and commits, and anything it
+			// did not reach is picked up by another instance once the lease
+			// expires.
+			agentServeCtx, stopAgentServe := context.WithCancel(ctx)
+			defer stopAgentServe()
+			if agentKernel != nil {
+				if err := agentCfg.ValidateWorker(); err != nil {
+					return goerr.Wrap(err, "invalid agent worker configuration")
+				}
+				async.Dispatch(agentServeCtx, func(c context.Context) error {
+					logging.Default().Info("Starting agent runtime worker",
+						logAttrsToArgs(agentCfg.LogAttrs())...)
+					if err := agentKernel.Serve(c,
+						agentkit.WithLease(agentCfg.WorkerLease()),
+						agentkit.WithPollInterval(agentCfg.WorkerPollInterval()),
+						agentkit.WithPollConcurrency(agentCfg.WorkerPollConcurrency()),
+						agentkit.WithMaxConcurrent(agentCfg.WorkerConcurrency()),
+					); err != nil && !errors.Is(err, context.Canceled) {
+						return goerr.Wrap(err, "agent runtime worker stopped")
+					}
+					logging.Default().Info("Agent runtime worker stopped")
+					return nil
+				})
 			}
 
 			// Create HTTP server
