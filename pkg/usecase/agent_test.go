@@ -354,6 +354,24 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		// Second message: final response (via PostThreadReply)
 		gt.Value(t, posts[1].ChannelID).Equal("C-AGENT-001")
 		gt.Value(t, posts[1].Text).Equal("This is a test response from the AI agent.")
+
+		// The run also records the per-call timeline the case agent page reads.
+		// The Sequence numbers come from the repository, not from an in-process
+		// counter, which is what lets a run that moves between instances keep one
+		// ordered timeline.
+		runs, err := repo.JobRun().ListByCase(ctx, "ws-test", 1)
+		gt.NoError(t, err).Required()
+		gt.Array(t, runs).Length(1).Required()
+		events, err := repo.JobRunEvent().List(ctx,
+			model.JobRunKey{WorkspaceID: "ws-test", CaseID: 1, JobID: runs[0].JobID},
+			runs[0].LastRunID)
+		gt.NoError(t, err).Required()
+		// One LLM call, recorded as a request and a response.
+		gt.Array(t, events).Length(2).Required()
+		gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
+		gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+		gt.Value(t, events[0].Sequence).Equal(int64(1))
+		gt.Value(t, events[1].Sequence).Equal(int64(2))
 	})
 
 	t.Run("responds to mention in thread", func(t *testing.T) {

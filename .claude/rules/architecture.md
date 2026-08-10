@@ -454,12 +454,18 @@ Rules for this path:
   (`pkg/agent/kernel/middleware.go`), keyed on the Process id rather than the
   Slack session id. `threadcase` still passes its handler via
   `planexec.RunRequest.TraceHandler`. Do not replace the archive trace.
-- **The per-call `JobRunEvent` timeline is NOT yet wired for agentkit-hosted
-  runs.** It needs one sequence allocator per run that survives a run moving
-  between instances, which an in-process `runtrace.Sequencer` cannot be. Until
-  that lands, an agentkit-hosted mention run records its `JobRunLog` totals but
-  no per-call events. Do not wire a per-claim Sequencer as a stopgap — it would
-  issue the same sequence number twice.
+- **The per-call `JobRunEvent` timeline is wired in the claim bracket**, as a
+  second sink alongside the archive (`runTimeline` in
+  `pkg/agent/kernel/middleware.go`, combined via `trace.Multi`). A fresh
+  `runtrace.Handler` per claim is correct because **`Sequence` is allocated by the
+  repository inside each write** (`JobRunEventRepository.AppendNext`): several
+  Handlers on one run — this claim's, a later claim's on another instance, and the
+  run owner's `RUN_ERROR` — append into one ordered timeline with nothing shared
+  between them. There is no `runtrace.Sequencer` any more; do not reintroduce an
+  in-process counter, which would hand the same number out twice.
+- A run gets a timeline only when its Scope names one: workspace, case, job and
+  job-run id must all be set. A run that keeps no run record leaves the archive as
+  its only trace, which is the intended outcome rather than a gap.
 - `ModeCreate` (creation-time materialize) is excluded — the requirement is
   post-creation mentions.
 - Trace recording is observability: `Open`/`Finish`/event failures are

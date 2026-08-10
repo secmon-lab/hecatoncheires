@@ -395,11 +395,12 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
   `Process.Metrics`**, not from a trace handler: the run's transitions are
   spread across claims and possibly instances, so only the Process row
   accumulates the whole total.
-- **The per-call event timeline is not yet available for agentkit-hosted
-  runs.** `JobRunEvent` rows need a sequence allocator that survives a run
-  moving between instances; until that exists, a `casebound` run shows its
-  totals and its outcome on the page but no per-call rows. `threadcase` and
-  Job runs are unaffected.
+- **The per-call event timeline works for agentkit-hosted runs too.** Each claim
+  opens a `runtrace.Handler` alongside the archive recorder, and `Sequence` is
+  allocated by the repository inside each write — so a run that moves between
+  instances, or a resumed turn, keeps appending to one ordered timeline. This is
+  why there is no in-process sequence counter any more: two claims would both
+  start at 1.
 - Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
   mentions in an already-created case are listed.
 
