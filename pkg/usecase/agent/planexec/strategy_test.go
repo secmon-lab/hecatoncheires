@@ -475,10 +475,12 @@ func TestStructuredFinalIsValidatedAndRegenerated(t *testing.T) {
 		`{"title":"Deploy failure"}`,
 	}}
 	var finalizerCalls atomic.Int32
+	var seenWorkspace []string
 	cfg := planexec.Config[caseDraft]{
-		Finalizers: []func(*caseDraft) error{
-			func(d *caseDraft) error {
+		Finalizers: []planexec.Finalizer[caseDraft]{
+			func(_ context.Context, meta map[string]string, d *caseDraft) error {
 				finalizerCalls.Add(1)
+				seenWorkspace = append(seenWorkspace, meta["workspace_id"])
 				if d.Title == "forbidden" {
 					return goerr.New("that title is not allowed in this workspace")
 				}
@@ -488,7 +490,7 @@ func TestStructuredFinalIsValidatedAndRegenerated(t *testing.T) {
 	}
 	rt := newRuntime(t, planner.client(), generousBudget(), nil, nil, cfg)
 
-	proc := rt.run(t, textInput(), nil)
+	proc := rt.run(t, textInput(), map[string]string{"workspace_id": "ws-1"})
 	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
 
 	out, err := planexec.DecodeOutput[caseDraft](proc.Output)
@@ -500,6 +502,9 @@ func TestStructuredFinalIsValidatedAndRegenerated(t *testing.T) {
 	// The finalizer ran on every shape-valid attempt, and the rejection reached
 	// the model.
 	gt.Number(t, finalizerCalls.Load()).Equal(2)
+	// Each call saw the run's own scope, which is what lets one registered
+	// finalizer validate against the workspace the run belongs to.
+	gt.Array(t, seenWorkspace).Equal([]string{"ws-1", "ws-1"})
 	seen := planner.seen()
 	gt.String(t, seen[len(seen)-1]).Contains("rejected")
 }

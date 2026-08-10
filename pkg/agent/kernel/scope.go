@@ -30,6 +30,8 @@ const (
 	metaJobRunID    = "job_run_id"
 	metaEventType   = "event_type"
 	metaSlotGated   = "slot_gated"
+	metaUIChannelID = "ui_channel_id"
+	metaUIThreadTS  = "ui_thread_ts"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -56,9 +58,20 @@ type Scope struct {
 	// CaseID is the case this Process is pinned to, or 0 when there is none
 	// (a draft turn, or a create turn before the case exists).
 	CaseID int64
-	// ChannelID / ThreadTS locate the Slack thread the run reports into.
+	// ChannelID / ThreadTS locate the run's own Slack thread — the one its Session
+	// is keyed on, and the one its answer belongs in.
 	ChannelID string
 	ThreadTS  string
+	// UIChannelID / UIThreadTS locate the thread the person who triggered the run
+	// is watching, for the runs where that is a DIFFERENT thread: a case raised by
+	// a reaction lives in the monitored channel, while the reactor is watching the
+	// thread they reacted in. Progress, questions and failure notices go here;
+	// the case's own content still goes to ChannelID / ThreadTS.
+	//
+	// Empty means the two are the same thread, which is the case for every other
+	// run. UITarget resolves that.
+	UIChannelID string
+	UIThreadTS  string
 	// SessionID is the model.Session this thread belongs to. It doubles as the
 	// turn-lock subject id.
 	SessionID string
@@ -96,6 +109,10 @@ func (s Scope) Validate() error {
 	if (s.ChannelID == "") != (s.ThreadTS == "") {
 		return goerr.New("channel id and thread ts must be set together",
 			goerr.V("channel_id", s.ChannelID), goerr.V("thread_ts", s.ThreadTS))
+	}
+	if (s.UIChannelID == "") != (s.UIThreadTS == "") {
+		return goerr.New("ui channel id and ui thread ts must be set together",
+			goerr.V("ui_channel_id", s.UIChannelID), goerr.V("ui_thread_ts", s.UIThreadTS))
 	}
 	if s.CaseID != 0 && s.WorkspaceID == "" {
 		return goerr.New("workspace id is required when a case id is set",
@@ -143,6 +160,8 @@ func (s Scope) Metadata() map[string]string {
 	}
 	put(metaChannelID, s.ChannelID)
 	put(metaThreadTS, s.ThreadTS)
+	put(metaUIChannelID, s.UIChannelID)
+	put(metaUIThreadTS, s.UIThreadTS)
 	put(metaSessionID, s.SessionID)
 	put(metaActorUserID, s.ActorUserID)
 	put(metaLang, s.Lang)
@@ -172,6 +191,8 @@ func ScopeFrom(m map[string]string) Scope {
 		CaseID:      caseID,
 		ChannelID:   m[metaChannelID],
 		ThreadTS:    m[metaThreadTS],
+		UIChannelID: m[metaUIChannelID],
+		UIThreadTS:  m[metaUIThreadTS],
 		SessionID:   m[metaSessionID],
 		ActorUserID: m[metaActorUserID],
 		Lang:        m[metaLang],
@@ -182,6 +203,17 @@ func ScopeFrom(m map[string]string) Scope {
 		EventType:   m[metaEventType],
 		SlotGated:   m[metaSlotGated] == "1",
 	}
+}
+
+// UITarget returns the thread the requester is watching, falling back to the
+// run's own thread when they are the same. Callers use it instead of reading
+// UIChannelID directly, so the "empty means the same thread" rule lives in one
+// place.
+func (s Scope) UITarget() (channelID, threadTS string) {
+	if s.UIChannelID != "" {
+		return s.UIChannelID, s.UIThreadTS
+	}
+	return s.ChannelID, s.ThreadTS
 }
 
 // WithToolSets returns a copy of the metadata map carrying a different toolset

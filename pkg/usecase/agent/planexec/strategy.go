@@ -138,15 +138,26 @@ type TextResult struct {
 // Validate satisfies Validatable.
 func (TextResult) Validate() error { return nil }
 
+// Finalizer validates a decoded terminal output against context T.Validate()
+// cannot see — a workspace field schema, say. A returned error is fed back to the
+// model and the output regenerated.
+//
+// It MUST be side-effect-free: a later attempt re-runs every finalizer, so
+// committing anything here would commit it several times. Committing the output
+// happens after the turn, never in a finalizer.
+//
+// meta is the run's Process metadata, which is what lets one registered finalizer
+// serve every run: the host reads its own scope back out of it (the workspace,
+// the case) instead of closing over a single run's values, since a strategy is
+// registered once at startup and then serves every run of that agent.
+type Finalizer[T any] func(ctx context.Context, meta map[string]string, out *T) error
+
 // Config is the host's terminal-output contract.
 type Config[T Validatable] struct {
 	// Decode turns the terminal JSON into T. nil uses encoding/json.
 	Decode func([]byte) (*T, error)
-	// Finalizers validate the decoded output against host context Validate()
-	// cannot see (a workspace field schema, say). A returned error is fed back to
-	// the model and the output regenerated, so a finalizer MUST be
-	// side-effect-free: a later attempt re-runs every one.
-	Finalizers []func(*T) error
+	// Finalizers run in order after T.Validate(); the first rejection wins.
+	Finalizers []Finalizer[T]
 	// TextOnly generates the terminal output as prose instead of JSON and puts it
 	// in Output.Text.
 	TextOnly bool
@@ -495,7 +506,7 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		derr = (*out).Validate()
 	}
 	if derr == nil {
-		derr = runFinalizers(out, s.cfg.Finalizers)
+		derr = s.runFinalizers(ctx, sys.Metadata(), out)
 	}
 	if derr != nil {
 		st.FinalRetries++
@@ -530,6 +541,21 @@ func (s *strategy[T]) carryCorrection(ctx context.Context, st state, cause error
 	errutil.Handle(ctx, goerr.Wrap(cause, msg, goerr.T(errutil.TagBenign)), msg)
 	st.NextInput = planRetryInput(cause)
 	return st
+}
+
+// runFinalizers applies the host's validators to a decoded terminal output. The
+// first rejection wins: a later finalizer would be judging an output that is
+// already going to be regenerated.
+func (s *strategy[T]) runFinalizers(ctx context.Context, meta map[string]string, out *T) error {
+	for _, fin := range s.cfg.Finalizers {
+		if fin == nil {
+			continue
+		}
+		if err := fin(ctx, meta, out); err != nil {
+			return goerr.Wrap(err, "final output rejected by finalizer")
+		}
+	}
+	return nil
 }
 
 // decodeFinal turns the terminal JSON into T, through the host's decoder when it

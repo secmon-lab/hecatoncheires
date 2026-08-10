@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -55,7 +56,7 @@ func firstSlackUserMention(text string, ignoreIDs ...string) string {
 // form's Submit interaction (HandleThreadCaseQuestionSubmit) — a free-text
 // reply or mention in the not-yet-a-case thread is intentionally ignored.
 func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -131,7 +132,7 @@ func (uc *AgentUseCase) botUserID(ctx context.Context) string {
 // keyed on (channel, threadTS); TriggerTS is the mention's own TS so a
 // re-delivered mention dedups without a follow-up being mistaken for a retry.
 func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -233,7 +234,7 @@ func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg
 // the question form's Submit interaction, and free-text replies / mentions in
 // a not-yet-a-case thread are ignored (see handleThreadModeEvent).
 func (uc *AgentUseCase) ResumeThreadCaseCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -367,14 +368,22 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 	// agent investigates.
 	traceMsg.appendLine(ctx, i18n.T(ctx, i18n.MsgThreadCaseCreating))
 
-	res, runErr := uc.threadcase.RunTurn(ctx, threadcase.TurnRequest{
+	// The session predates the case, so the reporter and the reaction source it
+	// carries are how a durable run's completion handler attributes the case it
+	// commits — that handler may run on an instance that never saw this request.
+	uc.persistCreateSession(ctx, session)
+
+	res, runErr := uc.runThreadCaseTurn(ctx, threadcase.TurnRequest{
 		Session:           session,
 		Workspace:         req.entry,
 		Case:              nil,
 		ChannelID:         req.caseChannel,
 		ThreadTS:          req.caseTS,
+		UIChannelID:       req.uiChannel,
+		UIThreadTS:        req.uiTS,
 		MentionText:       req.mentionText,
 		MentionTS:         req.mentionTS,
+		MentionUserID:     req.reporter,
 		TriggerTS:         req.triggerTS,
 		Mode:              threadcase.ModeCreate,
 		SystemMessages:    req.systemMessages,
@@ -388,6 +397,9 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 	}
 
 	switch res.Status {
+	case threadcase.StatusStarted:
+		// The case, its outcome post and any question form are all produced by the
+		// run's own completion handler.
 	case threadcase.StatusCompleted:
 		if res.Case == nil {
 			return res.Status, nil
@@ -404,6 +416,23 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		// Another turn owns this thread, or a duplicate trigger — drop.
 	}
 	return res.Status, nil
+}
+
+// persistCreateSession writes the pre-case session so a durable run's completion
+// handler can read the reporter and the reaction source back out of storage.
+//
+// The in-process path did not need this: the create handler closed over the same
+// values. A durable run has no such closure — its handler runs after the turn, on
+// whichever instance committed the terminal transition.
+func (uc *AgentUseCase) persistCreateSession(ctx context.Context, session *model.Session) {
+	if uc.durableThreadcase == nil {
+		return
+	}
+	session.UpdatedAt = time.Now().UTC()
+	if err := uc.deps.Repo.Session().Put(ctx, session); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "persist the pre-case session",
+			goerr.V("session_id", session.ID)), "persist the pre-case session")
+	}
 }
 
 // postCreatedCaseOutcome posts the case-creation outcome. For a normal / same-
@@ -530,7 +559,7 @@ func (uc *AgentUseCase) postThreadCaseSummary(ctx context.Context, wsID string, 
 // thread: it runs the investigation agent and applies the resulting decision
 // (respond / materialize / close).
 func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry, foundCase *model.Case) error {
-	if uc.threadcase == nil || entry == nil || foundCase == nil {
+	if !uc.threadCaseReady() || entry == nil || foundCase == nil {
 		return nil
 	}
 	logger := logging.From(ctx)
@@ -559,7 +588,7 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 	}
 
 	traceMsg := uc.newTraceMessage(channelID, threadTS)
-	res, runErr := uc.threadcase.RunTurn(ctx, threadcase.TurnRequest{
+	res, runErr := uc.runThreadCaseTurn(ctx, threadcase.TurnRequest{
 		Session:     session,
 		Workspace:   entry,
 		Case:        foundCase,
@@ -585,6 +614,9 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 	}
 
 	switch res.Status {
+	case threadcase.StatusStarted:
+		// The decision is applied by the run's own completion handler.
+		return nil
 	case threadcase.StatusBusy:
 		uc.postThreadReply(ctx, channelID, threadTS, i18n.T(ctx, i18n.MsgKeyAgentBusy))
 		return nil

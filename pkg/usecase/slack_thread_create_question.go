@@ -170,7 +170,7 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || uc.deps.Registry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || uc.deps.Registry == nil {
 		return nil
 	}
 	ctx = contextWithSlackUserLang(ctx, uc.deps.SlackService, callback.User.ID)

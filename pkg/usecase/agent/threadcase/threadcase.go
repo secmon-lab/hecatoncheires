@@ -50,7 +50,14 @@ type TurnRequest struct {
 
 	ChannelID string
 	ThreadTS  string
-	MentionTS string
+	// UIChannelID / UIThreadTS locate the thread the requester is watching, for the
+	// one flow where that is not ChannelID / ThreadTS: a case raised by a reaction
+	// lives in the monitored channel while the reactor watches the thread they
+	// reacted in. Progress, questions and failure notices go there. Empty means the
+	// two are the same thread.
+	UIChannelID string
+	UIThreadTS  string
+	MentionTS   string
 	// MentionText is the raw text of the mention that triggered this turn.
 	MentionText string
 	// MentionUserID / MentionUserName identify its author. The ID is what makes
@@ -95,6 +102,10 @@ const (
 	// StatusFallback means the planner exhausted its budget or errored before
 	// reaching a decision. Decision is nil.
 	StatusFallback
+	// StatusStarted means the turn was spawned on the durable agent runtime; its
+	// decision is applied by the run's own completion handler. The caller has
+	// nothing to apply or post.
+	StatusStarted
 )
 
 // Result is the outcome of RunTurn.

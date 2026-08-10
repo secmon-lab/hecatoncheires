@@ -54,10 +54,11 @@ type AgentUseCase struct {
 	// Non-nil whenever the LLM client is configured.
 	workspaceAgent *wsagent.UseCase
 
-	// durableWorkspaceAgent runs the same cross-case agent on the agentkit
-	// runtime. It is filled by RegisterAgents, so a deployment that has not built
-	// a Kernel keeps taking workspaceAgent's in-process path.
+	// durableWorkspaceAgent and durableThreadcase run the same agents on the
+	// agentkit runtime. They are filled by RegisterAgents, so a deployment that has
+	// not built a Kernel keeps taking the in-process paths above.
 	durableWorkspaceAgent *wsagent.Durable
+	durableThreadcase     *threadcase.Durable
 }
 
 // AgentDeps groups the dependencies AgentUseCase needs. Required fields are
@@ -237,14 +238,25 @@ func (uc *AgentUseCase) RegisterAgents(
 		return goerr.Wrap(err, "register the task sub-agent")
 	}
 
+	progress := agentProgress{uc: uc}
+
 	wa, err := wsagent.NewDurable(wsagentHost{uc: uc}, locator)
 	if err != nil {
 		return goerr.Wrap(err, "build the workspace agent")
 	}
-	if err := wa.Register(reg, taskAgent, agentProgress{uc: uc}, limiter, store); err != nil {
+	if err := wa.Register(reg, taskAgent, progress, limiter, store); err != nil {
 		return goerr.Wrap(err, "register the workspace agent")
 	}
 	uc.durableWorkspaceAgent = wa
+
+	tc, err := threadcase.NewDurable(uc.deps.Repo, uc.deps.Registry, threadcaseHost{uc: uc}, locator)
+	if err != nil {
+		return goerr.Wrap(err, "build the thread-mode agents")
+	}
+	if err := tc.Register(reg, taskAgent, progress, limiter, store); err != nil {
+		return goerr.Wrap(err, "register the thread-mode agents")
+	}
+	uc.durableThreadcase = tc
 	return nil
 }
 
@@ -258,6 +270,7 @@ func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel) {
 		uc.casebound.Bind(k)
 	}
 	uc.durableWorkspaceAgent.Bind(k)
+	uc.durableThreadcase.Bind(k)
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent

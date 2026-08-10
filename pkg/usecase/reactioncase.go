@@ -111,7 +111,7 @@ func (uc *SlackUseCases) handleReactionEvent(ctx context.Context, event *slackev
 // path. Idempotency comes from the existing turn lock plus GetBySlackThread, so
 // no ReactionClaim is needed here.
 func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *model.WorkspaceEntry, reporter, channelID, srcTS string) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -141,7 +141,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 // case summary on completion), and runs the creation dialog in the reactor's
 // source thread while binding the Case to the placeholder thread.
 func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *model.WorkspaceEntry, reporter, srcChannel, srcTS string) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || uc.deps.SlackService == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || uc.deps.SlackService == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
