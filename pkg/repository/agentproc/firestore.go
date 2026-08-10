@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -76,6 +77,25 @@ var claimImmediately = time.Time{}
 type processRow struct {
 	Process agentkit.Process
 	ClaimAt time.Time
+	// EventSeq is how many events this Process has appended. It is the source of
+	// the per-event Seq below, and it advances in the same transaction as the
+	// events it numbers.
+	EventSeq int64
+}
+
+// eventRow is the stored shape of an Event: the agentkit value nested whole,
+// plus the append position.
+//
+// The position cannot be derived from the EventID. IDs are uuid v7, and this
+// codebase already records what that costs — interfaces.JobRunEventRepository
+// says in as many words that uuid v7 doc ids "may diverge under clock skew" and
+// orders its own timeline on a sequence instead. A Process moves between
+// instances between claims, so ordering these on the id would reorder the
+// timeline whenever two machines' clocks disagree, and agentkit's Repository
+// contract asks for append order specifically.
+type eventRow struct {
+	Event agentkit.Event
+	Seq   int64
 }
 
 // keyGuard enforces idempotency-key uniqueness. It is created with the Process
@@ -384,12 +404,11 @@ func (r *Repository) ListAwaits(ctx context.Context, pid agentkit.ProcessID) ([]
 	return out, nil
 }
 
-// ListEvents returns a Process's events in append order. Event IDs are uuid v7,
-// which sort lexicographically by creation time, so ordering by document ID
-// reproduces the append order without a stored sequence number.
+// ListEvents returns a Process's events in append order, which is the stored
+// Seq — not the document id. See eventRow for why the id cannot stand in for it.
 func (r *Repository) ListEvents(ctx context.Context, pid agentkit.ProcessID, q agentkit.EventQuery) ([]*agentkit.Event, error) {
 	coll := r.processRef(pid).Collection(eventsCollection)
-	query := coll.OrderBy(firestore.DocumentID, firestore.Asc)
+	query := coll.OrderBy("Seq", firestore.Asc)
 
 	if q.After != "" {
 		// A cursor the Process has no event for means the caller's stored
@@ -403,7 +422,11 @@ func (r *Repository) ListEvents(ctx context.Context, pid agentkit.ProcessID, q a
 			}
 			return nil, goerr.Wrap(err, "get event cursor", goerr.V("process", pid))
 		}
-		query = query.StartAfter(afterSnap)
+		var after eventRow
+		if err := afterSnap.DataTo(&after); err != nil {
+			return nil, goerr.Wrap(err, "decode event cursor", goerr.V("process", pid))
+		}
+		query = query.Where("Seq", ">", after.Seq)
 	}
 	if q.Limit > 0 {
 		query = query.Limit(q.Limit)
@@ -415,10 +438,11 @@ func (r *Repository) ListEvents(ctx context.Context, pid agentkit.ProcessID, q a
 	}
 	out := make([]*agentkit.Event, 0, len(snaps))
 	for _, snap := range snaps {
-		var ev agentkit.Event
-		if err := snap.DataTo(&ev); err != nil {
+		var row eventRow
+		if err := snap.DataTo(&row); err != nil {
 			return nil, goerr.Wrap(err, "decode event", goerr.V("doc_id", snap.Ref.ID))
 		}
+		ev := row.Event
 		out = append(out, &ev)
 	}
 	return out, nil
@@ -468,7 +492,6 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 			}
 		}
 
-		stored := make(map[agentkit.ProcessID]*agentkit.Process, len(cs.Processes))
 		for _, p := range cs.Processes {
 			snap := snaps[r.processRef(p.ID).Path]
 			exists := snap != nil && snap.Exists()
@@ -483,17 +506,15 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 				return goerr.Wrap(agentkit.ErrConflict, "process does not exist",
 					goerr.V("process", p.ID), goerr.V("want_rev", p.Rev))
 			}
-			var doc processRow
-			if err := snap.DataTo(&doc); err != nil {
+			var row processRow
+			if err := snap.DataTo(&row); err != nil {
 				return goerr.Wrap(err, "decode process for revision check", goerr.V("process", p.ID))
 			}
-			if doc.Process.Rev != p.Rev {
+			if row.Process.Rev != p.Rev {
 				return goerr.Wrap(agentkit.ErrConflict, "process revision mismatch",
 					goerr.V("process", p.ID),
-					goerr.V("want_rev", p.Rev), goerr.V("stored_rev", doc.Process.Rev))
+					goerr.V("want_rev", p.Rev), goerr.V("stored_rev", row.Process.Rev))
 			}
-			cur := doc.Process
-			stored[p.ID] = &cur
 		}
 
 		for _, p := range cs.Processes {
@@ -514,13 +535,25 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 			}
 		}
 
+		// Number this change set's events, continuing each Process's own count.
+		// The numbers are handed out in ChangeSet order, which is the append
+		// order the Repository contract asks ListEvents to reproduce.
+		seqBase, err := r.eventSeqBases(cs, snaps, r.processRef)
+		if err != nil {
+			return err
+		}
+		seqNext := maps.Clone(seqBase)
+
 		// --- write phase ---
+		written := map[agentkit.ProcessID]struct{}{}
 		for _, p := range cs.Processes {
 			next := *p
 			next.Rev = p.Rev + 1
-			if err := tx.Set(r.processRef(p.ID), processRow{Process: next, ClaimAt: claimAtFor(&next)}); err != nil {
+			row := processRow{Process: next, ClaimAt: claimAtFor(&next), EventSeq: eventSeqAfter(cs, p.ID, seqBase)}
+			if err := tx.Set(r.processRef(p.ID), row); err != nil {
 				return goerr.Wrap(err, "tx set process", goerr.V("process", p.ID))
 			}
+			written[p.ID] = struct{}{}
 			if p.Rev == 0 {
 				if p.IdempotencyKey != "" {
 					if err := tx.Set(r.keyRef(p.IdempotencyKey), keyGuard{Key: p.IdempotencyKey, ProcessID: p.ID}); err != nil {
@@ -552,9 +585,32 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 			}
 		}
 		for _, ev := range cs.Events {
-			if err := tx.Set(r.eventRef(ev.ProcessID, ev.ID), ev); err != nil {
-				return goerr.Wrap(err, "tx set event",
+			seq := seqNext[ev.ProcessID]
+			seqNext[ev.ProcessID] = seq + 1
+			// Create, not Set: an event is an append. Re-using an id would
+			// otherwise replace an event a caller may already hold as a cursor,
+			// changing what that cursor resumes from.
+			if err := tx.Create(r.eventRef(ev.ProcessID, ev.ID), eventRow{Event: *ev, Seq: seq}); err != nil {
+				return goerr.Wrap(err, "tx create event",
 					goerr.V("process", ev.ProcessID), goerr.V("event", ev.ID))
+			}
+		}
+
+		// A Process whose events were appended without its row being rewritten
+		// still has to record how far its numbering got. Update touches only that
+		// field, so the Process keeps its Rev — the caller did not ask for a
+		// revision bump and a CAS the kernel did not expect would fence it out.
+		for pid, next := range seqNext {
+			if _, ok := written[pid]; ok {
+				continue
+			}
+			if next == seqBase[pid] {
+				continue
+			}
+			if err := tx.Update(r.processRef(pid), []firestore.Update{
+				{Path: "EventSeq", Value: next},
+			}); err != nil {
+				return goerr.Wrap(err, "tx advance event sequence", goerr.V("process", pid))
 			}
 		}
 		return nil
@@ -573,6 +629,60 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 		return goerr.Wrap(err, "apply agent process change set")
 	}
 	return nil
+}
+
+// eventSeqBases reads, for every Process this ChangeSet appends events to, the
+// number of events it has already appended.
+//
+// An event for a Process that is neither stored nor being inserted here has
+// nothing to be appended to, and numbering it would put it in an order nobody
+// can reproduce, so it is a conflict rather than a silent write.
+func (r *Repository) eventSeqBases(
+	cs agentkit.ChangeSet,
+	snaps map[string]*firestore.DocumentSnapshot,
+	refOf func(agentkit.ProcessID) *firestore.DocumentRef,
+) (map[agentkit.ProcessID]int64, error) {
+	inserting := map[agentkit.ProcessID]struct{}{}
+	for _, p := range cs.Processes {
+		if p.Rev == 0 {
+			inserting[p.ID] = struct{}{}
+		}
+	}
+
+	bases := map[agentkit.ProcessID]int64{}
+	for _, ev := range cs.Events {
+		if _, seen := bases[ev.ProcessID]; seen {
+			continue
+		}
+		snap := snaps[refOf(ev.ProcessID).Path]
+		if snap == nil || !snap.Exists() {
+			if _, ok := inserting[ev.ProcessID]; ok {
+				bases[ev.ProcessID] = 0
+				continue
+			}
+			return nil, goerr.Wrap(agentkit.ErrConflict, "event for a process that does not exist",
+				goerr.V("process", ev.ProcessID), goerr.V("event", ev.ID))
+		}
+		var row processRow
+		if err := snap.DataTo(&row); err != nil {
+			return nil, goerr.Wrap(err, "decode process for event numbering",
+				goerr.V("process", ev.ProcessID))
+		}
+		bases[ev.ProcessID] = row.EventSeq
+	}
+	return bases, nil
+}
+
+// eventSeqAfter is the event count a Process row carries once this ChangeSet's
+// events are appended.
+func eventSeqAfter(cs agentkit.ChangeSet, pid agentkit.ProcessID, bases map[agentkit.ProcessID]int64) int64 {
+	next := bases[pid]
+	for _, ev := range cs.Events {
+		if ev.ProcessID == pid {
+			next++
+		}
+	}
+	return next
 }
 
 // checkChangeSetUniqueness rejects a ChangeSet whose own inserts collide on an
@@ -632,6 +742,11 @@ func (r *Repository) collectReadRefs(cs agentkit.ChangeSet) ([]*firestore.Docume
 		if p.Subject != nil {
 			add(r.subjectRef(*p.Subject))
 		}
+	}
+	// An event's Process row carries the append counter, and a ChangeSet may
+	// append events without rewriting that row, so it has to be read too.
+	for _, ev := range cs.Events {
+		add(r.processRef(ev.ProcessID))
 	}
 	return refs, order
 }

@@ -80,22 +80,28 @@ func (d *ToolDeps) Validate() error {
 // A sub-agent carries an explicit subset instead, chosen by the planner from
 // the same vocabulary, so this table is also the ceiling on what any task in a
 // run can ask for.
-func defaultToolSets(name agentkit.AgentName) []string {
+//
+// An agent kind whose palette has not been established yet is an error rather
+// than a fallback. The Job and assist tool sets are deliberately NARROWER than
+// the case-channel one — a Job gets core.NewWriterForJob, which withholds
+// archive / unarchive / delete_action_step precisely because an unattended run
+// must not act on a misjudgement — so defaulting them to a wider palette would
+// silently hand an unattended agent destructive tools. Those palettes are added
+// with the hosts that use them.
+func defaultToolSets(name agentkit.AgentName) ([]string, error) {
 	switch name {
-	case AgentCaseChannel, AgentJobSimple, AgentAssist:
-		return agent.KnownToolSetIDsCaseChannel
+	case AgentCaseChannel:
+		return agent.KnownToolSetIDsCaseChannel, nil
 	case AgentCaseThread:
-		return agent.KnownToolSetIDsThreadWrite
+		return agent.KnownToolSetIDsThreadWrite, nil
 	case AgentCaseThreadCreate:
-		return agent.KnownToolSetIDsNoCore
+		return agent.KnownToolSetIDsNoCore, nil
 	case AgentWorkspace:
-		return agent.KnownToolSetIDsWorkspaceChannel
+		return agent.KnownToolSetIDsWorkspaceChannel, nil
 	case AgentProposal, AgentTask:
-		return agent.KnownToolSetIDs
-	case AgentJob:
-		return agent.KnownToolSetIDsCaseChannel
+		return agent.KnownToolSetIDs, nil
 	default:
-		return agent.KnownToolSetIDs
+		return nil, goerr.New("no default tool palette for this agent", goerr.V("agent", name))
 	}
 }
 
@@ -136,7 +142,12 @@ func NewToolFactory(d ToolDeps) (agentkit.ToolFactory, error) {
 
 		ids := sc.ToolSets
 		if slices.Contains(ids, ToolSetsAll) {
-			ids = defaultToolSets(proc.Agent)
+			expanded, err := defaultToolSets(proc.Agent)
+			if err != nil {
+				return nil, goerr.Wrap(err, "expand the agent tool palette",
+					goerr.V("process", proc.ID))
+			}
+			ids = expanded
 		}
 		return resolver.Resolve(ids), nil
 	}, nil
@@ -230,7 +241,13 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 	// Knowledge is workspace-wide and visible to everyone, so a run processing a
 	// private case gets the read tools only: a write would carry that case's
 	// contents into shared knowledge.
-	if !sc.PrivateCase {
+	//
+	// The check ORs the flag recorded at spawn with the case's CURRENT state. A
+	// durable Process can sit waiting for a person for hours, and a case that
+	// turned private in the meantime must not still be writable through a
+	// snapshot taken before the change. Keeping the spawn-time flag as well means
+	// a case the factory could not load stays restricted rather than opening up.
+	if !sc.PrivateCase && (target == nil || !target.IsPrivate) {
 		deps.Knowledge.Mutator = d.KnowledgeMutator
 	}
 

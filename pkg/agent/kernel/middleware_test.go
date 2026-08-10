@@ -3,6 +3,7 @@ package kernel_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
 // probeState is the state of the probe strategy below.
@@ -202,7 +204,7 @@ func TestClaimMiddlewareEstablishesTheRequestScope(t *testing.T) {
 	proc := runToCompletion(t, rt, kernel.Scope{
 		ActorUserID: "U-actor",
 		Lang:        string(i18n.LangJA),
-		ToolSets:    []string{kernel.ToolSetsAll},
+		ToolSets:    []string{agent.ToolSetJira},
 	})
 
 	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
@@ -220,7 +222,7 @@ func TestClaimMiddlewareEstablishesTheRequestScope(t *testing.T) {
 // every run.
 func TestEffectMiddlewareRecordsTheTrace(t *testing.T) {
 	rt := newProbeRuntime(t)
-	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{kernel.ToolSetsAll}})
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
 	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
 
 	ids := rt.traces.TraceIDs(string(proc.RootID))
@@ -234,16 +236,36 @@ func TestEffectMiddlewareRecordsTheTrace(t *testing.T) {
 	gt.Bool(t, kinds["tool_exec"]).True()
 }
 
-// TestClaimTraceIDIsPerClaim pins that the archive id carries the committed
-// transition count. trace.Repository.Save overwrites by id, so a per-Process id
-// would let a later, partial claim replace an earlier complete archive.
+// TestClaimTraceIDIsPerClaim pins that the archive id identifies one CLAIM, not
+// one Process. trace.Repository.Save overwrites by id, and a claim that dies
+// before committing is reclaimed at the same transition count — so the id has to
+// carry the lease token, which is the one value that differs per claim.
 func TestClaimTraceIDIsPerClaim(t *testing.T) {
 	rt := newProbeRuntime(t)
-	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{kernel.ToolSetsAll}})
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
 
 	ids := rt.traces.TraceIDs(string(proc.RootID))
 	gt.Array(t, ids).Length(1).Required()
-	gt.String(t, ids[0]).Equal(string(proc.ID) + ".0")
+
+	prefix := string(proc.ID) + ".0."
+	gt.String(t, ids[0]).HasPrefix(prefix)
+	gt.String(t, strings.TrimPrefix(ids[0], prefix)).NotEqual("")
+}
+
+// TestClaimRefusedWithoutAnActor pins the fail-closed rule for agents that act
+// on a person's behalf. A context with no auth token is read by the usecase
+// layer as a system context and BYPASSES private-case access control, so a
+// missing actor there widens access rather than narrowing it.
+func TestClaimRefusedWithoutAnActor(t *testing.T) {
+	gt.Bool(t, kernel.RequiresActor(kernel.AgentWorkspace)).True()
+
+	// The per-case agents ran without an auth token before this runtime, so
+	// requiring one for them would be a separate, deliberate tightening.
+	for _, name := range []agentkit.AgentName{
+		kernel.AgentCaseChannel, kernel.AgentCaseThread, kernel.AgentJob, kernel.AgentAssist,
+	} {
+		gt.Bool(t, kernel.RequiresActor(name)).False()
+	}
 }
 
 // TestTokensAreMeteredOntoTheProcess pins that the metrics the budget reads are
@@ -251,7 +273,7 @@ func TestClaimTraceIDIsPerClaim(t *testing.T) {
 // triggers.
 func TestTokensAreMeteredOntoTheProcess(t *testing.T) {
 	rt := newProbeRuntime(t)
-	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{kernel.ToolSetsAll}})
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
 
 	gt.Value(t, proc.Metrics.InputTokens).Equal(int64(11))
 	gt.Value(t, proc.Metrics.OutputTokens).Equal(int64(7))

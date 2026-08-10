@@ -183,6 +183,129 @@ func TestProcessRowPreservesEveryField(t *testing.T) {
 	gt.Bool(t, claimAt.Equal(lease)).True()
 }
 
+// newStoredProcess inserts a Process so events have something to attach to.
+func newStoredProcess(t *testing.T, repo *agentproc.Repository) agentkit.ProcessID {
+	t.Helper()
+	ctx := context.Background()
+	pid := agentkit.ProcessID(uuid.Must(uuid.NewV7()).String())
+	now := time.Now().UTC()
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Processes: []*agentkit.Process{{
+		ID:        pid,
+		Agent:     "test",
+		Status:    agentkit.ProcessPending,
+		RootID:    pid,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}})).Required()
+	return pid
+}
+
+func newEvent(pid agentkit.ProcessID, id string, payload string) *agentkit.Event {
+	return &agentkit.Event{
+		ID:        agentkit.EventID(id),
+		ProcessID: pid,
+		Type:      agentkit.EventProcessCreated,
+		Payload:   []byte(payload),
+		At:        time.Now().UTC(),
+	}
+}
+
+// TestListEventsOrdersByAppendNotByID is the reason events carry a stored
+// sequence. Event ids are uuid v7, and this codebase already records that uuid
+// v7 ids "may diverge under clock skew" across instances
+// (interfaces.JobRunEventRepository). A durable Process moves between instances
+// between claims, so an id that sorts BEFORE its predecessor is a real outcome —
+// and the append order must survive it.
+func TestListEventsOrdersByAppendNotByID(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepository(t)
+	pid := newStoredProcess(t, repo)
+
+	// The second append deliberately carries the lexicographically SMALLER id,
+	// as a machine with a slow clock would produce.
+	first := newEvent(pid, "zz-appended-first", "1")
+	second := newEvent(pid, "aa-appended-second", "2")
+
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{first}})).Required()
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{second}})).Required()
+
+	events, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{})
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	gt.Value(t, events[0].ID).Equal(first.ID)
+	gt.Value(t, events[1].ID).Equal(second.ID)
+
+	t.Run("the cursor follows the same order", func(t *testing.T) {
+		after, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{After: first.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, after).Length(1).Required()
+		gt.Value(t, after[0].ID).Equal(second.ID)
+	})
+}
+
+// TestApplyRejectsDuplicateEventID pins that an event is an append. Replacing an
+// event would change what a caller holding its id as a cursor resumes from.
+func TestApplyRejectsDuplicateEventID(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepository(t)
+	pid := newStoredProcess(t, repo)
+
+	ev := newEvent(pid, "e-1", "first")
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{ev}})).Required()
+
+	again := newEvent(pid, "e-1", "second")
+	gt.Error(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{again}})).Is(agentkit.ErrConflict)
+
+	events, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{})
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(1).Required()
+	gt.Value(t, string(events[0].Payload)).Equal("first")
+}
+
+// TestApplyRejectsEventForUnknownProcess pins that an event cannot be numbered
+// against a Process that does not exist: there is nothing to append it to, and a
+// silent write would land in an order nobody can reproduce.
+func TestApplyRejectsEventForUnknownProcess(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepository(t)
+
+	ev := newEvent(agentkit.ProcessID("never-created"), "e-1", "x")
+	gt.Error(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{ev}})).Is(agentkit.ErrConflict)
+}
+
+// TestAppendingEventsDoesNotBumpRev pins that the append counter rides on the
+// Process row without changing its revision. A revision the kernel did not
+// expect would fence out the very worker that asked for the append.
+func TestAppendingEventsDoesNotBumpRev(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepository(t)
+	pid := newStoredProcess(t, repo)
+
+	before, err := repo.GetProcess(ctx, pid)
+	gt.NoError(t, err).Required()
+
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{
+		newEvent(pid, "e-1", "1"),
+		newEvent(pid, "e-2", "2"),
+	}})).Required()
+
+	after, err := repo.GetProcess(ctx, pid)
+	gt.NoError(t, err).Required()
+	gt.Value(t, after.Rev).Equal(before.Rev)
+
+	// The next append continues the numbering rather than restarting it.
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{
+		newEvent(pid, "e-3", "3"),
+	}})).Required()
+
+	events, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{})
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(3).Required()
+	gt.Value(t, string(events[0].Payload)).Equal("1")
+	gt.Value(t, string(events[1].Payload)).Equal("2")
+	gt.Value(t, string(events[2].Payload)).Equal("3")
+}
+
 func TestHashID(t *testing.T) {
 	t.Run("produces a firestore-safe document id", func(t *testing.T) {
 		got := agentproc.HashIDForTest("workspaces/ws-1/cases/7")

@@ -9,9 +9,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/agenttrace"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -55,9 +52,19 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 				ctx = i18n.ContextWithLang(ctx, i18n.Lang(sc.Lang))
 			}
 			// The actor was validated before Spawn; this is where it becomes the
-			// access scope every tool in the claim runs under. A run without one
-			// acts with no user scope, which the private-case gates read as "no
-			// membership".
+			// access scope every tool in the claim runs under.
+			//
+			// An agent that acts on a person's behalf must not run without one.
+			// A context with no auth token is read by the usecase layer as a
+			// system context and BYPASSES private-case access control, so a
+			// missing actor there is not reduced access — it is full access.
+			// Refusing the claim keeps that failure loud instead of silently
+			// widening what the run can reach.
+			if sc.ActorUserID == "" && RequiresActor(proc.Agent) {
+				return agentkit.ClaimRefused, goerr.New(
+					"this agent may only run with an identified actor",
+					goerr.V("process", proc.ID), goerr.V("agent", proc.Agent))
+			}
 			if sc.ActorUserID != "" {
 				ctx = auth.ContextWithToken(ctx, &auth.Token{Sub: sc.ActorUserID})
 			}
@@ -67,11 +74,13 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 				trace.WithTraceID(claimTraceID(proc)),
 				trace.WithMetadata(claimTraceMetadata(proc, sc)),
 			)
-			handlers := []trace.Handler{recorder}
-			if rt := newRunTraceHandler(ctx, d.Tools.Repo, sc); rt != nil {
-				handlers = append(handlers, rt)
-			}
-			handler := trace.Multi(handlers...)
+			// The per-run JobRunEvent timeline is NOT wired here. Its contract
+			// requires one sequence allocator per run
+			// (interfaces.JobRunEventRepository), and a durable run's claims are
+			// spread across instances, so any in-process allocator would issue
+			// the same number twice. It is wired with the Job host, together with
+			// an allocator that survives that.
+			handler := trace.Handler(recorder)
 			ctx = withTraceHandler(ctx, handler)
 
 			// The root span has to be opened here, and it has to bracket the
@@ -98,10 +107,15 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 // claimTraceID names one claim's archive object. A Process runs over many
 // claims, possibly on different instances, and trace.Repository.Save overwrites
 // by id — so a per-Process id would let a later, partial claim replace the
-// complete archive of an earlier one. The committed transition count makes each
-// claim's id distinct and orders them.
+// complete archive of an earlier one.
+//
+// The committed transition count alone is not enough: a claim that dies before
+// committing anything is reclaimed at the SAME StateSeq, and the reclaim would
+// overwrite the archive of the attempt that failed — which is the one worth
+// keeping. The lease token is the identity that is unique per claim, so it goes
+// in too; StateSeq stays because it is what orders the archives.
 func claimTraceID(proc *agentkit.Process) string {
-	return fmt.Sprintf("%s.%d", proc.ID, proc.StateSeq)
+	return fmt.Sprintf("%s.%d.%s", proc.ID, proc.StateSeq, proc.LeaseToken)
 }
 
 func claimTraceMetadata(proc *agentkit.Process, sc Scope) trace.TraceMetadata {
@@ -129,44 +143,6 @@ func claimTraceMetadata(proc *agentkit.Process, sc Scope) trace.TraceMetadata {
 		labels["job_run_id"] = sc.JobRunID
 	}
 	return trace.TraceMetadata{Labels: labels}
-}
-
-// newRunTraceHandler rebuilds the JobRunEvent writer for this claim, or returns
-// nil when the run keeps no such record.
-//
-// The sequence allocator has to continue where the previous claim stopped —
-// event sequence numbers are per run, not per claim — so it is seeded from the
-// events already stored. Failing to read them is not worth failing the claim
-// for: the timeline is observability, and losing it must never cost the turn.
-func newRunTraceHandler(ctx context.Context, repo interfaces.Repository, sc Scope) *runtrace.Handler {
-	if sc.JobRunID == "" || sc.WorkspaceID == "" || sc.CaseID == 0 {
-		return nil
-	}
-	key := model.JobRunKey{WorkspaceID: sc.WorkspaceID, CaseID: sc.CaseID, JobID: sc.JobID}
-	events, err := repo.JobRunEvent().List(ctx, key, sc.JobRunID)
-	if err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "read the run timeline to continue its sequence",
-			goerr.V("job_run_id", sc.JobRunID)), "read the run timeline to continue its sequence")
-		return nil
-	}
-	var next int64
-	for _, ev := range events {
-		if ev.Sequence >= next {
-			next = ev.Sequence + 1
-		}
-	}
-	return runtrace.NewHandler(
-		repo.JobRunEvent(),
-		runtrace.Routing{
-			WorkspaceID: sc.WorkspaceID,
-			CaseID:      sc.CaseID,
-			JobID:       sc.JobID,
-			RunID:       sc.JobRunID,
-			TraceID:     sc.JobRunID,
-		},
-		runtrace.NewSequencerStartingAt(next),
-		nil,
-	)
 }
 
 // generateMiddleware records one LLM call onto the claim's trace handler.
