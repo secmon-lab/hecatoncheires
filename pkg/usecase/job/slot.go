@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
@@ -79,6 +80,19 @@ func (d ConcurrencyLimiterDeps) Validate() error {
 // instance of the deployment by handing out one of Limit execution slots
 // (model.JobSlot). It is stateless beyond its configuration — the slots live
 // in the shared repository — so every instance enforces the same limit.
+//
+// It satisfies agentkernel.SlotGate, which is how the agent runtime consults it:
+// once per claim, holding the slot for exactly as long as a worker is driving the
+// run. That is a change in what the number bounds — a run suspended waiting for
+// its children gives its slot back, having no work in flight of its own — and it
+// is the accurate reading: the limit exists to bound concurrent LLM traffic.
+// Asserted here so a change to either side is a compile error rather than a
+// deployment that silently runs ungated.
+var (
+	_ agentkernel.SlotGate = (*ConcurrencyLimiter)(nil)
+	_ agentkernel.SlotHold = (*slotHold)(nil)
+)
+
 type ConcurrencyLimiter struct {
 	repo          interfaces.JobSlotRepository
 	limit         int
@@ -126,6 +140,41 @@ type slotHold struct {
 	// acquiredAt is when this hold claimed the slot, so release can report how
 	// long the slot was occupied.
 	acquiredAt time.Time
+}
+
+// Release frees the slot. It satisfies agentkernel.SlotHold, which is how the
+// agent runtime's claim bracket hands the slot back when a claim ends.
+//
+// The hold time it computes is logged rather than returned here, because the
+// runtime has no summary line to fold it into — unlike the pre-agentkit
+// JobRunner, which reported it alongside the run's other stage timings.
+func (h *slotHold) Release(ctx context.Context) { _ = h.release(ctx) }
+
+// Acquire takes a slot for one agent run, satisfying agentkernel.SlotGate.
+//
+// It returns (nil, nil) when every slot is occupied. The agent runtime turns
+// that into a refused claim: the run goes back to pending and is tried again
+// after a backoff, so a full gate delays work instead of failing it.
+func (l *ConcurrencyLimiter) Acquire(ctx context.Context, ref agentkernel.SlotRef) (agentkernel.SlotHold, error) {
+	hold, obs, err := l.acquire(ctx, model.JobRunKey{
+		WorkspaceID: ref.WorkspaceID, CaseID: ref.CaseID, JobID: ref.JobID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if hold == nil {
+		// Logged here rather than by the caller: the occupancy that caused the
+		// refusal is only visible at this layer, and without it an operator sees a
+		// delayed run with no reason for the delay.
+		logging.From(ctx).Debug("no job execution slot free",
+			slog.Int("slot_occupied", obs.Occupied),
+			slog.Int("slot_limit", obs.Limit),
+			slog.String("job_id", ref.JobID))
+		// A typed nil in a non-nil interface would read as "acquired" to the
+		// caller, so the untyped nil is returned explicitly.
+		return nil, nil
+	}
+	return hold, nil
 }
 
 // slotObservation is what one admission attempt saw of the gate. The caller

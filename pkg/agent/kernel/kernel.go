@@ -52,6 +52,10 @@ type Deps struct {
 	// the first Spawn or Serve, so registration is the caller's job and this is
 	// the finished result.
 	Agents *agentkit.Registry
+	// Slots is the deployment-wide concurrency gate. Optional: nil leaves every
+	// run ungated, which is what a deployment that configured no limit wants.
+	// Only runs whose Scope sets SlotGated are subject to it.
+	Slots SlotGate
 }
 
 // Validate enforces the required-field contract so a wiring mistake fails at
@@ -120,6 +124,10 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 
 	k, err := agentkit.New(d.Repo, d.LLM, d.Agents,
 		agentkit.WithToolFactory(factory),
+		// The gate goes OUTSIDE the observability bracket: a claim refused for
+		// want of capacity did nothing, so opening a trace and a run-scoped
+		// logger for it would file an empty archive on every backoff.
+		agentkit.WithClaimMiddleware(slotGuard(d.Slots)),
 		agentkit.WithClaimMiddleware(claimMiddleware(d)),
 		agentkit.WithGenerateMiddleware(generateMiddleware()),
 		agentkit.WithToolCallMiddleware(toolCallMiddleware()),

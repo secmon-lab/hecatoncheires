@@ -29,6 +29,7 @@ const (
 	metaJobID       = "job_id"
 	metaJobRunID    = "job_run_id"
 	metaEventType   = "event_type"
+	metaSlotGated   = "slot_gated"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -78,6 +79,15 @@ type Scope struct {
 	JobID     string
 	JobRunID  string
 	EventType string
+	// SlotGated subjects the run to the deployment-wide concurrency gate: a
+	// claim on it waits for a free execution slot before any transition runs.
+	//
+	// The host decides it at spawn rather than the runtime inferring it, so the
+	// kernel needs no opinion about which kinds of run are rate-limited. Today
+	// only scheduled Job runs set it — an interactive turn is a person waiting
+	// for an answer, and a lifecycle or manual run is a single deliberate
+	// action, so making either queue behind a batch would be the wrong trade.
+	SlotGated bool
 }
 
 // Validate enforces the invariants the claim path depends on, so a wiring
@@ -132,6 +142,9 @@ func (s Scope) Metadata() map[string]string {
 	put(metaJobID, s.JobID)
 	put(metaJobRunID, s.JobRunID)
 	put(metaEventType, s.EventType)
+	if s.SlotGated {
+		m[metaSlotGated] = "1"
+	}
 	return m
 }
 
@@ -156,6 +169,7 @@ func ScopeFrom(m map[string]string) Scope {
 		JobID:       m[metaJobID],
 		JobRunID:    m[metaJobRunID],
 		EventType:   m[metaEventType],
+		SlotGated:   m[metaSlotGated] == "1",
 	}
 }
 
