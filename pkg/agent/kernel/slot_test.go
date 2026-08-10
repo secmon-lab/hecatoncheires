@@ -3,6 +3,7 @@ package kernel_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ type countingGate struct {
 
 	mu       sync.Mutex
 	held     int
+	peak     int
 	refusals int
 	asked    []kernel.SlotRef
 	err      error
@@ -52,6 +54,9 @@ func (g *countingGate) Acquire(_ context.Context, ref kernel.SlotRef) (kernel.Sl
 	full := g.held >= g.limit
 	if err == nil && !full {
 		g.held++
+		if g.held > g.peak {
+			g.peak = g.held
+		}
 	}
 	if err != nil || full {
 		g.refusals++
@@ -105,6 +110,14 @@ func (g *countingGate) stats() (asked []kernel.SlotRef, refusals, held int) {
 	return out, g.refusals, g.held
 }
 
+// maxHeld is the highest number of slots held at the same moment. It is the
+// figure the whole gate exists to bound.
+func (g *countingGate) maxHeld() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
+
 type countingHold struct {
 	gate *countingGate
 	once sync.Once
@@ -143,6 +156,10 @@ func newSlotRuntime(t *testing.T, gate kernel.SlotGate) *slotRuntime {
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					// Long enough that two admitted runs would demonstrably overlap,
+					// so a gate that failed to bound them is caught rather than
+					// merely unlikely to be caught.
+					time.Sleep(20 * time.Millisecond)
 					return &gollem.Response{Texts: []string{"done"}}, nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
@@ -180,9 +197,17 @@ func (rt *slotRuntime) spawn(t *testing.T, ctx context.Context, sc kernel.Scope)
 // leave the goroutine running into the next test.
 func (rt *slotRuntime) serve(t *testing.T) func() {
 	t.Helper()
+	return rt.serveWith(t)
+}
+
+// serveWith is serve with extra worker options, for a test that needs the worker
+// to be capable of running several Processes at once.
+func (rt *slotRuntime) serveWith(t *testing.T, opts ...agentkit.ServeOption) func() {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- rt.kernel.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	all := append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, opts...)
+	go func() { served <- rt.kernel.Serve(ctx, all...) }()
 
 	var once sync.Once
 	stop := func() {
@@ -305,6 +330,42 @@ func TestSlotGateDelaysARunItCannotAdmit(t *testing.T) {
 	gate.setLimit(1)
 	rt.awaitTerminal(t, pid, agentkit.ProcessSucceeded)
 	stop()
+}
+
+// TestSlotGateBoundsConcurrentExecution is the gate's whole reason for existing:
+// with capacity for one, two runs must not execute at the same time.
+//
+// The tests above check one run being admitted or refused, which a gate that
+// simply said yes to everything would also pass. This one measures the peak
+// number of slots held simultaneously, so a broken bound is a failure rather than
+// a coincidence — and every run still finishes, because a refusal delays work
+// instead of dropping it.
+func TestSlotGateBoundsConcurrentExecution(t *testing.T) {
+	ctx := context.Background()
+	gate := newCountingGate(1)
+	rt := newSlotRuntime(t, gate)
+
+	const runs = 4
+	pids := make([]agentkit.ProcessID, 0, runs)
+	for i := range runs {
+		sc := gatedScope()
+		// Distinct jobs, so nothing but the gate can serialise them.
+		sc.JobID = fmt.Sprintf("job-%d", i)
+		pids = append(pids, rt.spawn(t, ctx, sc))
+	}
+
+	// Several poll loops and plenty of concurrency, so the worker would happily
+	// run all four at once if the gate did not stop it.
+	stop := rt.serveWith(t, agentkit.WithMaxConcurrent(runs), agentkit.WithPollConcurrency(2))
+	for _, pid := range pids {
+		rt.awaitTerminal(t, pid, agentkit.ProcessSucceeded)
+	}
+	stop()
+
+	gt.Number(t, gate.maxHeld()).Equal(1)
+	// And nothing was leaked: every hold was released.
+	_, _, held := gate.stats()
+	gt.Number(t, held).Equal(0)
 }
 
 // A gate that cannot report its own state must fail CLOSED. Proceeding would

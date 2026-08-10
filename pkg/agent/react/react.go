@@ -203,6 +203,16 @@ func noticeInstruction(msg string) string {
 // the model gets to react to the failure on its next turn — which is how the
 // previous runtime behaved too. The one error that must not be swallowed is a
 // refusal from the budget: continuing past it would spend beyond the ceiling.
+//
+// That refusal check is DEFENSIVE rather than a path budget.Config can take.
+// agentkit evaluates Limit against "committed metrics plus whatever this
+// transition has already spent", and this transition spends nothing before the
+// call — so a metrics-based limiter that let the transition begin also lets the
+// call through, and the run is stopped at the next transition boundary instead.
+// The check is kept because Limit is an arbitrary function: a stateful or
+// time-based one can refuse here, and swallowing that would spend past a ceiling
+// its owner had already declared closed. Do not remove it on the grounds that no
+// test drives it; no test can, with the limiter this application ships.
 func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
 	if len(st.Pending) == 0 {
 		st.Phase = phaseGenerate

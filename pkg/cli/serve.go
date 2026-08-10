@@ -797,12 +797,11 @@ func cmdServe() *cli.Command {
 					defer close(agentServeDone)
 					logging.Default().Info("Starting agent runtime worker",
 						logAttrsToArgs(agentCfg.LogAttrs())...)
-					if err := agentKernel.Serve(c,
+					if err := agentkernel.Serve(c, agentKernel,
 						agentkit.WithLease(agentCfg.WorkerLease()),
 						agentkit.WithPollInterval(agentCfg.WorkerPollInterval()),
 						agentkit.WithPollConcurrency(agentCfg.WorkerPollConcurrency()),
 						agentkit.WithMaxConcurrent(agentCfg.WorkerConcurrency()),
-						agentkernel.NoDuplicateSideEffects(),
 					); err != nil && !errors.Is(err, context.Canceled) {
 						return goerr.Wrap(err, "agent runtime worker stopped")
 					}

@@ -1,6 +1,8 @@
 package kernel
 
 import (
+	"context"
+
 	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
@@ -88,9 +90,27 @@ func (d *Deps) Validate() error {
 	return nil
 }
 
+// Serve runs the agent worker. Every worker in this application starts here
+// rather than calling Kernel.Serve directly, so the guard below cannot be
+// forgotten at a call site: it is prepended to whatever the caller passes.
+//
+// Caller options come after it and can therefore still override it, which is
+// what a test needs when it is measuring the guard itself. Production code has
+// no reason to.
+func Serve(ctx context.Context, k *agentkit.Kernel, opts ...agentkit.ServeOption) error {
+	if k == nil {
+		return goerr.New("agent kernel is required")
+	}
+	all := append([]agentkit.ServeOption{NoDuplicateSideEffects()}, opts...)
+	if err := k.Serve(ctx, all...); err != nil {
+		return goerr.Wrap(err, "run the agent worker")
+	}
+	return nil
+}
+
 // NoDuplicateSideEffects is the Serve option every worker in this application
-// MUST pass. It is not tuning — it is a correctness requirement of the tools
-// these agents carry.
+// MUST pass; Serve above applies it for you. It is not tuning — it is a
+// correctness requirement of the tools these agents carry.
 //
 // A transition runs its effect and is checkpointed afterwards, so a claim that
 // dies in between leaves a Process whose last checkpoint still asks for the call
