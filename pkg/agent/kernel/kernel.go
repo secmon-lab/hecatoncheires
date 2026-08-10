@@ -84,6 +84,27 @@ func (d *Deps) Validate() error {
 	return nil
 }
 
+// NoDuplicateSideEffects is the Serve option every worker in this application
+// MUST pass. It is not tuning — it is a correctness requirement of the tools
+// these agents carry.
+//
+// A transition runs its effect and is checkpointed afterwards, so a claim that
+// dies in between leaves a Process whose last checkpoint still asks for the call
+// that already happened. agentkit's default lets three such takeovers re-run it;
+// its own documentation says callers that cannot tolerate duplicated side effects
+// set the bound to 0. This application cannot: core__create_action,
+// case__update_case, memo / knowledge creation and slack__post_message all take
+// effect on the first call and carry no idempotency key, so a re-run means a
+// second Action, a second post, a second record.
+//
+// The cost is that a run whose instance dies mid-transition fails instead of
+// resuming — which is exactly what the previous runtime did with a crashed turn,
+// so nothing regresses. Remove this only once every side-effecting tool is
+// idempotent under a replayed (process, call) pair.
+func NoDuplicateSideEffects() agentkit.ServeOption {
+	return agentkit.WithMaxUncleanReclaims(0)
+}
+
 // Build assembles the Kernel: the tool factory, the claim bracket that carries
 // the request-scoped context and the trace sinks, and the two effect
 // middlewares that record LLM and tool calls.

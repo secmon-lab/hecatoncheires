@@ -117,10 +117,22 @@ hide an output run-away — the expensive half — until the whole budget was go
 All three are cumulative over the whole run, sub-agents included: a sub-agent's
 usage is added to its parent when it finishes, so the ceiling on a run covers
 everything it spawned. A sub-agent's own allowance is a fifth of the root one.
-Crossing `--agent-budget-notice-ratio` of any ceiling tells the agent to produce
-its answer from what it already has; crossing the ceiling itself stops the run,
-and the user gets the same "couldn't reach a conclusion" reply as any other
-unfinished turn.
+Crossing `--agent-budget-notice-ratio` of any ceiling adds a line to the agent's
+next turn telling it to answer from what it already has and to stop calling
+tools; crossing the ceiling itself stops the run, and the user gets the same
+"couldn't reach a conclusion" reply as any other unfinished turn. The notice
+exists so the common case is a shorter answer rather than no answer.
+
+### A crashed run is not resumed
+
+If the instance driving a run dies mid-transition, the run fails; it is not
+picked up and re-run from its last checkpoint. That is deliberate. A transition
+performs its effect and is checkpointed afterwards, so re-running one that died
+in between would repeat an effect that already happened — a second Action, a
+second Slack post. Failing is what the previous runtime did with a crashed turn,
+so this is not a regression, and the user gets the usual "couldn't finish this
+turn" reply. A run that merely returns an *error* is still retried normally;
+this applies only to a claim that vanished.
 
 The step defaults are derived from the loop bounds the previous agent runtime
 used. **The token defaults are not derived from measurement** — the previous

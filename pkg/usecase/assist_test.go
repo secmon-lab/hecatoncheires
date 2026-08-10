@@ -1,7 +1,10 @@
 package usecase_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
@@ -293,6 +297,12 @@ func TestAssistUseCase_RunAssistWritesNoLogForAFailedRun(t *testing.T) {
 	// schedule (which pkg/agent covers).
 	usecase.SetAssistServeOptionsForTest(assistUC, agentkit.WithMaxStepAttempts(1))
 
+	// errutil.Handle logs through the context logger, so capturing it is how the
+	// report is observed. A failure that is merely counted and never reported is
+	// the defect this guards: the command would print a clean pass.
+	var logged bytes.Buffer
+	ctx = logging.With(ctx, logging.New(&logged, slog.LevelInfo, logging.FormatJSON, false))
+
 	// The pass itself succeeds — one failed case does not fail the command — and
 	// drain still returns once the run reached its terminal state.
 	gt.NoError(t, assistUC.RunAssist(ctx, usecase.AssistOption{})).Required()
@@ -300,6 +310,11 @@ func TestAssistUseCase_RunAssistWritesNoLogForAFailedRun(t *testing.T) {
 	logs, _, err := repo.AssistLog().List(ctx, testWorkspaceID, c.ID, 10, 0)
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(0)
+
+	report := logged.String()
+	gt.String(t, report).Contains("assist run failed")
+	gt.String(t, report).Contains("the model is unreachable")
+	gt.String(t, report).Contains(fmt.Sprintf("\"case_id\":%d", c.ID))
 }
 
 // RunAssist must refuse before doing anything when the agent runtime was never

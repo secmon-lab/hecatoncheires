@@ -111,6 +111,10 @@ func atNotice(used, ceiling int64, ratio float64) bool {
 // Prefix renders the line a strategy prepends to a planner turn so the model
 // can plan against what is left. It replaces the old "[budget] planner round
 // n/m" line, which counted a quantity that no longer exists.
+//
+// Its consumer is the plan-execute strategy, which needs the full picture to
+// decide how many tasks a round can afford. A ReAct run does not: it reads the
+// Limit verdict instead, which already names the ceiling it is close to.
 func (c Config) Prefix(m agentkit.Metrics) string {
 	return fmt.Sprintf("[budget] steps %d/%d, input tokens %d/%d, output tokens %d/%d",
 		m.Steps, c.MaxSteps,

@@ -151,6 +151,19 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 		input = []gollem.Input{gollem.Text(st.Prompt)}
 	}
 
+	// A budget that is close to its ceiling has to be TOLD to the model, not
+	// merely enforced against it. Enforcement alone produces the worst outcome:
+	// the run is cut off mid-investigation with no answer at all. Given the
+	// notice, the model can spend its last call on a conclusion instead of
+	// another tool.
+	//
+	// The notice is appended as a fresh input rather than folded into the system
+	// prompt because the system prompt is fixed at Init and this crossing happens
+	// mid-run.
+	if notice := sys.LimitStatus(); notice.Kind() == agentkit.LimitKindNotice {
+		input = append(input, gollem.Text(noticeInstruction(notice.Message())))
+	}
+
 	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(st.SystemPrompt)}
 	if s.role != nil {
 		opts = append(opts, agentkit.WithRole(s.role))
@@ -171,6 +184,16 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	st.Pending = res.FunctionCalls
 	st.Phase = phaseTool
 	return st, agentkit.Continue[Output](), nil
+}
+
+// noticeInstruction turns a budget notice into an instruction the model can act
+// on. The limiter's message says what is nearly spent; this says what to do
+// about it.
+func noticeInstruction(msg string) string {
+	if msg == "" {
+		return "This run is close to its budget. Answer now from what you already have, and do not call any more tools."
+	}
+	return msg + "\nThis run is close to its budget. Answer now from what you already have, and do not call any more tools."
 }
 
 // stepTool runs exactly one pending tool call.

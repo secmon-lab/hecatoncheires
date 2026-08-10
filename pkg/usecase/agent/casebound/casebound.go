@@ -166,11 +166,6 @@ func (uc *UseCase) StartTurn(ctx context.Context, req TurnRequest) (*Result, err
 		return &Result{Status: StatusDuplicate, ProcessID: existing}, nil
 	}
 
-	// The run record is opened before the spawn so the case agent page lists the
-	// turn while it is still running. It is observability: a failure here leaves
-	// the turn untraced but does not stop it.
-	uc.openRunLog(ctx, scope, systemPrompt)
-
 	pid, err := uc.agent.Spawn(ctx, uc.kernel,
 		react.Input{SystemPrompt: systemPrompt, Prompt: userInput},
 		agentkit.WithSubject(agentkernel.ThreadSubject(req.Session.ID)),
@@ -185,10 +180,19 @@ func (uc *UseCase) StartTurn(ctx context.Context, req TurnRequest) (*Result, err
 			goerr.V("session_id", req.Session.ID))
 	}
 
+	// The run record is opened only once the run exists, so a refused turn leaves
+	// no RUNNING log behind: such a log never reaches Finish, and a log without a
+	// Finish never gets the JobRun summary the case agent page lists from — it
+	// would be an invisible orphan row written on every busy mention.
+	//
+	// It is observability either way: a failure here leaves the turn untraced but
+	// does not stop it.
+	uc.openRunLog(ctx, scope, systemPrompt)
+
 	// The mention this turn processes is what the next turn's delta scan starts
 	// after. It is stamped now rather than at the end because a second mention
 	// arriving mid-run must not re-read messages this run already holds.
-	uc.stampMention(ctx, req.Session, req.MentionTS)
+	uc.stampSession(ctx, req.Session, req.MentionTS)
 
 	return &Result{Status: StatusStarted, ProcessID: pid}, nil
 }
@@ -309,7 +313,6 @@ func (uc *UseCase) onFinish(ctx context.Context, pid agentkit.ProcessID, res age
 	}
 
 	uc.finishRunLog(ctx, sc, proc.Metrics, runErr)
-	uc.markAnswered(ctx, sc)
 	return nil
 }
 
@@ -341,34 +344,27 @@ func (uc *UseCase) finishRunLog(ctx context.Context, sc agentkernel.Scope, m age
 		runErr, time.Now().UTC())
 }
 
-// markAnswered records what ended the turn. The Slack dispatcher reads it to
-// decide whether a plain thread reply should start another one.
-func (uc *UseCase) markAnswered(ctx context.Context, sc agentkernel.Scope) {
-	if sc.ChannelID == "" || sc.ThreadTS == "" {
-		return
-	}
-	ssn, err := uc.repo.Session().GetByThread(ctx, sc.ChannelID, sc.ThreadTS)
-	if err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "load the session to record the turn end"),
-			"load the session to record the turn end")
-		return
-	}
-	if ssn == nil {
-		return
-	}
-	ssn.LastAction = model.SessionEndedWithCaseBoundReply
-	ssn.UpdatedAt = time.Now().UTC()
-	if err := uc.repo.Session().Put(ctx, ssn); err != nil {
-		errutil.Handle(ctx, err, "record the turn end on the session")
-	}
-}
-
-// stampMention records the mention this turn is processing.
-func (uc *UseCase) stampMention(ctx context.Context, ssn *model.Session, mentionTS string) {
+// stampSession records the mention this turn is processing and what kind of turn
+// it is. It is the turn's ONLY Session write, and it happens while the turn still
+// holds the thread's subject.
+//
+// That single-write shape is what keeps two turns from clobbering each other.
+// SessionRepository.Put replaces the whole document, and agentkit releases the
+// subject when the terminal transition commits — before the completion handler
+// runs — so a second write from the finishing turn could interleave with the next
+// turn's and restore an older LastMentionTS. A stale LastMentionTS is not
+// cosmetic: the next turn's delta scan would re-read messages an earlier turn
+// already processed, and act on them again.
+//
+// Recording LastAction here rather than at the end is equivalent in effect: the
+// only reader asks whether it is SessionEndedWithQuestion (a pending form), and a
+// channel-mode mention turn never sets that.
+func (uc *UseCase) stampSession(ctx context.Context, ssn *model.Session, mentionTS string) {
 	if mentionTS == "" {
 		return
 	}
 	ssn.LastMentionTS = mentionTS
+	ssn.LastAction = model.SessionEndedWithCaseBoundReply
 	ssn.UpdatedAt = time.Now().UTC()
 	if err := uc.repo.Session().Put(ctx, ssn); err != nil {
 		errutil.Handle(ctx, err, "persist the session mention position")

@@ -802,6 +802,7 @@ func cmdServe() *cli.Command {
 						agentkit.WithPollInterval(agentCfg.WorkerPollInterval()),
 						agentkit.WithPollConcurrency(agentCfg.WorkerPollConcurrency()),
 						agentkit.WithMaxConcurrent(agentCfg.WorkerConcurrency()),
+						agentkernel.NoDuplicateSideEffects(),
 					); err != nil && !errors.Is(err, context.Canceled) {
 						return goerr.Wrap(err, "agent runtime worker stopped")
 					}

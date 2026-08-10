@@ -415,8 +415,8 @@ a new agent execution to planexec, wire the host handler into it too.
 `JobRunLog` / `JobRunEvent` are NOT Job-only: the case agent page
 (`caseJobRunLogs`) lists **every** case-scoped agent run through one read
 path. Post-creation Slack mentions handled by the `casebound` (channel-mode,
-direct gollem) and `threadcase` (thread-mode, planexec, `ModeMention` only)
-hosts record the same records via `runtrace.Recorder`. They are not
+agentkit + the `react` strategy) and `threadcase` (thread-mode, planexec,
+`ModeMention` only) hosts record the same records. They are not
 configured Jobs, so **each mention turn gets its own fresh per-turn JobID**
 (a UUID) and is tagged `EventType = model.EventTypeMention`. `EventType` — not
 a reserved JobID — is the discriminator: `ResolveJobName` maps a run with that
@@ -440,14 +440,52 @@ Rules for this path:
   is simply never listed (no perpetual-RUNNING row). The lifecycle method is
   named `Finish` (not `Close`) because it ends a run record, not an
   `io.Closer` (the goast policy reserves `.Close()` for `safe.Close`).
-- Keep the existing durable trace sink. casebound feeds the Cloud Storage
-  recorder and `runtrace.Recorder.Handler()` through `trace.Multi`; threadcase
-  passes the handler via `planexec.RunRequest.TraceHandler` (planexec already
-  combines it with its archive recorder). Do not replace the archive trace.
+- **A durable run cannot hold a Recorder, so it opens and finishes the log at
+  two separate points.** `casebound` calls `runtrace.Open` right after Spawn
+  succeeds and `runtrace.FinishRun` from its agentkit completion handler, which
+  reloads the RUNNING log from storage and folds in the usage read off
+  `Process.Metrics`. Two consequences to preserve: the log is opened only
+  **after** a successful Spawn (a refused turn must leave no orphan RUNNING
+  row), and the usage totals come from the Process, because the run's
+  transitions span claims and possibly instances and no single in-process
+  handler sees them all.
+- Keep the existing durable trace sink. `casebound` no longer wires one itself:
+  the agentkit claim middleware opens a Cloud Storage trace per **claim**
+  (`pkg/agent/kernel/middleware.go`), keyed on the Process id rather than the
+  Slack session id. `threadcase` still passes its handler via
+  `planexec.RunRequest.TraceHandler`. Do not replace the archive trace.
+- **The per-call `JobRunEvent` timeline is NOT yet wired for agentkit-hosted
+  runs.** It needs one sequence allocator per run that survives a run moving
+  between instances, which an in-process `runtrace.Sequencer` cannot be. Until
+  that lands, an agentkit-hosted mention run records its `JobRunLog` totals but
+  no per-call events. Do not wire a per-claim Sequencer as a stopgap — it would
+  issue the same sequence number twice.
 - `ModeCreate` (creation-time materialize) is excluded — the requirement is
   post-creation mentions.
 - Trace recording is observability: `Open`/`Finish`/event failures are
   non-fatal (`errutil.Handle`) and must never fail the mention turn.
+
+## Agent runtime: no duplicated side effects (NON-NEGOTIABLE)
+
+Every `Kernel.Serve` call in this application MUST pass
+`agentkernel.NoDuplicateSideEffects()`.
+
+An agentkit transition performs its effect and is checkpointed afterwards, so a
+claim that dies in between leaves a Process whose last checkpoint still asks for
+the call that already happened. agentkit's default permits three such takeovers
+to re-run it. This application's tools cannot survive that: `core__create_action`,
+`case__update_case`, the memo / knowledge creators and `slack__post_message` all
+take effect on the first call and carry no idempotency key, so a replay means a
+second Action, a second post, a second record.
+
+The option sets the bound to 0, which fails the run instead of re-running it —
+the same outcome the pre-agentkit runtime produced for a crashed turn, so nothing
+regresses. It may be relaxed only once **every** side-effecting tool is idempotent
+under a replayed `(ProcessID, FunctionCall.ID)` pair; that is a change to the tool
+contract, not a Serve-option tweak.
+
+The same reasoning is why a new side-effecting tool must not be written assuming
+"it runs at most once".
 
 ## Budget
 

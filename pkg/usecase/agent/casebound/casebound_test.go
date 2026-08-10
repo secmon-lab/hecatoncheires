@@ -176,6 +176,15 @@ func (h *harness) request(ssn *model.Session, triggerTS string) casebound.TurnRe
 	}
 }
 
+// jobIDOf reads the per-turn JobID a run recorded on its Process, which is the
+// key its JobRunLog lives under.
+func (h *harness) jobIDOf(t *testing.T, ctx context.Context, pid agentkit.ProcessID) string {
+	t.Helper()
+	proc, err := h.kernel.GetProcess(ctx, pid)
+	gt.NoError(t, err).Required()
+	return agentkernel.ScopeFrom(proc.Metadata).JobID
+}
+
 // drive runs the worker until pid reaches a terminal state and returns it.
 func (h *harness) drive(t *testing.T, pid agentkit.ProcessID, opts ...agentkit.ServeOption) *agentkit.Process {
 	t.Helper()
@@ -317,11 +326,21 @@ func TestStartTurnRefusesASecondTurnOnTheSameThread(t *testing.T) {
 	gt.Value(t, second.Busy.ProcessID).Equal(first.ProcessID)
 	gt.Bool(t, second.Busy.StartedAt.IsZero()).False()
 
-	// The refused turn must not have opened a second run record, or the case
-	// agent page would list a run that never happened.
+	// The refused turn must leave no run record at all. A RUNNING log opened for
+	// a turn that never started never reaches Finish, so it would sit in storage
+	// forever without ever being listed.
 	runs, err := h.repo.JobRun().ListByCase(ctx, "ws-1", 55)
 	gt.NoError(t, err).Required()
 	gt.Array(t, runs).Length(0)
+
+	// The turn that DID start has its RUNNING log, under its own per-turn JobID.
+	// (The refused turn's JobID is never used, so there is no key to look it up
+	// by — its absence is what the JobRun assertion above stands for.)
+	firstKey := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: h.jobIDOf(t, ctx, first.ProcessID)}
+	firstLogs, err := h.repo.JobRunLog().List(ctx, firstKey, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, firstLogs).Length(1).Required()
+	gt.Value(t, firstLogs[0].Stage).Equal(model.JobRunStageRunning)
 }
 
 // Slack re-delivers events. A re-delivery must resolve to the run the first

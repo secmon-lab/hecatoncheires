@@ -2,6 +2,7 @@ package react_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -295,6 +296,82 @@ func TestTokenBudgetsStopTheRun(t *testing.T) {
 			gt.Value(t, proc.Failure.Code).Equal(agentkit.FailureLimitExceeded)
 		})
 	}
+}
+
+// inputRecordingLLM is scriptedLLM plus a record of the inputs each Generate
+// received, so a test can assert what the model was actually told.
+func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []string
+	var n atomic.Int32
+
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					var b strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
+							b.WriteString("\n")
+						}
+					}
+					mu.Lock()
+					seen = append(seen, b.String())
+					mu.Unlock()
+
+					i := int(n.Add(1)) - 1
+					if i >= len(responses) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return responses[i], nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+	return client, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]string, len(seen))
+		copy(out, seen)
+		return out
+	}
+}
+
+// TestBudgetNoticeReachesTheModel pins that crossing the notice ratio TELLS the
+// model to wrap up, rather than only being enforced against it later. Without
+// this the documented behaviour ("tells the agent to produce its answer from what
+// it already has") would be a promise the runtime does not keep, and a run would
+// get cut off mid-investigation with no answer at all.
+func TestBudgetNoticeReachesTheModel(t *testing.T) {
+	tool := &recordingTool{name: "probe__ping"}
+	call := func() *gollem.Response {
+		return callResponse(&gollem.FunctionCall{ID: "c", Name: "probe__ping", Arguments: map[string]any{}})
+	}
+	llm, inputs := inputRecordingLLM(t, call(), call(), textResponse("here is what I have"))
+
+	// Notice at 40% of 10 steps = 4 committed transitions. The first Generate is
+	// step 0, so it must be clean; a later one must carry the notice.
+	rt := newRuntime(t, llm, budget.Config{
+		MaxSteps: 10, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.4,
+	}, tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "investigate"})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := inputs()
+	gt.Array(t, seen).Length(3).Required()
+	// The opening turn is nowhere near the ceiling, so it must not be nagged.
+	gt.Bool(t, strings.Contains(seen[0], "close to its budget")).False()
+	// The last turn is past the notice threshold and must carry both the
+	// limiter's own message and the instruction derived from it.
+	gt.String(t, seen[2]).Contains("close to its budget")
+	gt.String(t, seen[2]).Contains("do not call any more tools")
+	gt.String(t, seen[2]).Contains("nearly exhausted")
 }
 
 func TestRegisterRequiresALimiter(t *testing.T) {

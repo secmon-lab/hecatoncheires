@@ -245,16 +245,21 @@ func (uc *AssistUseCase) drain(ctx context.Context, pids []agentkit.ProcessID) e
 	serveCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	served := make(chan error, 1)
+	opts := append([]agentkit.ServeOption{agentkernel.NoDuplicateSideEffects()}, uc.serveOpts...)
 	async.DispatchCancelable(serveCtx, func(c context.Context) error {
-		err := uc.kernel.Serve(c, uc.serveOpts...)
+		err := uc.kernel.Serve(c, opts...)
 		served <- err
-		return err
+		// Reported to the caller through `served`, not returned: the normal exit
+		// here is the cancellation drain performs itself, and returning that would
+		// have the async helper report every assist pass as a failure.
+		return nil
 	})
 
 	pending := make(map[agentkit.ProcessID]bool, len(pids))
 	for _, pid := range pids {
 		pending[pid] = true
 	}
+	failed := 0
 	for len(pending) > 0 {
 		for pid := range pending {
 			proc, err := uc.kernel.GetProcess(ctx, pid)
@@ -264,10 +269,14 @@ func (uc *AssistUseCase) drain(ctx context.Context, pids []agentkit.ProcessID) e
 				errutil.Handle(ctx, goerr.Wrap(err, "read an assist run",
 					goerr.V("process", pid)), "read an assist run")
 				delete(pending, pid)
+				failed++
 				continue
 			}
 			if proc.Status.Terminal() {
 				delete(pending, pid)
+				if uc.reportIfUnsuccessful(ctx, proc) {
+					failed++
+				}
 			}
 		}
 		if len(pending) == 0 {
@@ -289,7 +298,47 @@ func (uc *AssistUseCase) drain(ctx context.Context, pids []agentkit.ProcessID) e
 	if err := <-served; err != nil && !errors.Is(err, context.Canceled) {
 		return goerr.Wrap(err, "run the assist agent worker")
 	}
+	logger.Info("assist runs finished", "count", len(pids), "failed", failed)
 	return nil
+}
+
+// reportIfUnsuccessful reports a run that did not succeed and says whether it
+// counted as a failure.
+//
+// The pass itself still succeeds: assist walks every open case, and one case the
+// agent could not get through must not cost the rest of the workspace its pass —
+// which is what the pre-agentkit loop did by routing each case's error through
+// errutil.Handle. What must NOT happen is the failure going unmentioned, leaving
+// the command to report a clean pass over runs that produced nothing.
+func (uc *AssistUseCase) reportIfUnsuccessful(ctx context.Context, proc *agentkit.Process) bool {
+	switch proc.Status {
+	case agentkit.ProcessSucceeded:
+		return false
+	case agentkit.ProcessFailed:
+		sc := agentkernel.ScopeFrom(proc.Metadata)
+		err := goerr.New("assist run failed",
+			goerr.V("process", proc.ID),
+			goerr.V("workspace_id", sc.WorkspaceID),
+			goerr.V("case_id", sc.CaseID))
+		if proc.Failure != nil {
+			err = goerr.With(err,
+				goerr.V("failure_code", string(proc.Failure.Code)),
+				goerr.V("failure_message", proc.Failure.Message))
+		}
+		errutil.Handle(ctx, err, "assist run failed")
+		return true
+	default:
+		// Cancelled, or any terminal status added later: someone or something
+		// stopped this run deliberately, so it is reported without a stack.
+		sc := agentkernel.ScopeFrom(proc.Metadata)
+		errutil.Handle(ctx, goerr.New("assist run did not complete",
+			goerr.V("process", proc.ID),
+			goerr.V("status", string(proc.Status)),
+			goerr.V("workspace_id", sc.WorkspaceID),
+			goerr.V("case_id", sc.CaseID),
+			goerr.T(errutil.TagBenign)), "assist run did not complete")
+		return true
+	}
 }
 
 // assistDrainPollInterval is how often drain re-reads the runs it is waiting on.
@@ -301,8 +350,10 @@ const assistDrainPollInterval = 200 * time.Millisecond
 // terminal transition committed.
 func (uc *AssistUseCase) onFinish(ctx context.Context, pid agentkit.ProcessID, res agentkit.FinishResult[react.Output]) error {
 	if res.Status != agentkit.ProcessSucceeded || res.Output == nil {
-		// A failed or cancelled run has nothing to summarise. The failure is
-		// already recorded on the Process and reported by drain's caller.
+		// A failed or cancelled run has nothing to summarise — a log records what
+		// a pass concluded, and this one concluded nothing. drain reports the
+		// failure itself (reportIfUnsuccessful), reading it off the Process rather
+		// than from here, so a lost completion callback cannot swallow it.
 		return nil
 	}
 	proc, err := uc.kernel.GetProcess(ctx, pid)
