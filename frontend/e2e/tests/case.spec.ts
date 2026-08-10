@@ -528,8 +528,7 @@ test.describe('Case Management', () => {
     // so the total page count differs — only the page index is asserted.
     await caseListPage.goToPage('next');
     expect(page.url()).toContain('page=2');
-    const page2Titles = await caseListPage.getCaseTitles();
-    await caseListPage.clickCaseByTitle(page2Titles[0]);
+    await caseListPage.clickFirstCase();
 
     await caseDetailPage.clickBack();
     await caseListPage.waitForTableLoad();
@@ -537,8 +536,7 @@ test.describe('Case Management', () => {
     expect(await caseListPage.getPaginationInfo()).toMatch(/^\s*2 \//);
 
     // Browser Back gets the same treatment, because the page lives in the URL.
-    const backTitles = await caseListPage.getCaseTitles();
-    await caseListPage.clickCaseByTitle(backTitles[0]);
+    await caseListPage.clickFirstCase();
     await page.goBack();
     await caseListPage.waitForTableLoad();
     expect(page.url()).toContain('page=2');
