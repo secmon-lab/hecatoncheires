@@ -491,7 +491,9 @@ func wireDurableJobRuntime(
 
 	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	gt.NoError(t, durable.Register(reg, cfg.Limiter())).Required()
+	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(), durable.History)
+	gt.NoError(t, tErr).Required()
+	gt.NoError(t, durable.Register(reg, cfg.Limiter(), taskAgent)).Required()
 
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    agentprocmemory.New(),
@@ -610,6 +612,124 @@ func TestJobRunner_DurableSimpleRunRecordsAFailure(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)
+}
+
+// A planexec-strategy Job runs on the durable runtime too: the planner rounds and
+// the per-task sub-agents are all Processes, and the run's outcome arrives from
+// the completion handler.
+func TestJobRunner_DurablePlanexecRunRecordsItsOutcome(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:       "durable-planexec",
+		Prompt:   "summarise the case",
+		Strategy: model.JobStrategyPlanexec,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := scriptedReplyLLM(
+		// plan: one task
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"the case is read","tools":["core_job"]}]}`,
+		// the child task's answer
+		`the case is a stalled deploy`,
+		// replan: finalize
+		`{"finalize":{"reason":"enough is known"}}`,
+		// final: prose
+		`The deploy has been stalled since Tuesday.`,
+	)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		// No executor for the planexec strategy: the durable path must be the one
+		// that runs, not a fallback into an in-process executor.
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).NotEqual("")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, logs[0].ExecutorKind).Equal(model.ExecutorKindPlanexec)
+	// Four LLM calls (plan, child, replan, final) across four Processes; only the
+	// Process metrics see them all.
+	gt.Value(t, logs[0].LLMCallCount).Equal(int64(4))
+}
+
+// An interactive Job stays on the in-process executor: asking the user mid-run
+// needs a durable place to record the question's await key, which does not exist
+// yet. Left unguarded, such a Job would spawn and silently lose its question.
+func TestJobRunner_InteractiveJobStaysOnTheInProcessExecutor(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:          "interactive",
+		Prompt:      "ask me something",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := singleReplyLLM("done", 1, 1)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	exec := &recordingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	// The in-process executor ran it, synchronously, so the outcome is already
+	// recorded when Run returns.
+	gt.Array(t, exec.firedJobIDs()).Equal([]string{j.ID})
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+}
+
+// scriptedReplyLLM answers with replies[i] on the i-th Generate. An extra call
+// fails rather than repeating the last answer.
+func scriptedReplyLLM(replies ...string) gollem.LLMClient {
+	var n atomic.Int32
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					i := int(n.Add(1)) - 1
+					if i >= len(replies) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return &gollem.Response{Texts: []string{replies[i]}, InputToken: 5, OutputToken: 3}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
 }
 
 // awaitJobRunStatus waits for the run summary to reach want.

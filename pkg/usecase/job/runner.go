@@ -539,7 +539,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// and demanding one would make the migration's intermediate state
 	// unrunnable: the wiring stops registering an executor for a strategy the
 	// moment its agent exists.
-	durableAgent, onDurableRuntime := r.deps.Durable.agentFor(strategy)
+	onDurableRuntime := r.deps.Durable.handles(strategy, j.Interactive)
 	var executor job.JobExecutor
 	if !onDurableRuntime {
 		found, execLookupErr := r.deps.executorFor(strategy)
@@ -615,13 +615,14 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// the in-process path, so the two differ only in who drives the loop.
 	if onDurableRuntime {
 		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
-		pid, spawnErr := r.deps.Durable.spawn(ctx, durableAgent, spawnParams{
+		pid, spawnErr := r.deps.Durable.spawn(ctx, strategy, spawnParams{
 			job:          j,
 			event:        ev,
 			key:          key,
 			runID:        runID,
 			systemPrompt: systemPrompt,
 			userPrompt:   userPrompt,
+			interactive:  j.Interactive,
 		})
 		if spawnErr != nil {
 			// Nothing is running, so this is the run's outcome: record it rather

@@ -209,11 +209,14 @@ var DefaultThreadcaseBudget = planexec.BudgetConfig{
 // It is a separate step from NewAgentUseCase because both halves of the wiring
 // depend on the other: registering needs this usecase as the completion handler,
 // and building the Kernel needs the filled registry.
+// taskAgent is the shared per-task sub-agent (agentkernel.RegisterTaskAgent),
+// registered by the caller so the Job runtime can be handed the same handle.
 func (uc *AgentUseCase) RegisterAgents(
 	reg *agentkit.Registry,
 	limiter agentkit.Limiter,
 	store agentkit.HistoryStore,
 	procRepo agentkit.Repository,
+	taskAgent agentkit.Agent[react.Input],
 ) error {
 	locator, err := agentkernel.NewLocator(procRepo)
 	if err != nil {
@@ -228,14 +231,8 @@ func (uc *AgentUseCase) RegisterAgents(
 	}
 	uc.casebound = cb
 
-	// The sub-agent every plan-execute host spawns per planned task. It is
-	// registered once and shared: agentkit keys a Process on the agent NAME, so a
-	// second registration under the same name is an error, and each host holding
-	// its own copy would need its own name and its own tool palette.
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, taskAgentVersion, limiter,
-		agentkit.WithHistoryStore[react.Output](store))
-	if err != nil {
-		return goerr.Wrap(err, "register the task sub-agent")
+	if taskAgent.Name() == "" {
+		return goerr.New("the task sub-agent must be registered before the plan-execute agents")
 	}
 
 	progress := agentProgress{uc: uc}
@@ -259,9 +256,6 @@ func (uc *AgentUseCase) RegisterAgents(
 	uc.durableThreadcase = tc
 	return nil
 }
-
-// taskAgentVersion is the state version of the shared per-task sub-agent.
-const taskAgentVersion = 1
 
 // BindAgentKernel hands the built Kernel to every agent RegisterAgents
 // registered. Until it is called, a mention turn cannot be spawned.

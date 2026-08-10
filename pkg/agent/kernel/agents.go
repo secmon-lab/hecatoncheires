@@ -3,6 +3,8 @@ package kernel
 import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 )
 
 // Agent names. These values are persisted on every Process row, so a running
@@ -38,6 +40,27 @@ const (
 	// task.
 	AgentTask agentkit.AgentName = "task"
 )
+
+// taskAgentVersion is the state version of the shared per-task sub-agent.
+const taskAgentVersion = 1
+
+// RegisterTaskAgent registers the ReAct sub-agent every plan-execute agent spawns
+// per planned task, and returns the handle they are all built with.
+//
+// It lives here, and is called exactly once per registry, because agentkit keys a
+// Process on the agent NAME: a second registration under AgentTask is an error,
+// and giving each host its own name would mean maintaining a separate tool palette
+// for each — for sub-agents that do the same thing.
+func RegisterTaskAgent(reg *agentkit.Registry, limiter agentkit.Limiter,
+	store agentkit.HistoryStore,
+) (agentkit.Agent[react.Input], error) {
+	handle, err := react.Register(reg, AgentTask, taskAgentVersion, limiter,
+		agentkit.WithHistoryStore[react.Output](store))
+	if err != nil {
+		return agentkit.Agent[react.Input]{}, goerr.Wrap(err, "register the task sub-agent")
+	}
+	return handle, nil
+}
 
 // RequiresActor reports whether an agent may only run with an identified Slack
 // user behind it.

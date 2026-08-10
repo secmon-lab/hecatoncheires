@@ -2,6 +2,8 @@ package job
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
@@ -11,15 +13,19 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	agentjob "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
-// jobSimpleAgentVersion is the strategy state version stamped on every Process
-// the simple-strategy Job agent creates. Bump it only alongside a DecodeState
-// that still reads the older shape — a running deployment always has in-flight
-// Processes on the old one.
-const jobSimpleAgentVersion = 1
+// Strategy state versions stamped on every Process the Job agents create. Bump
+// one only alongside a DecodeState that still reads the older shape — a running
+// deployment always has in-flight Processes on the old one.
+const (
+	jobSimpleAgentVersion   = 1
+	jobPlanexecAgentVersion = 1
+)
 
 // DurableRuntime is the agent runtime a Job run is Spawned onto, plus the pieces
 // a finished run needs to close itself out.
@@ -37,8 +43,9 @@ type DurableRuntime struct {
 	// in-process executor used.
 	History agentkit.HistoryStore
 
-	simple agentkit.Agent[react.Input]
-	runner *JobRunner
+	simple   agentkit.Agent[react.Input]
+	planexec agentkit.Agent[planexec.Input]
+	runner   *JobRunner
 }
 
 // Register registers the Job agents. Call it before building the Kernel, then
@@ -48,21 +55,42 @@ type DurableRuntime struct {
 // are not: building the Kernel needs the registry registration fills, and the
 // JobRunner needs this runtime handed to it at construction. Registration itself
 // needs neither, so it goes first and the other two are wired in after.
-func (d *DurableRuntime) Register(reg *agentkit.Registry, limiter agentkit.Limiter) error {
+// taskAgent is the ReAct sub-agent the planexec-strategy Job spawns per planned
+// task. It is registered elsewhere and shared, because agentkit keys a Process on
+// the agent NAME and a second registration under the same name is an error.
+func (d *DurableRuntime) Register(reg *agentkit.Registry, limiter agentkit.Limiter,
+	taskAgent agentkit.Agent[react.Input],
+) error {
 	if d == nil {
 		return goerr.New("durable runtime is nil")
 	}
 	if d.History == nil {
 		return goerr.New("history store is required")
 	}
-	handle, err := react.Register(reg, agentkernel.AgentJobSimple, jobSimpleAgentVersion, limiter,
+	simple, err := react.Register(reg, agentkernel.AgentJobSimple, jobSimpleAgentVersion, limiter,
 		agentkit.WithHistoryStore[react.Output](d.History),
 		agentkit.WithOnFinish(d.onSimpleFinish),
 	)
 	if err != nil {
 		return goerr.Wrap(err, "register the simple-strategy job agent")
 	}
-	d.simple = handle
+	d.simple = simple
+
+	// A Job's deliverable is a prose summary posted to the case, so the terminal
+	// output is text; there is no structured object for a host to apply.
+	//
+	// No progress: a Job run reports through its operational log in the case
+	// thread, not through a milestone message a person is watching.
+	handle, err := planexec.Register(reg, agentkernel.AgentJob, jobPlanexecAgentVersion,
+		taskAgent, nil, limiter,
+		planexec.Config[planexec.TextResult]{TextOnly: true},
+		agentkit.WithHistoryStore[planexec.Output[planexec.TextResult]](d.History),
+		agentkit.WithOnFinish(d.onPlanexecFinish),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "register the planexec-strategy job agent")
+	}
+	d.planexec = handle
 	return nil
 }
 
@@ -85,16 +113,27 @@ func (d *DurableRuntime) AttachRunner(r *JobRunner) {
 	}
 }
 
-// agentFor returns the agent that drives strategy, and whether there is one.
-// A strategy with no agent stays on the in-process executor.
-func (d *DurableRuntime) agentFor(strategy model.JobStrategy) (agentkit.Agent[react.Input], bool) {
-	if d == nil || d.Kernel == nil {
-		return agentkit.Agent[react.Input]{}, false
+// handles reports whether the durable runtime drives this run. A run it does not
+// drive stays on the in-process executor.
+//
+// An INTERACTIVE run is deliberately excluded and stays in-process. Asking the
+// user mid-run means parking one Process on an agentkit question await and later
+// resuming it with Kernel.Respond, which needs the await's key recorded somewhere
+// durable — the run log has no field for it, and adding one is a persistence
+// change that has not been agreed. Every non-interactive run of either strategy
+// runs here.
+func (d *DurableRuntime) handles(strategy model.JobStrategy, interactive bool) bool {
+	if d == nil || d.Kernel == nil || interactive {
+		return false
 	}
-	if strategy == model.JobStrategySimple && d.simple.Name() != "" {
-		return d.simple, true
+	switch strategy {
+	case model.JobStrategySimple:
+		return d.simple.Name() != ""
+	case model.JobStrategyPlanexec:
+		return d.planexec.Name() != ""
+	default:
+		return false
 	}
-	return agentkit.Agent[react.Input]{}, false
 }
 
 // spawnParams is what starting a durable Job run needs beyond the prompts.
@@ -110,6 +149,13 @@ type spawnParams struct {
 	runID        string
 	systemPrompt string
 	userPrompt   string
+	// interactive lets a planexec Job ask the user mid-run. The simple strategy
+	// ignores it: a single ReAct loop has no planner to ask from.
+	interactive bool
+	// inheritFrom continues a finished run's conversation in a run of its own. It
+	// is how an answered question resumes: a new Process, its own budget, the
+	// prior turn's context.
+	inheritFrom agentkit.ProcessID
 }
 
 // spawn starts one durable Job run and returns as soon as it is recorded.
@@ -118,7 +164,11 @@ type spawnParams struct {
 // two runs of the same Job on the same Case. The lease the caller holds is
 // released when Run returns, so the subject — not the lease — is the durable
 // guard from here on.
-func (d *DurableRuntime) spawn(ctx context.Context, agent agentkit.Agent[react.Input], p spawnParams) (agentkit.ProcessID, error) {
+func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, p spawnParams) (agentkit.ProcessID, error) {
+	name := agentkernel.AgentJobSimple
+	if strategy == model.JobStrategyPlanexec {
+		name = agentkernel.AgentJob
+	}
 	scope := agentkernel.Scope{
 		WorkspaceID: p.key.WorkspaceID,
 		CaseID:      p.key.CaseID,
@@ -132,20 +182,57 @@ func (d *DurableRuntime) spawn(ctx context.Context, agent agentkit.Agent[react.I
 		// resume is a single user-visible action with no such retry.
 		SlotGated: p.event.Domain == model.JobEventDomainScheduled,
 	}
-	if err := agentkernel.ValidateSpawn(agentkernel.AgentJobSimple, scope); err != nil {
+	if err := agentkernel.ValidateSpawn(name, scope); err != nil {
 		return "", goerr.Wrap(err, "validate the job run scope", goerr.V("job_id", p.key.JobID))
 	}
 
-	pid, err := agent.Spawn(ctx, d.Kernel,
-		react.Input{SystemPrompt: p.systemPrompt, Prompt: p.userPrompt},
+	opts := []agentkit.SpawnOption{
 		agentkit.WithSubject(agentkernel.JobRunSubject(p.key.WorkspaceID, p.key.CaseID, p.key.JobID)),
 		agentkit.WithMetadata(scope.Metadata()),
-	)
+		// The run id is what a later resume looks the run's Process up by, so it
+		// doubles as the idempotency key. That also makes a re-attempt of the same
+		// run resolve to the run it already started.
+		agentkit.WithIdempotencyKey(jobRunProcessKey(p.key, p.runID)),
+	}
+	if p.inheritFrom != "" {
+		opts = append(opts, agentkit.WithInheritedHistory(p.inheritFrom))
+	}
+
+	var pid agentkit.ProcessID
+	var err error
+	if strategy == model.JobStrategyPlanexec {
+		pid, err = d.planexec.Spawn(ctx, d.Kernel, planexec.Input{
+			SystemPrompt: p.systemPrompt,
+			UserInput:    p.userPrompt,
+			KnownToolIDs: agent.KnownToolSetIDsJob,
+			// A Job's sub-agents perform the deliverable action (posting the result,
+			// filing an action) rather than only observing, so the write tools its
+			// palette carries are actually usable.
+			AllowSubAgentWrites: true,
+			// A trivially-answerable Job skips the investigation machinery and
+			// replies in a single tool-enabled pass.
+			AllowDirect: true,
+			// Only an interactive Job may stop and ask; an unattended one has nobody
+			// to answer.
+			AllowQuestion: p.interactive,
+		}, opts...)
+	} else {
+		pid, err = d.simple.Spawn(ctx, d.Kernel,
+			react.Input{SystemPrompt: p.systemPrompt, Prompt: p.userPrompt}, opts...)
+	}
 	if err != nil {
 		return "", goerr.Wrap(err, "spawn the job agent",
 			goerr.V("job_id", p.key.JobID), goerr.V("run_id", p.runID))
 	}
 	return pid, nil
+}
+
+// jobRunProcessKey is the idempotency key one Job run's Process is filed under.
+// The separator is a NUL so no component can forge a boundary; the value is never
+// parsed back.
+func jobRunProcessKey(key model.JobRunKey, runID string) string {
+	return strings.Join([]string{"job-run", key.WorkspaceID,
+		strconv.FormatInt(key.CaseID, 10), key.JobID, runID}, "\x00")
 }
 
 // onSimpleFinish closes out a finished simple-strategy run: the run log, the
@@ -192,6 +279,69 @@ func (d *DurableRuntime) onSimpleFinish(ctx context.Context, pid agentkit.Proces
 		d.reflect(ctx, proc, sc, j, c)
 	}
 	return nil
+}
+
+// onPlanexecFinish closes out a finished planexec-strategy run.
+//
+// It has one outcome the simple strategy cannot produce: a question. There the run
+// is NOT closed — the form is posted, the log is parked at AWAITING_INPUT, and the
+// answer starts a fresh run continuing this one's conversation.
+func (d *DurableRuntime) onPlanexecFinish(ctx context.Context, pid agentkit.ProcessID,
+	res agentkit.FinishResult[planexec.Output[planexec.TextResult]],
+) error {
+	r := d.runner
+	if r == nil {
+		return goerr.New("durable runtime has no job runner")
+	}
+	proc, err := d.Kernel.GetProcess(ctx, pid)
+	if err != nil {
+		return goerr.Wrap(err, "read the finished job run", goerr.V("process", pid))
+	}
+	sc := agentkernel.ScopeFrom(proc.Metadata)
+	key := model.JobRunKey{WorkspaceID: sc.WorkspaceID, CaseID: sc.CaseID, JobID: sc.JobID}
+	usage := processUsage(proc)
+
+	var runErr error
+	switch res.Status {
+	case agentkit.ProcessSucceeded:
+		if res.Output != nil && res.Output.Kind == planexec.OutputFallback {
+			runErr = goerr.New(fallbackReason(res.Output.FallbackReason))
+		}
+	case agentkit.ProcessFailed:
+		runErr = failureError(res.Failure)
+	default:
+		runErr = goerr.New("job run did not complete", goerr.V("status", string(proc.Status)))
+	}
+
+	runtrace.FinishRun(ctx, r.deps.Repo, key, sc.JobRunID, usage, runErr, r.clock())
+
+	j, c := d.reloadRunContext(ctx, sc)
+	d.postCompletionMarker(ctx, sc, j, runErr)
+	if runErr == nil {
+		d.reflect(ctx, proc, sc, j, c)
+	}
+	return nil
+}
+
+// processUsage reads a finished run's totals off its Process, which is the only
+// place a run whose transitions span claims and instances accumulates them.
+func processUsage(proc *agentkit.Process) runtrace.Usage {
+	return runtrace.Usage{
+		InputTokens:              proc.Metrics.InputTokens,
+		OutputTokens:             proc.Metrics.OutputTokens,
+		CacheCreationInputTokens: proc.Metrics.CacheCreationInputTokens,
+		CacheReadInputTokens:     proc.Metrics.CacheReadInputTokens,
+		LLMCalls:                 proc.Metrics.LLMCalls,
+		ToolCalls:                proc.Metrics.ToolCalls,
+	}
+}
+
+// fallbackReason renders a fallback that reached no conclusion.
+func fallbackReason(reason string) string {
+	if reason == "" {
+		return "the run reached no conclusion"
+	}
+	return reason
 }
 
 // reloadRunContext fetches the Job definition and the Case a finished run was

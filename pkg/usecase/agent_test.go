@@ -237,7 +237,9 @@ func startAgentRuntime(t *testing.T, d agentRuntimeDeps) {
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
-	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentBudget.Limiter(), history, procRepo)).Required()
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(), history)
+	gt.NoError(t, err).Required()
+	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentBudget.Limiter(), history, procRepo, taskAgent)).Required()
 
 	traceRepo := d.Trace
 	if traceRepo == nil {

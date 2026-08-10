@@ -567,11 +567,18 @@ func cmdServe() *cli.Command {
 				// Kernel must be bound before the first Spawn — so the three
 				// steps run in this order and nowhere else.
 				agentRegistry := agentkit.NewRegistry()
-				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo); rErr != nil {
+				// The per-task sub-agent is registered once and shared: agentkit keys
+				// a Process on the agent name, so a second registration would fail.
+				taskAgent, tErr := agentkernel.RegisterTaskAgent(agentRegistry,
+					budgets.Task.Limiter(), processHistory)
+				if tErr != nil {
+					return goerr.Wrap(tErr, "failed to register the task sub-agent")
+				}
+				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo, taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
 				}
 				durableJobs = &job.DurableRuntime{History: processHistory}
-				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter()); rErr != nil {
+				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(), taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the job agents")
 				}
 
