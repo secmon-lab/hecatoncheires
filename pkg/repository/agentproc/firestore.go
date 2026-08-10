@@ -370,7 +370,15 @@ func (r *Repository) claimOne(ctx context.Context, ref *firestore.DocumentRef, w
 			p.UncleanReclaims = doc.Process.UncleanReclaims + 1
 		}
 
-		if err := tx.Set(ref, processRow{Process: p, ClaimAt: claimAtFor(&p)}); err != nil {
+		// EventSeq rides along untouched. A claim is not an append, and dropping
+		// the counter would restart the numbering: the next event would reuse a
+		// number an earlier one already has, which makes the append order
+		// ambiguous and makes a cursor skip every event sharing that number.
+		if err := tx.Set(ref, processRow{
+			Process:  p,
+			ClaimAt:  claimAtFor(&p),
+			EventSeq: doc.EventSeq,
+		}); err != nil {
 			return goerr.Wrap(err, "tx set claimed process", goerr.V("doc_id", ref.ID))
 		}
 		claimed = &p
@@ -631,8 +639,15 @@ func (r *Repository) Apply(ctx context.Context, cs agentkit.ChangeSet) error {
 	return nil
 }
 
-// eventSeqBases reads, for every Process this ChangeSet appends events to, the
-// number of events it has already appended.
+// eventSeqBases reads how many events each Process this ChangeSet touches has
+// already appended.
+//
+// It covers every Process the ChangeSet WRITES, not only those it appends
+// events to. A Process row is rewritten on every ordinary transition — and on
+// every claim — so a row written from a base of zero would restart the
+// numbering, and the next event would reuse a number an earlier one already
+// has. That makes the append order ambiguous and makes a cursor skip every
+// event sharing that number.
 //
 // An event for a Process that is neither stored nor being inserted here has
 // nothing to be appended to, and numbering it would put it in an order nobody
@@ -650,31 +665,43 @@ func (r *Repository) eventSeqBases(
 	}
 
 	bases := map[agentkit.ProcessID]int64{}
-	for _, ev := range cs.Events {
-		if _, seen := bases[ev.ProcessID]; seen {
-			continue
+	read := func(pid agentkit.ProcessID, mustExist bool, evID agentkit.EventID) error {
+		if _, seen := bases[pid]; seen {
+			return nil
 		}
-		snap := snaps[refOf(ev.ProcessID).Path]
+		snap := snaps[refOf(pid).Path]
 		if snap == nil || !snap.Exists() {
-			if _, ok := inserting[ev.ProcessID]; ok {
-				bases[ev.ProcessID] = 0
-				continue
+			if _, ok := inserting[pid]; ok || !mustExist {
+				bases[pid] = 0
+				return nil
 			}
-			return nil, goerr.Wrap(agentkit.ErrConflict, "event for a process that does not exist",
-				goerr.V("process", ev.ProcessID), goerr.V("event", ev.ID))
+			return goerr.Wrap(agentkit.ErrConflict, "event for a process that does not exist",
+				goerr.V("process", pid), goerr.V("event", evID))
 		}
 		var row processRow
 		if err := snap.DataTo(&row); err != nil {
-			return nil, goerr.Wrap(err, "decode process for event numbering",
-				goerr.V("process", ev.ProcessID))
+			return goerr.Wrap(err, "decode process for event numbering", goerr.V("process", pid))
 		}
-		bases[ev.ProcessID] = row.EventSeq
+		bases[pid] = row.EventSeq
+		return nil
+	}
+
+	for _, p := range cs.Processes {
+		if err := read(p.ID, false, ""); err != nil {
+			return nil, err
+		}
+	}
+	for _, ev := range cs.Events {
+		if err := read(ev.ProcessID, true, ev.ID); err != nil {
+			return nil, err
+		}
 	}
 	return bases, nil
 }
 
 // eventSeqAfter is the event count a Process row carries once this ChangeSet's
-// events are appended.
+// events are appended. With no events for that Process it is the stored count,
+// unchanged.
 func eventSeqAfter(cs agentkit.ChangeSet, pid agentkit.ProcessID, bases map[agentkit.ProcessID]int64) int64 {
 	next := bases[pid]
 	for _, ev := range cs.Events {

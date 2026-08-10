@@ -51,20 +51,16 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 			if sc.Lang != "" {
 				ctx = i18n.ContextWithLang(ctx, i18n.Lang(sc.Lang))
 			}
-			// The actor was validated before Spawn; this is where it becomes the
-			// access scope every tool in the claim runs under.
+			// The actor was validated before Spawn (ValidateSpawn); this is where
+			// it becomes the access scope every tool in the claim runs under.
 			//
-			// An agent that acts on a person's behalf must not run without one.
-			// A context with no auth token is read by the usecase layer as a
-			// system context and BYPASSES private-case access control, so a
-			// missing actor there is not reduced access — it is full access.
-			// Refusing the claim keeps that failure loud instead of silently
-			// widening what the run can reach.
-			if sc.ActorUserID == "" && RequiresActor(proc.Agent) {
-				return agentkit.ClaimRefused, goerr.New(
-					"this agent may only run with an identified actor",
-					goerr.V("process", proc.ID), goerr.V("agent", proc.Agent))
-			}
+			// A Process that reaches here without one is NOT refused. Refusing a
+			// claim puts the row back as pending with a backoff and never
+			// consumes the retry budget, so a permanent metadata fault would
+			// requeue forever and hold its Subject with it — no further turn on
+			// that thread could ever start. The capability is withdrawn instead:
+			// the tool factory hands such a run nothing (see NewToolFactory), so
+			// it cannot act, and it ends on its own.
 			if sc.ActorUserID != "" {
 				ctx = auth.ContextWithToken(ctx, &auth.Token{Sub: sc.ActorUserID})
 			}

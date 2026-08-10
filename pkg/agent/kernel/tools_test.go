@@ -257,6 +257,47 @@ func TestToolFactoryWithholdsKnowledgeWritesForAPrivateCase(t *testing.T) {
 	})
 }
 
+// TestToolFactoryWithholdsEverythingWithoutAnActor pins the backstop for an
+// agent that acts on a person's behalf. It withholds the tools rather than
+// failing the claim: a claim that fails is requeued forever without ever
+// consuming the retry budget, so the Process would hold its Subject and block
+// every later turn on that thread. With no tools the run reaches nothing and
+// ends on its own.
+func TestToolFactoryWithholdsEverythingWithoutAnActor(t *testing.T) {
+	ctx := context.Background()
+	// The knowledge read tools are offered to every agent regardless of what it
+	// requested, so their absence is what proves the whole set was withheld
+	// rather than merely unconfigured.
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:              memory.New(),
+		Registry:          testRegistry(channelWorkspace()),
+		KnowledgeAccessor: stubKnowledgeAccessor{},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{kernel.ToolSetsAll}}
+
+	t.Run("the workspace agent gets nothing", func(t *testing.T) {
+		tools, err := factory(ctx, newProcess(kernel.AgentWorkspace, sc))
+		gt.NoError(t, err).Required()
+		gt.Array(t, tools).Length(0)
+	})
+
+	t.Run("with an actor it gets its palette back", func(t *testing.T) {
+		withActor := sc
+		withActor.ActorUserID = "U1"
+		tools, err := factory(ctx, newProcess(kernel.AgentWorkspace, withActor))
+		gt.NoError(t, err).Required()
+		gt.Bool(t, len(tools) > 0).True()
+	})
+
+	t.Run("an agent that needs no actor is unaffected", func(t *testing.T) {
+		tools, err := factory(ctx, newProcess(kernel.AgentCaseChannel, sc))
+		gt.NoError(t, err).Required()
+		gt.Bool(t, len(tools) > 0).True()
+	})
+}
+
 // TestToolFactoryFailsOnAnUnknownWorkspace pins that a Process naming a
 // workspace this deployment does not configure fails the claim. Handing the
 // agent an empty tool set instead would let it run to a confident, tool-less

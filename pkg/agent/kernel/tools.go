@@ -20,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // ToolDeps carries the clients and usecases every toolset is built from. It is
@@ -113,6 +114,23 @@ func NewToolFactory(d ToolDeps) (agentkit.ToolFactory, error) {
 	}
 	return func(ctx context.Context, proc *agentkit.Process) ([]gollem.Tool, error) {
 		sc := ScopeFrom(proc.Metadata)
+
+		// An agent that acts on a person's behalf gets nothing without one. A
+		// context with no auth token is read by the usecase layer as a system
+		// context and BYPASSES private-case access control, so running such an
+		// agent with its normal tools would widen access rather than narrow it.
+		//
+		// Withdrawing the tools rather than failing is deliberate: a claim that
+		// fails is requeued forever without ever consuming the retry budget, so
+		// the Process would hold its Subject and block every later turn on that
+		// thread. With no tools the run reaches nothing and ends on its own.
+		// ValidateSpawn is what stops such a Process being created at all.
+		if sc.ActorUserID == "" && RequiresActor(proc.Agent) {
+			errutil.Handle(ctx, goerr.New("agent run has no actor; withholding every tool",
+				goerr.V("process", proc.ID), goerr.V("agent", proc.Agent)),
+				"agent run has no actor; withholding every tool")
+			return nil, nil
+		}
 
 		var entry *model.WorkspaceEntry
 		if sc.WorkspaceID != "" {

@@ -252,22 +252,6 @@ func TestClaimTraceIDIsPerClaim(t *testing.T) {
 	gt.String(t, strings.TrimPrefix(ids[0], prefix)).NotEqual("")
 }
 
-// TestClaimRefusedWithoutAnActor pins the fail-closed rule for agents that act
-// on a person's behalf. A context with no auth token is read by the usecase
-// layer as a system context and BYPASSES private-case access control, so a
-// missing actor there widens access rather than narrowing it.
-func TestClaimRefusedWithoutAnActor(t *testing.T) {
-	gt.Bool(t, kernel.RequiresActor(kernel.AgentWorkspace)).True()
-
-	// The per-case agents ran without an auth token before this runtime, so
-	// requiring one for them would be a separate, deliberate tightening.
-	for _, name := range []agentkit.AgentName{
-		kernel.AgentCaseChannel, kernel.AgentCaseThread, kernel.AgentJob, kernel.AgentAssist,
-	} {
-		gt.Bool(t, kernel.RequiresActor(name)).False()
-	}
-}
-
 // TestTokensAreMeteredOntoTheProcess pins that the metrics the budget reads are
 // actually accumulated. A Limit that never sees tokens is a budget that never
 // triggers.

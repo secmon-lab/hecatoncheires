@@ -306,6 +306,54 @@ func TestAppendingEventsDoesNotBumpRev(t *testing.T) {
 	gt.Value(t, string(events[2].Payload)).Equal("3")
 }
 
+// TestEventSequenceSurvivesTheProcessLifecycle is the regression this numbering
+// has to withstand. agentkit rewrites a Process row on every ordinary
+// transition and on every claim, so a row written from a base of zero would
+// restart the numbering: the next event would reuse a number an earlier one
+// already holds, the append order would stop being a total order, and a cursor
+// would skip every event sharing that number.
+func TestEventSequenceSurvivesTheProcessLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepository(t)
+	pid := newStoredProcess(t, repo)
+
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{
+		newEvent(pid, "e-1", "1"),
+	}})).Required()
+
+	// An ordinary Process-only transition, exactly as a strategy step commits.
+	stored, err := repo.GetProcess(ctx, pid)
+	gt.NoError(t, err).Required()
+	updated := *stored
+	updated.StateSeq = stored.StateSeq + 1
+	updated.State = []byte(`{"phase":"next"}`)
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Processes: []*agentkit.Process{&updated}})).Required()
+
+	// A claim, which rewrites the row again.
+	now := time.Now().UTC()
+	claimed, err := repo.ClaimNextProcess(ctx, "worker-1", now.Add(time.Hour), now.Add(time.Hour))
+	gt.NoError(t, err).Required()
+	gt.Value(t, claimed).NotNil().Required()
+	gt.Value(t, claimed.ID).Equal(pid)
+
+	gt.NoError(t, repo.Apply(ctx, agentkit.ChangeSet{Events: []*agentkit.Event{
+		newEvent(pid, "e-2", "2"),
+	}})).Required()
+
+	events, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{})
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	gt.Value(t, string(events[0].Payload)).Equal("1")
+	gt.Value(t, string(events[1].Payload)).Equal("2")
+
+	// The cursor must reach the second event. A restarted counter gives both the
+	// same number, and "after the first" then excludes the second as well.
+	after, err := repo.ListEvents(ctx, pid, agentkit.EventQuery{After: "e-1"})
+	gt.NoError(t, err).Required()
+	gt.Array(t, after).Length(1).Required()
+	gt.Value(t, string(after[0].Payload)).Equal("2")
+}
+
 func TestHashID(t *testing.T) {
 	t.Run("produces a firestore-safe document id", func(t *testing.T) {
 		got := agentproc.HashIDForTest("workspaces/ws-1/cases/7")

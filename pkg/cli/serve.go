@@ -769,13 +769,27 @@ func cmdServe() *cli.Command {
 			// transition already in flight finishes and commits, and anything it
 			// did not reach is picked up by another instance once the lease
 			// expires.
+			//
+			// DispatchCancelable, not Dispatch: Dispatch severs the context with
+			// context.WithoutCancel, so the worker would keep polling after
+			// shutdown — against the Firestore and Cloud Storage clients the
+			// deferred cleanup below has already closed.
 			agentServeCtx, stopAgentServe := context.WithCancel(ctx)
-			defer stopAgentServe()
+			agentServeDone := make(chan struct{})
 			if agentKernel != nil {
 				if err := agentCfg.ValidateWorker(); err != nil {
+					stopAgentServe()
 					return goerr.Wrap(err, "invalid agent worker configuration")
 				}
-				async.Dispatch(agentServeCtx, func(c context.Context) error {
+				// Registered before the clients it uses are closed, so it runs
+				// AFTER them in LIFO order: stop the worker, wait for it to let
+				// go, and only then let the client cleanups run.
+				defer func() {
+					stopAgentServe()
+					<-agentServeDone
+				}()
+				async.DispatchCancelable(agentServeCtx, func(c context.Context) error {
+					defer close(agentServeDone)
 					logging.Default().Info("Starting agent runtime worker",
 						logAttrsToArgs(agentCfg.LogAttrs())...)
 					if err := agentKernel.Serve(c,
@@ -789,6 +803,9 @@ func cmdServe() *cli.Command {
 					logging.Default().Info("Agent runtime worker stopped")
 					return nil
 				})
+			} else {
+				stopAgentServe()
+				close(agentServeDone)
 			}
 
 			// Create HTTP server

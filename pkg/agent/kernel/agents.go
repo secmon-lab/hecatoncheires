@@ -1,6 +1,9 @@
 package kernel
 
-import "github.com/gollem-dev/agentkit"
+import (
+	"github.com/gollem-dev/agentkit"
+	"github.com/m-mizutani/goerr/v2"
+)
 
 // Agent names. These values are persisted on every Process row, so a running
 // deployment always has in-flight Processes referring to them by name. Renaming
@@ -53,4 +56,23 @@ const (
 // moving them onto this runtime.
 func RequiresActor(name agentkit.AgentName) bool {
 	return name == AgentWorkspace
+}
+
+// ValidateSpawn checks a scope against the agent it is about to launch. A host
+// calls it before Spawn.
+//
+// This is the enforcing check, not the tool factory's. Spawn is the last point
+// where a bad scope can be reported to someone who can act on it: once the
+// Process exists, a claim that refuses to run it is put back as pending with a
+// backoff and never consumes the retry budget, so the row would requeue forever
+// and hold its Subject with it — no later turn on that thread could start.
+func ValidateSpawn(name agentkit.AgentName, sc Scope) error {
+	if err := sc.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid agent scope", goerr.V("agent", name))
+	}
+	if RequiresActor(name) && sc.ActorUserID == "" {
+		return goerr.New("this agent may only run with an identified actor",
+			goerr.V("agent", name))
+	}
+	return nil
 }
