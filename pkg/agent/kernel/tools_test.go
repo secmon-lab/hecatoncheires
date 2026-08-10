@@ -13,6 +13,9 @@ import (
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
@@ -92,6 +95,22 @@ func (stubKnowledgeMutator) UpdateKnowledge(context.Context, string, model.Knowl
 // one.
 type stubSlackBot struct {
 	slackservice.Service
+}
+
+// stubSlackPoster, stubActionMutator and stubCaseMutator stand in for the
+// writers a tool needs to exist at all. The embedded interfaces are nil, so any
+// method a test does not expect panics rather than silently succeeding — these
+// tests assert which tools get BUILT and never run one.
+type stubSlackPoster struct {
+	slackpost.Poster
+}
+
+type stubActionMutator struct {
+	core.ActionMutator
+}
+
+type stubCaseMutator struct {
+	casewriter.CaseMutator
 }
 
 func newProcess(name agentkit.AgentName, sc kernel.Scope) *agentkit.Process {
@@ -262,11 +281,61 @@ func TestToolFactoryWithdrawsActionToolsForAThreadBoundCase(t *testing.T) {
 	gt.Bool(t, hasPrefixIn(toolNames(tools), "core__")).False()
 }
 
-// TestToolFactoryRefusesAnAgentWithNoPalette pins that an agent kind whose tool
-// set has not been established yet fails loudly. The Job palettes are
-// deliberately narrower than the case-channel one — core.NewWriterForJob
-// withholds archive / unarchive / delete_action_step from unattended runs — so a
-// permissive fallback would hand an unattended agent destructive tools.
+// TestToolFactoryBuildsTheJobPalette pins the unattended-run palette against
+// what the pre-agentkit buildJobTools assembled. The three withheld action tools
+// are the point: a Job acts on its own judgement with nobody reviewing it, and a
+// wrong archive is work the team can no longer see.
+func TestToolFactoryBuildsTheJobPalette(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	ctx = seedCase(t, ctx, repo, &model.Case{
+		Title:          "job target",
+		SlackChannelID: "C-JOB",
+	})
+
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:        repo,
+		Registry:    testRegistry(channelWorkspace()),
+		SlackBot:    stubSlackBot{},
+		SlackPoster: stubSlackPoster{},
+		// The writers have to be wired for the write tools to exist at all.
+		ActionUC: stubActionMutator{},
+		CaseUC:   stubCaseMutator{},
+	})
+	gt.NoError(t, err).Required()
+
+	// No actor: a Job is unattended, which RequiresActor excludes precisely so
+	// this resolves to a palette rather than to nothing.
+	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{kernel.ToolSetsAll}}
+	for _, name := range []agentkit.AgentName{kernel.AgentJob, kernel.AgentJobSimple} {
+		t.Run(string(name), func(t *testing.T) {
+			tools, err := factory(ctx, newProcess(name, sc))
+			gt.NoError(t, err).Required()
+			names := toolNames(tools)
+
+			// Reads and the non-destructive writes.
+			gt.Bool(t, slices.Contains(names, "core__list_actions")).True()
+			gt.Bool(t, slices.Contains(names, "core__create_action")).True()
+			gt.Bool(t, slices.Contains(names, "core__update_action_status")).True()
+			// The three an unattended run must not have.
+			gt.Bool(t, slices.Contains(names, "core__archive_action")).False()
+			gt.Bool(t, slices.Contains(names, "core__unarchive_action")).False()
+			gt.Bool(t, slices.Contains(names, "core__delete_action_step")).False()
+			// Case edits, the channel-pinned poster, and Slack reads.
+			gt.Bool(t, slices.Contains(names, "case__update_case")).True()
+			gt.Bool(t, slices.Contains(names, "slack__post_to_case_channel")).True()
+			gt.Bool(t, slices.Contains(names, "slack__get_messages")).True()
+			// A Job has never had GitHub.
+			gt.Bool(t, hasPrefixIn(names, "github__")).False()
+		})
+	}
+}
+
+// TestToolFactoryRefusesAnAgentWithNoPalette pins that an agent kind with no
+// declared palette fails loudly rather than falling back to a permissive one. The
+// palettes differ in ways that matter — an unattended run is deliberately denied
+// archive / unarchive / delete_action_step — so a fallback would hand some agent
+// tools its kind was never meant to have, silently.
 func TestToolFactoryRefusesAnAgentWithNoPalette(t *testing.T) {
 	ctx := context.Background()
 	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
@@ -276,13 +345,9 @@ func TestToolFactoryRefusesAnAgentWithNoPalette(t *testing.T) {
 	gt.NoError(t, err).Required()
 
 	sc := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{kernel.ToolSetsAll}}
-	for _, name := range []agentkit.AgentName{kernel.AgentJob, kernel.AgentJobSimple} {
-		t.Run(string(name), func(t *testing.T) {
-			tools, err := factory(ctx, newProcess(name, sc))
-			gt.Value(t, err).NotNil()
-			gt.Array(t, tools).Length(0)
-		})
-	}
+	tools, err := factory(ctx, newProcess(agentkit.AgentName("agent-added-without-a-palette"), sc))
+	gt.Value(t, err).NotNil()
+	gt.Array(t, tools).Length(0)
 }
 
 // TestToolFactoryWithholdsKnowledgeWritesForAPrivateCase pins both halves of the

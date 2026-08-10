@@ -16,6 +16,7 @@ import (
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -38,6 +39,10 @@ type ToolDeps struct {
 	SlackBot       slacktool.BotService
 	SlackSearch    slacktool.SearchService
 	SlackRetriever slacktool.MessageRetriever
+	// SlackPoster backs the channel-pinned poster an unattended run reports
+	// through. It is a narrower interface than SlackBot on purpose: an LLM holding
+	// the post tool must not reach the wider Slack surface.
+	SlackPoster    slackpost.Poster
 	NotionClient   notiontool.Client
 	GitHubClient   *githubtool.Client
 	WebFetchClient *webfetch.Client
@@ -101,6 +106,8 @@ func defaultToolSets(name agentkit.AgentName) ([]string, error) {
 		return agent.KnownToolSetIDsWorkspaceChannel, nil
 	case AgentAssist:
 		return agent.KnownToolSetIDsAssist, nil
+	case AgentJob, AgentJobSimple:
+		return agent.KnownToolSetIDsJob, nil
 	case AgentProposal, AgentTask:
 		return agent.KnownToolSetIDs, nil
 	default:
@@ -206,13 +213,20 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 		deps.Core.StatusSet = entry.ActionStatusSet
 	}
 
-	// The Slack posting tool is pinned to the channel of the case the run is on.
+	// The Slack posting tools are pinned to the channel of the case the run is on.
 	// It is taken from the Case rather than from Scope.ChannelID because the
 	// scope's channel/thread pair locates the *thread a run reports into*, and an
-	// unattended run (assist) has no such thread while still having a channel to
-	// write to.
+	// unattended run (a Job, or assist) has no such thread while still having a
+	// channel to write to.
 	if target != nil {
 		deps.Slack.ChannelID = target.SlackChannelID
+		deps.SlackPost = slackpost.Deps{
+			Poster:    d.SlackPoster,
+			ChannelID: target.SlackChannelID,
+			// A thread-mode case's output belongs in the case thread, not at the
+			// monitored channel's root where it would be lost among other traffic.
+			DefaultThreadTS: target.SlackThreadTS,
+		}
 	}
 
 	// Actions exist only in channel-mode cases. A thread-mode case tracks its

@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
@@ -12,6 +13,7 @@ import (
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 )
 
@@ -62,6 +64,16 @@ const (
 	// findings back into the case channel, whereas a mention turn's reply is
 	// posted by its host, not by a tool the model may call at will.
 	ToolSetSlackWrite = "slack_write"
+	// ToolSetCoreJob is the action toolset an UNATTENDED run gets: the read tools
+	// plus create / update / status / assignee / steps, but NOT archive,
+	// unarchive or delete_action_step. Those three are withheld because a Job
+	// acts on its own judgement with nobody reviewing it, and a wrong archive is
+	// work the team can no longer see.
+	ToolSetCoreJob = "core_job"
+	// ToolSetSlackPost is the channel-pinned poster (slack__post_to_case_channel).
+	// A Job's output reaches people only through it, which is why an unattended
+	// run has it while an interactive turn — whose reply its host posts — does not.
+	ToolSetSlackPost = "slack_post"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -140,6 +152,23 @@ var KnownToolSetIDsAssist = []string{
 	ToolSetJira,
 }
 
+// KnownToolSetIDsJob is the palette of an unattended Job run. It matches what
+// the pre-agentkit buildJobTools assembled: the Job-safe action set, the case
+// writer, the channel-pinned poster, Slack reads, the read-only integrations,
+// memos and knowledge. Compared with the interactive mention agent it withholds
+// archive / unarchive / delete_action_step (see ToolSetCoreJob) and GitHub.
+var KnownToolSetIDsJob = []string{
+	ToolSetCoreJob,
+	ToolSetCaseWrite,
+	ToolSetSlackPost,
+	ToolSetSlackRO,
+	ToolSetNotion,
+	ToolSetWebFetch,
+	ToolSetJira,
+	ToolSetMemo,
+	ToolSetKnowledge,
+}
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -155,6 +184,12 @@ type ToolSetResolver struct {
 	// from core (read-only) rather than a superset flag because one resolver
 	// can be asked for either by different tasks in the same run.
 	coreFull []gollem.Tool
+	// coreJob is the unattended-run action set (ToolSetCoreJob): reads plus the
+	// non-destructive writes.
+	coreJob []gollem.Tool
+	// slackPost is the channel-pinned poster (ToolSetSlackPost). Empty unless a
+	// poster and a case channel are both known.
+	slackPost []gollem.Tool
 	// memo is the Case-scoped memo tool set (ToolSetMemo).
 	memo []gollem.Tool
 	// knowledgeWrite is the knowledge tool set including create/update
@@ -207,6 +242,11 @@ type ToolSetDeps struct {
 	// "jira" ToolSet ID resolves to nothing.
 	Jira []gollem.Tool
 
+	// SlackPost backs the slack_post toolset. Built when a poster and a channel
+	// are both known; a zero value leaves the toolset empty so requesting the id
+	// resolves to nothing rather than to a tool that posts nowhere.
+	SlackPost slackpost.Deps
+
 	// CaseWrite backs the case_write toolset (the full single-case writer set).
 	// The tools are built when CaseUC and CaseID identify a concrete case; a zero
 	// value (no case yet, or no mutator wired) leaves the toolset empty so
@@ -240,9 +280,15 @@ type ToolSetDeps struct {
 func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	var coreTools []gollem.Tool
 	var coreFullTools []gollem.Tool
+	var coreJobTools []gollem.Tool
 	if !d.OmitCore {
 		coreTools = core.NewReadOnly(d.Core)
 		coreFullTools = core.New(d.Core)
+		// The unattended set is the reads plus the non-destructive writes. It is
+		// assembled from the same two builders the pre-agentkit Job path used, so
+		// the withheld three (archive / unarchive / delete_action_step) stay
+		// withheld by construction rather than by a list that could drift.
+		coreJobTools = append(append([]gollem.Tool{}, coreTools...), actionwriter.New(d.Core)...)
 	}
 	var knowledge []gollem.Tool
 	var knowledgeWrite []gollem.Tool
@@ -280,9 +326,17 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	// that a case with no Slack channel still keeps its Slack READS — withholding
 	// the whole set there would take away tools that work.
 	slackWrite := slacktool.NewForAssist(d.Slack)
+	// The poster is pinned to one channel and cannot be redirected by the model,
+	// so without a channel there is nothing to build.
+	var slackPost []gollem.Tool
+	if d.SlackPost.Poster != nil && d.SlackPost.ChannelID != "" {
+		slackPost = slackpost.New(d.SlackPost)
+	}
 	return &ToolSetResolver{
 		core:           coreTools,
 		coreFull:       coreFullTools,
+		coreJob:        coreJobTools,
+		slackPost:      slackPost,
 		memo:           memoTools,
 		knowledgeWrite: knowledgeWrite,
 		slack:          slacktool.NewReadOnly(d.Slack),
@@ -367,6 +421,10 @@ func (r *ToolSetResolver) setFor(id string) []gollem.Tool {
 		return r.core
 	case ToolSetCore:
 		return r.coreFull
+	case ToolSetCoreJob:
+		return r.coreJob
+	case ToolSetSlackPost:
+		return r.slackPost
 	case ToolSetSlackRO:
 		return r.slack
 	case ToolSetSlackWrite:
