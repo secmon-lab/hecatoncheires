@@ -26,7 +26,7 @@ mention agent) and a Job-safe subset.
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
 | `core__list_actions` | R | List the case's actions. | Optional `include_archived` (default `false`). |
-| `core__get_action` | R | Fetch one action by id. | |
+| `core__get_action` | R | Fetch one action by id. | Scoped to the case the run is pinned to: an action of another case is reported as **not found**, with the same wording as a missing one so the other case's existence is not confirmed. An action id is a small integer a model can guess, or be told to fetch by text it read. |
 | `core__list_action_steps` | R | List the binary-state steps under an action. | |
 | `core__search_referenceable_cases` | R | Search the target workspace of a `case_ref` / `multi_case_ref` field for a case id to reference. | Only wired when the workspace defines such a field. Private and draft cases are excluded. |
 | `core__get_referenceable_cases` | R | Batch-fetch full details of referenced cases. | Same gating as above. Set the value itself via `case__update_case`'s `fields`. |

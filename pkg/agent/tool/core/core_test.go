@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -403,6 +404,50 @@ func TestGetActionTool(t *testing.T) {
 
 		_, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
+	})
+
+	// An action id is a small integer the model can arrive at by guessing, or by
+	// being told to in text it read. The read goes straight to the repository and
+	// passes no access gate, so without this check a run on one case could read
+	// another case's work — including a private case its actor is not in.
+	t.Run("refuses an action belonging to another case", func(t *testing.T) {
+		const otherCaseID = testCaseID + 1
+		var reached bool
+		actionRepo := &mockActionRepo{
+			getFn: func(_ context.Context, _ string, id int64) (*model.Action, error) {
+				reached = true
+				return &model.Action{ID: id, CaseID: otherCaseID, Title: "Someone else's work",
+					Status: types.ActionStatusInProgress}, nil
+			},
+		}
+		tools := core.New(core.Deps{
+			Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID,
+		})
+
+		result, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{"action_id": float64(42)})
+		gt.Error(t, err).Required()
+		gt.Value(t, result).Nil()
+		gt.Bool(t, reached).True() // the repository was consulted; the answer was withheld
+		// The same wording as a genuinely missing action: confirming that the id
+		// exists but belongs elsewhere would leak the other case's existence.
+		gt.String(t, err.Error()).Contains("action not found")
+		gt.Bool(t, strings.Contains(err.Error(), "Someone else's work")).False()
+	})
+
+	// A run with no case pinned has no core toolset at all, so the tool does not
+	// exist there; the zero guard is what keeps the check from rejecting
+	// everything if one ever did.
+	t.Run("without a pinned case the check does not apply", func(t *testing.T) {
+		actionRepo := &mockActionRepo{
+			getFn: func(_ context.Context, _ string, id int64) (*model.Action, error) {
+				return &model.Action{ID: id, CaseID: 7, Title: "Any", Status: types.ActionStatusTodo}, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID})
+
+		result, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{"action_id": float64(1)})
+		gt.NoError(t, err).Required()
+		gt.Value(t, result["title"]).Equal("Any")
 	})
 }
 
@@ -823,7 +868,9 @@ func TestToolUpdateCalls(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
 		actionRepo := &mockActionRepo{
 			getFn: func(_ context.Context, _ string, id int64) (*model.Action, error) {
-				return &model.Action{ID: id, Title: "T", Status: types.ActionStatusTodo}, nil
+				// CaseID matters: get_action only returns an action of the case the
+				// run is pinned to.
+				return &model.Action{ID: id, CaseID: testCaseID, Title: "T", Status: types.ActionStatusTodo}, nil
 			},
 		}
 		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
