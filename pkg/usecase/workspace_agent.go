@@ -30,7 +30,7 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 		return goerr.New("msg and entry are required")
 	}
 	logger := logging.From(ctx)
-	if uc.workspaceAgent == nil {
+	if uc.workspaceAgent == nil && uc.durableWorkspaceAgent == nil {
 		logger.Debug("workspace agent not configured; skipping workspace channel mention")
 		return nil
 	}
@@ -81,7 +81,7 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 	// agent's final reply in place of the last transient line.
 	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
 
-	res, runErr := uc.workspaceAgent.RunTurn(ctx, wsagent.TurnRequest{
+	req := wsagent.TurnRequest{
 		Session:     session,
 		Workspace:   entry,
 		ActorID:     msg.UserID(),
@@ -91,13 +91,20 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 			TraceAppendFn:  traceMsg.appendLine,
 			TraceReplaceFn: traceMsg.replaceLine,
 		},
-	})
+	}
+
+	// The durable runtime is preferred once it is wired: the run survives an
+	// instance restart and its reply is posted by the completion handler. The
+	// in-process path stays for a deployment built without a Kernel.
+	res, runErr := uc.runWorkspaceAgentTurn(ctx, req)
 	if runErr != nil {
 		uc.replyUserError(ctx, runErr, "workspace agent run turn", msg.ChannelID(), threadTS)
 		return nil
 	}
 
 	switch res.Status {
+	case wsagent.StatusStarted:
+		return nil
 	case wsagent.StatusBusy:
 		busyMsg := i18n.T(ctx, i18n.MsgKeyAgentBusy)
 		if _, postErr := uc.deps.SlackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, busyMsg); postErr != nil {
@@ -120,4 +127,12 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 	default:
 		return goerr.New("unexpected workspace-agent status", goerr.V("status", int(res.Status)))
 	}
+}
+
+// runWorkspaceAgentTurn dispatches one turn to whichever runtime is wired.
+func (uc *AgentUseCase) runWorkspaceAgentTurn(ctx context.Context, req wsagent.TurnRequest) (*wsagent.Result, error) {
+	if uc.durableWorkspaceAgent != nil {
+		return uc.durableWorkspaceAgent.StartTurn(ctx, req)
+	}
+	return uc.workspaceAgent.RunTurn(ctx, req)
 }

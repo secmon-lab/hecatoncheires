@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -52,6 +53,11 @@ type AgentUseCase struct {
 	// workspaceAgent runs the workspace-channel cross-case agent (channel mode).
 	// Non-nil whenever the LLM client is configured.
 	workspaceAgent *wsagent.UseCase
+
+	// durableWorkspaceAgent runs the same cross-case agent on the agentkit
+	// runtime. It is filled by RegisterAgents, so a deployment that has not built
+	// a Kernel keeps taking workspaceAgent's in-process path.
+	durableWorkspaceAgent *wsagent.Durable
 }
 
 // AgentDeps groups the dependencies AgentUseCase needs. Required fields are
@@ -220,8 +226,30 @@ func (uc *AgentUseCase) RegisterAgents(
 		return goerr.Wrap(err, "register the case-channel agent")
 	}
 	uc.casebound = cb
+
+	// The sub-agent every plan-execute host spawns per planned task. It is
+	// registered once and shared: agentkit keys a Process on the agent NAME, so a
+	// second registration under the same name is an error, and each host holding
+	// its own copy would need its own name and its own tool palette.
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, taskAgentVersion, limiter,
+		agentkit.WithHistoryStore[react.Output](store))
+	if err != nil {
+		return goerr.Wrap(err, "register the task sub-agent")
+	}
+
+	wa, err := wsagent.NewDurable(wsagentHost{uc: uc}, locator)
+	if err != nil {
+		return goerr.Wrap(err, "build the workspace agent")
+	}
+	if err := wa.Register(reg, taskAgent, agentProgress{uc: uc}, limiter, store); err != nil {
+		return goerr.Wrap(err, "register the workspace agent")
+	}
+	uc.durableWorkspaceAgent = wa
 	return nil
 }
+
+// taskAgentVersion is the state version of the shared per-task sub-agent.
+const taskAgentVersion = 1
 
 // BindAgentKernel hands the built Kernel to every agent RegisterAgents
 // registered. Until it is called, a mention turn cannot be spawned.
@@ -229,6 +257,7 @@ func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel) {
 	if uc.casebound != nil {
 		uc.casebound.Bind(k)
 	}
+	uc.durableWorkspaceAgent.Bind(k)
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
@@ -399,6 +428,64 @@ func (h caseboundHost) Reply(ctx context.Context, channelID, threadTS, text stri
 func (h caseboundHost) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
 	h.uc.replyUserError(ctx, fallbackReasonError(reason), "casebound agent turn", channelID, threadTS)
 	return nil
+}
+
+// wsagentHost is the Slack side of a finished workspace-agent turn. It mirrors
+// caseboundHost; the two are separate types because each host package declares
+// its own Host interface, and one adapter satisfying both would tie their
+// contracts together.
+type wsagentHost struct {
+	uc *AgentUseCase
+}
+
+// Reply posts the agent's answer as a thread reply.
+func (h wsagentHost) Reply(ctx context.Context, channelID, threadTS, text string) error {
+	if text == "" {
+		return nil
+	}
+	if _, err := h.uc.deps.SlackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
+		return goerr.Wrap(err, "post the workspace-agent reply",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	return nil
+}
+
+// ReportFailure tells the user the turn could not finish.
+func (h wsagentHost) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
+	h.uc.replyUserError(ctx, fallbackReasonError(reason), "workspace agent turn", channelID, threadTS)
+	return nil
+}
+
+// agentProgress draws a durable run's milestone lines into a single Slack
+// message.
+//
+// Unlike traceMessage it holds no state: the message id and the lines so far
+// live in the run's checkpointed state, because a run's transitions can be
+// claimed by a different instance and an in-process accumulator there would
+// start a second message instead of updating the first.
+type agentProgress struct {
+	uc *AgentUseCase
+}
+
+// Render posts the lines as one message, or updates the message already posted.
+func (p agentProgress) Render(ctx context.Context, target planexec.ProgressTarget,
+	messageTS string, lines []string,
+) (string, error) {
+	blocks := buildTraceContextBlocks(lines)
+	fallback := traceFallbackText(lines)
+	if messageTS == "" {
+		ts, err := p.uc.deps.SlackService.PostThreadMessage(ctx, target.ChannelID, target.ThreadTS, blocks, fallback)
+		if err != nil {
+			return "", goerr.Wrap(err, "post the agent progress message",
+				goerr.V("channel_id", target.ChannelID), goerr.V("thread_ts", target.ThreadTS))
+		}
+		return ts, nil
+	}
+	if err := p.uc.deps.SlackService.UpdateMessage(ctx, target.ChannelID, messageTS, blocks, fallback); err != nil {
+		return messageTS, goerr.Wrap(err, "update the agent progress message",
+			goerr.V("channel_id", target.ChannelID), goerr.V("message_ts", messageTS))
+	}
+	return messageTS, nil
 }
 
 // toCaseboundMessages converts the Slack-service ConversationMessage shape
@@ -721,6 +808,18 @@ func buildTraceContextBlocks(lines []string) []goslack.Block {
 	return blocks
 }
 
+// traceFallbackText renders the plain-text notification fallback for a milestone
+// history, windowed to the same most-recent maxTraceBlocks lines
+// buildTraceContextBlocks renders. Keeping the two in step is what stops an
+// unbounded history from blowing past Slack's 4000-char text-field limit
+// (msg_too_long) while the blocks themselves stay within their own cap.
+func traceFallbackText(lines []string) string {
+	if len(lines) > maxTraceBlocks {
+		lines = lines[len(lines)-maxTraceBlocks:]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // buildContextBlocks renders the milestone history followed by the transient
 // live line. When a live line is present, one block slot is reserved for it so
 // a long milestone history never pushes the in-place line out of the message.
@@ -746,10 +845,7 @@ func (tm *traceMessage) buildContextBlocks() []goslack.Block {
 func (tm *traceMessage) fallbackText() string {
 	lines := tm.lines
 	if tm.liveLine == "" {
-		if len(lines) > maxTraceBlocks {
-			lines = lines[len(lines)-maxTraceBlocks:]
-		}
-		return strings.Join(lines, "\n")
+		return traceFallbackText(lines)
 	}
 	if len(lines) > maxTraceBlocks-1 {
 		lines = lines[len(lines)-(maxTraceBlocks-1):]

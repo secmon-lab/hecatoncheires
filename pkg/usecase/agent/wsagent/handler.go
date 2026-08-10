@@ -86,6 +86,10 @@ const (
 	// StatusFallback: the planner exhausted its budget or hit an internal error
 	// without producing a reply; the caller should post a fallback message.
 	StatusFallback
+	// StatusStarted: the turn was spawned on the durable agent runtime and its
+	// answer will be posted by the run's own completion handler. The caller has
+	// nothing to post.
+	StatusStarted
 )
 
 // Result is what RunTurn returns to the usecase layer.
