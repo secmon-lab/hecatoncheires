@@ -10,43 +10,51 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 )
 
+func validConfig() budget.Config {
+	return budget.Config{MaxSteps: 10, MaxInputTokens: 1000, MaxOutputTokens: 200, NoticeRatio: 0.8}
+}
+
 func TestConfigValidate(t *testing.T) {
 	testCases := map[string]struct {
-		cfg     budget.Config
+		mutate  func(budget.Config) budget.Config
 		wantErr bool
 	}{
 		"valid": {
-			cfg: budget.Config{MaxSteps: 64, MaxTokens: 1000, NoticeRatio: 0.8},
+			mutate: func(c budget.Config) budget.Config { return c },
 		},
 		"zero steps": {
-			cfg:     budget.Config{MaxSteps: 0, MaxTokens: 1000, NoticeRatio: 0.8},
+			mutate:  func(c budget.Config) budget.Config { c.MaxSteps = 0; return c },
 			wantErr: true,
 		},
 		"negative steps": {
-			cfg:     budget.Config{MaxSteps: -1, MaxTokens: 1000, NoticeRatio: 0.8},
+			mutate:  func(c budget.Config) budget.Config { c.MaxSteps = -1; return c },
 			wantErr: true,
 		},
-		"zero tokens": {
-			cfg:     budget.Config{MaxSteps: 64, MaxTokens: 0, NoticeRatio: 0.8},
+		"zero input tokens": {
+			mutate:  func(c budget.Config) budget.Config { c.MaxInputTokens = 0; return c },
+			wantErr: true,
+		},
+		"zero output tokens": {
+			mutate:  func(c budget.Config) budget.Config { c.MaxOutputTokens = 0; return c },
 			wantErr: true,
 		},
 		"ratio at zero": {
-			cfg:     budget.Config{MaxSteps: 64, MaxTokens: 1000, NoticeRatio: 0},
+			mutate:  func(c budget.Config) budget.Config { c.NoticeRatio = 0; return c },
 			wantErr: true,
 		},
 		"ratio at one": {
-			cfg:     budget.Config{MaxSteps: 64, MaxTokens: 1000, NoticeRatio: 1},
+			mutate:  func(c budget.Config) budget.Config { c.NoticeRatio = 1; return c },
 			wantErr: true,
 		},
 		"ratio above one": {
-			cfg:     budget.Config{MaxSteps: 64, MaxTokens: 1000, NoticeRatio: 1.5},
+			mutate:  func(c budget.Config) budget.Config { c.NoticeRatio = 1.5; return c },
 			wantErr: true,
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			err := tc.cfg.Validate()
+			err := tc.mutate(validConfig()).Validate()
 			if tc.wantErr {
 				gt.Value(t, err).NotNil()
 				return
@@ -57,8 +65,7 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestConfigLimiter(t *testing.T) {
-	cfg := budget.Config{MaxSteps: 10, MaxTokens: 1000, NoticeRatio: 0.8}
-	limit := cfg.Limiter()
+	limit := validConfig().Limiter()
 	ctx := context.Background()
 
 	testCases := map[string]struct {
@@ -66,52 +73,56 @@ func TestConfigLimiter(t *testing.T) {
 		wantKind    agentkit.LimitKind
 		wantMessage string
 	}{
-		"well within both ceilings": {
+		"well within every ceiling": {
 			metrics:  agentkit.Metrics{Steps: 1, InputTokens: 10, OutputTokens: 10},
 			wantKind: agentkit.LimitKindPass,
 		},
-		"just below both notice thresholds": {
-			metrics:  agentkit.Metrics{Steps: 7, InputTokens: 400, OutputTokens: 399},
+		"just below every notice threshold": {
+			metrics:  agentkit.Metrics{Steps: 7, InputTokens: 799, OutputTokens: 159},
 			wantKind: agentkit.LimitKindPass,
 		},
 		"step notice threshold reached": {
-			metrics:     agentkit.Metrics{Steps: 8, InputTokens: 0, OutputTokens: 0},
+			metrics:     agentkit.Metrics{Steps: 8},
 			wantKind:    agentkit.LimitKindNotice,
 			wantMessage: "step budget nearly exhausted (8/10)",
 		},
-		"token notice threshold reached": {
-			metrics:     agentkit.Metrics{Steps: 1, InputTokens: 500, OutputTokens: 300},
+		"input notice threshold reached": {
+			metrics:     agentkit.Metrics{Steps: 1, InputTokens: 800},
 			wantKind:    agentkit.LimitKindNotice,
-			wantMessage: "token budget nearly exhausted (800/1000)",
+			wantMessage: "input token budget nearly exhausted (800/1000)",
+		},
+		"output notice threshold reached": {
+			metrics:     agentkit.Metrics{Steps: 1, OutputTokens: 160},
+			wantKind:    agentkit.LimitKindNotice,
+			wantMessage: "output token budget nearly exhausted (160/200)",
 		},
 		"step ceiling reached": {
 			metrics:     agentkit.Metrics{Steps: 10},
 			wantKind:    agentkit.LimitKindStop,
 			wantMessage: "step budget exhausted (10/10)",
 		},
-		"step ceiling exceeded": {
-			metrics:     agentkit.Metrics{Steps: 11},
+		"input ceiling reached": {
+			metrics:     agentkit.Metrics{Steps: 1, InputTokens: 1000},
 			wantKind:    agentkit.LimitKindStop,
-			wantMessage: "step budget exhausted (11/10)",
+			wantMessage: "input token budget exhausted (1000/1000)",
 		},
-		"token ceiling reached": {
-			metrics:     agentkit.Metrics{Steps: 1, InputTokens: 600, OutputTokens: 400},
+		"output ceiling reached": {
+			metrics:     agentkit.Metrics{Steps: 1, OutputTokens: 200},
 			wantKind:    agentkit.LimitKindStop,
-			wantMessage: "token budget exhausted (1000/1000)",
+			wantMessage: "output token budget exhausted (200/200)",
 		},
-		// Both thresholds are crossed at once: Stop must win, otherwise a run
-		// that hit its ceiling would be told merely to wrap up and keep going.
-		"both ceilings crossed reports stop": {
-			metrics:     agentkit.Metrics{Steps: 10, InputTokens: 900, OutputTokens: 200},
-			wantKind:    agentkit.LimitKindStop,
-			wantMessage: "step budget exhausted (10/10)",
-		},
-		// The token ceiling alone must stop even while the step count is only at
-		// its notice threshold.
-		"token stop outranks step notice": {
+		// The output ceiling is the expensive one. A run that is only near its
+		// step and input thresholds but has spent its output allowance must be
+		// stopped, not merely told to wrap up.
+		"output stop outranks step and input notices": {
 			metrics:     agentkit.Metrics{Steps: 8, InputTokens: 900, OutputTokens: 200},
 			wantKind:    agentkit.LimitKindStop,
-			wantMessage: "token budget exhausted (1100/1000)",
+			wantMessage: "output token budget exhausted (200/200)",
+		},
+		"every ceiling crossed reports the step one first": {
+			metrics:     agentkit.Metrics{Steps: 10, InputTokens: 1000, OutputTokens: 200},
+			wantKind:    agentkit.LimitKindStop,
+			wantMessage: "step budget exhausted (10/10)",
 		},
 	}
 
@@ -124,23 +135,41 @@ func TestConfigLimiter(t *testing.T) {
 	}
 }
 
+// TestOutputCeilingIsNotHiddenByInputHeadroom is the reason the two token counts
+// are bounded separately. Under one combined ceiling this run would still look
+// comfortable, and the expensive half would keep growing.
+func TestOutputCeilingIsNotHiddenByInputHeadroom(t *testing.T) {
+	limit := budget.Config{
+		MaxSteps: 1000, MaxInputTokens: 500_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
+	}.Limiter()
+
+	m := agentkit.Metrics{Steps: 5, InputTokens: 20_000, OutputTokens: 100_000}
+	got := limit(context.Background(), nil, m)
+
+	gt.Value(t, got.Kind()).Equal(agentkit.LimitKindStop)
+	gt.String(t, got.Message()).Contains("output token budget exhausted")
+}
+
 // TestConfigLimiterCountsChildMetrics pins that the ceiling covers the whole
 // tree. agentkit folds a child's metrics into its parent when the child
 // terminates, so the parent's Limit sees them and must act on them.
 func TestConfigLimiterCountsChildMetrics(t *testing.T) {
-	cfg := budget.Config{MaxSteps: 100, MaxTokens: 1000, NoticeRatio: 0.8}
-	limit := cfg.Limiter()
+	limit := budget.Config{
+		MaxSteps: 100, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8,
+	}.Limiter()
 
 	own := agentkit.Metrics{Steps: 3, InputTokens: 100, OutputTokens: 50}
 	gt.Value(t, limit(context.Background(), nil, own).Kind()).Equal(agentkit.LimitKindPass)
 
-	// Same Process after two children folded 500 tokens each into it.
-	withChildren := agentkit.Metrics{Steps: 3, InputTokens: 900, OutputTokens: 150}
+	// Same Process after two children folded their usage into it.
+	withChildren := agentkit.Metrics{Steps: 3, InputTokens: 1000, OutputTokens: 150}
 	gt.Value(t, limit(context.Background(), nil, withChildren).Kind()).Equal(agentkit.LimitKindStop)
 }
 
 func TestConfigPrefix(t *testing.T) {
-	cfg := budget.Config{MaxSteps: 64, MaxTokens: 1500000, NoticeRatio: 0.8}
+	cfg := budget.Config{
+		MaxSteps: 64, MaxInputTokens: 500_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
+	}
 	got := cfg.Prefix(agentkit.Metrics{Steps: 12, InputTokens: 3000, OutputTokens: 400})
-	gt.String(t, got).Equal("[budget] steps 12/64, tokens 3400/1500000")
+	gt.String(t, got).Equal("[budget] steps 12/64, input tokens 3000/500000, output tokens 400/100000")
 }

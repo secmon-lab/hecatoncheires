@@ -44,18 +44,26 @@ const (
 //
 // This is not a formality. A context with no auth token is read by the usecase
 // layer as a system context and BYPASSES private-case access control entirely
-// (see tokenActor in pkg/usecase/case_access.go). So for an agent whose tools
-// reach across cases on a person's behalf, a missing actor is not "reduced
-// access" — it is full access. The workspace agent is that agent: its
-// cross-case tools are gated solely by the requesting user's membership, and
-// its pre-agentkit host required the actor for exactly this reason.
+// (see tokenActor in pkg/usecase/case_access.go). So for an agent working on a
+// person's request, a missing actor is not "reduced access" — it is full
+// access, and a private case becomes readable by someone who is not in its
+// channel.
 //
-// The per-case agents are deliberately NOT listed. Their pre-agentkit hosts ran
-// without an auth token as well, and adding one here would silently tighten who
-// the mention agent can act for. Tightening them is a separate decision from
-// moving them onto this runtime.
+// Every human-triggered agent is listed. The pre-agentkit hosts injected the
+// token only in the workspace agent, so the mention agents did read private
+// cases for a non-member; that is the behaviour being corrected, not preserved.
+//
+// The unattended agents are NOT listed. A Job and the assist batch run on a
+// schedule with nobody behind them, so there is no actor to name and their
+// system-context access is the intended one. A sub-agent inherits its parent's
+// metadata, so it carries whatever actor the parent was given.
 func RequiresActor(name agentkit.AgentName) bool {
-	return name == AgentWorkspace
+	switch name {
+	case AgentCaseChannel, AgentCaseThread, AgentCaseThreadCreate, AgentWorkspace, AgentProposal:
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateSpawn checks a scope against the agent it is about to launch. A host

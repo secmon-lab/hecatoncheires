@@ -16,8 +16,8 @@ import (
 
 func validBudgets() kernel.Budgets {
 	return kernel.Budgets{
-		Root: budget.Config{MaxSteps: 64, MaxTokens: 1000, NoticeRatio: 0.8},
-		Task: budget.Config{MaxSteps: 48, MaxTokens: 500, NoticeRatio: 0.8},
+		Root: budget.Config{MaxSteps: 64, MaxInputTokens: 1000, MaxOutputTokens: 200, NoticeRatio: 0.8},
+		Task: budget.Config{MaxSteps: 48, MaxInputTokens: 500, MaxOutputTokens: 100, NoticeRatio: 0.8},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestBuildRejectsIncompleteDeps(t *testing.T) {
 			return d
 		},
 		"invalid root budget": func(d kernel.Deps) kernel.Deps {
-			d.Budgets.Root.MaxTokens = 0
+			d.Budgets.Root.MaxOutputTokens = 0
 			return d
 		},
 		"invalid task budget": func(d kernel.Deps) kernel.Deps {

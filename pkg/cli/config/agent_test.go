@@ -31,9 +31,11 @@ func TestAgentDefaults(t *testing.T) {
 	budgets, err := cfg.Budgets()
 	gt.NoError(t, err).Required()
 	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(64))
-	gt.Value(t, budgets.Root.MaxTokens).Equal(int64(1_500_000))
+	gt.Value(t, budgets.Root.MaxInputTokens).Equal(int64(500_000))
+	gt.Value(t, budgets.Root.MaxOutputTokens).Equal(int64(100_000))
 	gt.Value(t, budgets.Task.MaxSteps).Equal(int64(48))
-	gt.Value(t, budgets.Task.MaxTokens).Equal(int64(300_000))
+	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(100_000))
+	gt.Value(t, budgets.Task.MaxOutputTokens).Equal(int64(20_000))
 	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.8)
 	gt.Value(t, budgets.Task.NoticeRatio).Equal(0.8)
 
@@ -47,9 +49,11 @@ func TestAgentDefaults(t *testing.T) {
 func TestAgentFlagsOverrideDefaults(t *testing.T) {
 	cfg := runAgentFlags(t,
 		"--agent-max-steps", "10",
-		"--agent-max-tokens", "2000",
+		"--agent-max-input-tokens", "2000",
+		"--agent-max-output-tokens", "400",
 		"--agent-task-max-steps", "6",
-		"--agent-task-max-tokens", "500",
+		"--agent-task-max-input-tokens", "500",
+		"--agent-task-max-output-tokens", "100",
 		"--agent-budget-notice-ratio", "0.5",
 		"--agent-worker-concurrency", "3",
 		"--agent-worker-poll-concurrency", "1",
@@ -60,9 +64,11 @@ func TestAgentFlagsOverrideDefaults(t *testing.T) {
 	budgets, err := cfg.Budgets()
 	gt.NoError(t, err).Required()
 	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(10))
-	gt.Value(t, budgets.Root.MaxTokens).Equal(int64(2000))
+	gt.Value(t, budgets.Root.MaxInputTokens).Equal(int64(2000))
+	gt.Value(t, budgets.Root.MaxOutputTokens).Equal(int64(400))
 	gt.Value(t, budgets.Task.MaxSteps).Equal(int64(6))
-	gt.Value(t, budgets.Task.MaxTokens).Equal(int64(500))
+	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(500))
+	gt.Value(t, budgets.Task.MaxOutputTokens).Equal(int64(100))
 	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.5)
 
 	gt.Value(t, cfg.WorkerConcurrency()).Equal(3)
@@ -76,13 +82,14 @@ func TestAgentFlagsOverrideDefaults(t *testing.T) {
 // the only symptom would be agents that answer nothing.
 func TestAgentBudgetsRejectInvalidValues(t *testing.T) {
 	testCases := map[string][]string{
-		"zero steps":     {"--agent-max-steps", "0"},
-		"zero tokens":    {"--agent-max-tokens", "0"},
-		"ratio at one":   {"--agent-budget-notice-ratio", "1"},
-		"negative ratio": {"--agent-budget-notice-ratio", "-0.1"},
-		"zero task steps": {
-			"--agent-task-max-steps", "0",
-		},
+		"zero steps":              {"--agent-max-steps", "0"},
+		"zero input tokens":       {"--agent-max-input-tokens", "0"},
+		"zero output tokens":      {"--agent-max-output-tokens", "0"},
+		"ratio at one":            {"--agent-budget-notice-ratio", "1"},
+		"negative ratio":          {"--agent-budget-notice-ratio", "-0.1"},
+		"zero task steps":         {"--agent-task-max-steps", "0"},
+		"zero task input tokens":  {"--agent-task-max-input-tokens", "0"},
+		"zero task output tokens": {"--agent-task-max-output-tokens", "0"},
 	}
 
 	for name, args := range testCases {
@@ -115,7 +122,8 @@ func TestAgentLogAttrs(t *testing.T) {
 		keys[a.Key] = true
 	}
 	for _, want := range []string{
-		"max_steps", "max_tokens", "task_max_steps", "task_max_tokens",
+		"max_steps", "max_input_tokens", "max_output_tokens",
+		"task_max_steps", "task_max_input_tokens", "task_max_output_tokens",
 		"notice_ratio", "worker_concurrency", "worker_poll_concurrency",
 		"worker_lease", "worker_poll_interval",
 	} {

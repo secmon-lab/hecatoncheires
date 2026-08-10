@@ -12,24 +12,34 @@ import (
 // TestRequiresActor pins which agents may only run with an identified person
 // behind them. A context with no auth token is read by the usecase layer as a
 // system context and BYPASSES private-case access control, so a missing actor
-// widens access rather than narrowing it — but the per-case agents ran without a
-// token before this runtime, and tightening them is a separate decision from
-// moving them onto it.
+// widens access rather than narrowing it: a private case becomes readable by
+// someone who is not in its channel.
 func TestRequiresActor(t *testing.T) {
-	gt.Bool(t, kernel.RequiresActor(kernel.AgentWorkspace)).True()
+	t.Run("every human-triggered agent needs one", func(t *testing.T) {
+		for _, name := range []agentkit.AgentName{
+			kernel.AgentCaseChannel,
+			kernel.AgentCaseThread,
+			kernel.AgentCaseThreadCreate,
+			kernel.AgentWorkspace,
+			kernel.AgentProposal,
+		} {
+			gt.Bool(t, kernel.RequiresActor(name)).True()
+		}
+	})
 
-	for _, name := range []agentkit.AgentName{
-		kernel.AgentCaseChannel,
-		kernel.AgentCaseThread,
-		kernel.AgentCaseThreadCreate,
-		kernel.AgentProposal,
-		kernel.AgentJob,
-		kernel.AgentJobSimple,
-		kernel.AgentAssist,
-		kernel.AgentTask,
-	} {
-		gt.Bool(t, kernel.RequiresActor(name)).False()
-	}
+	// A Job and the assist batch run on a schedule with nobody behind them, so
+	// there is no actor to name. A sub-agent inherits its parent's metadata and
+	// carries whatever actor the parent was given.
+	t.Run("the unattended agents and sub-agents do not", func(t *testing.T) {
+		for _, name := range []agentkit.AgentName{
+			kernel.AgentJob,
+			kernel.AgentJobSimple,
+			kernel.AgentAssist,
+			kernel.AgentTask,
+		} {
+			gt.Bool(t, kernel.RequiresActor(name)).False()
+		}
+	})
 }
 
 // TestValidateSpawn pins where the actor rule is enforced. Spawn is the last
@@ -55,13 +65,13 @@ func TestValidateSpawn(t *testing.T) {
 		gt.NoError(t, kernel.ValidateSpawn(kernel.AgentWorkspace, sc))
 	})
 
-	t.Run("an agent that does not need an actor is accepted without one", func(t *testing.T) {
-		gt.NoError(t, kernel.ValidateSpawn(kernel.AgentCaseChannel, valid))
+	t.Run("an unattended agent is accepted without one", func(t *testing.T) {
+		gt.NoError(t, kernel.ValidateSpawn(kernel.AgentJob, valid))
 	})
 
 	t.Run("an invalid scope is rejected whatever the agent", func(t *testing.T) {
 		sc := valid
 		sc.ToolSets = nil
-		gt.Value(t, kernel.ValidateSpawn(kernel.AgentCaseChannel, sc)).NotNil()
+		gt.Value(t, kernel.ValidateSpawn(kernel.AgentJob, sc)).NotNil()
 	})
 }

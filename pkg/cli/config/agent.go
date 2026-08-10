@@ -23,14 +23,24 @@ import (
 //
 // The token ceilings are NOT derived from measurement: the previous runtime
 // counted no tokens at all, so there is no baseline in this repository to
-// derive one from. They are deliberately generous so the first deployments
-// record real usage on Process.Metrics without any run hitting the ceiling; the
-// intent is to replace them with measured values once that data exists.
+// derive one from. Replace them with measured values once Process.Metrics has
+// recorded real usage.
+//
+// Input and output are bounded separately because output tokens cost several
+// times what input tokens do: under one combined ceiling a large input
+// allowance would hide an output run-away — the expensive half — until the
+// whole budget was gone.
+//
+// A sub-agent gets a fifth of the root allowance, the ratio the previous
+// runtime's loop bounds already implied (one investigation is a fraction of a
+// turn, and a turn may run several).
 const (
-	defaultAgentMaxSteps      = 64
-	defaultAgentMaxTokens     = 1_500_000
-	defaultAgentTaskMaxSteps  = 48
-	defaultAgentTaskMaxTokens = 300_000
+	defaultAgentMaxSteps            = 64
+	defaultAgentMaxInputTokens      = 500_000
+	defaultAgentMaxOutputTokens     = 100_000
+	defaultAgentTaskMaxSteps        = 48
+	defaultAgentTaskMaxInputTokens  = 100_000
+	defaultAgentTaskMaxOutputTokens = 20_000
 	// defaultAgentNoticeRatio leaves a fifth of the budget for wrapping up,
 	// which is more than the one or two transitions a terminal answer needs.
 	defaultAgentNoticeRatio = 0.8
@@ -56,11 +66,13 @@ const (
 // ceilings every Process runs under, and the worker settings of the in-process
 // Serve loop.
 type Agent struct {
-	maxSteps      int64
-	maxTokens     int64
-	taskMaxSteps  int64
-	taskMaxTokens int64
-	noticeRatio   float64
+	maxSteps            int64
+	maxInputTokens      int64
+	maxOutputTokens     int64
+	taskMaxSteps        int64
+	taskMaxInputTokens  int64
+	taskMaxOutputTokens int64
+	noticeRatio         float64
 
 	workerConcurrency     int
 	workerPollConcurrency int
@@ -79,11 +91,18 @@ func (a *Agent) Flags() []cli.Flag {
 			Destination: &a.maxSteps,
 		},
 		&cli.Int64Flag{
-			Name:        "agent-max-tokens",
-			Usage:       "Maximum input+output tokens one agent run may consume, including its sub-agents",
-			Value:       defaultAgentMaxTokens,
-			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_TOKENS"),
-			Destination: &a.maxTokens,
+			Name:        "agent-max-input-tokens",
+			Usage:       "Maximum input tokens one agent run may consume, including its sub-agents",
+			Value:       defaultAgentMaxInputTokens,
+			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS"),
+			Destination: &a.maxInputTokens,
+		},
+		&cli.Int64Flag{
+			Name:        "agent-max-output-tokens",
+			Usage:       "Maximum output tokens one agent run may produce, including its sub-agents",
+			Value:       defaultAgentMaxOutputTokens,
+			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS"),
+			Destination: &a.maxOutputTokens,
 		},
 		&cli.Int64Flag{
 			Name:        "agent-task-max-steps",
@@ -93,11 +112,18 @@ func (a *Agent) Flags() []cli.Flag {
 			Destination: &a.taskMaxSteps,
 		},
 		&cli.Int64Flag{
-			Name:        "agent-task-max-tokens",
-			Usage:       "Maximum input+output tokens one sub-agent may consume",
-			Value:       defaultAgentTaskMaxTokens,
-			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_TASK_MAX_TOKENS"),
-			Destination: &a.taskMaxTokens,
+			Name:        "agent-task-max-input-tokens",
+			Usage:       "Maximum input tokens one sub-agent may consume",
+			Value:       defaultAgentTaskMaxInputTokens,
+			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_TASK_MAX_INPUT_TOKENS"),
+			Destination: &a.taskMaxInputTokens,
+		},
+		&cli.Int64Flag{
+			Name:        "agent-task-max-output-tokens",
+			Usage:       "Maximum output tokens one sub-agent may produce",
+			Value:       defaultAgentTaskMaxOutputTokens,
+			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_TASK_MAX_OUTPUT_TOKENS"),
+			Destination: &a.taskMaxOutputTokens,
 		},
 		&cli.FloatFlag{
 			Name:        "agent-budget-notice-ratio",
@@ -141,14 +167,16 @@ func (a *Agent) Flags() []cli.Flag {
 func (a *Agent) Budgets() (agentkernel.Budgets, error) {
 	b := agentkernel.Budgets{
 		Root: budget.Config{
-			MaxSteps:    a.maxSteps,
-			MaxTokens:   a.maxTokens,
-			NoticeRatio: a.noticeRatio,
+			MaxSteps:        a.maxSteps,
+			MaxInputTokens:  a.maxInputTokens,
+			MaxOutputTokens: a.maxOutputTokens,
+			NoticeRatio:     a.noticeRatio,
 		},
 		Task: budget.Config{
-			MaxSteps:    a.taskMaxSteps,
-			MaxTokens:   a.taskMaxTokens,
-			NoticeRatio: a.noticeRatio,
+			MaxSteps:        a.taskMaxSteps,
+			MaxInputTokens:  a.taskMaxInputTokens,
+			MaxOutputTokens: a.taskMaxOutputTokens,
+			NoticeRatio:     a.noticeRatio,
 		},
 	}
 	if err := b.Validate(); err != nil {
@@ -194,9 +222,11 @@ func (a *Agent) ValidateWorker() error {
 func (a *Agent) LogAttrs() []slog.Attr {
 	return []slog.Attr{
 		slog.Int64("max_steps", a.maxSteps),
-		slog.Int64("max_tokens", a.maxTokens),
+		slog.Int64("max_input_tokens", a.maxInputTokens),
+		slog.Int64("max_output_tokens", a.maxOutputTokens),
 		slog.Int64("task_max_steps", a.taskMaxSteps),
-		slog.Int64("task_max_tokens", a.taskMaxTokens),
+		slog.Int64("task_max_input_tokens", a.taskMaxInputTokens),
+		slog.Int64("task_max_output_tokens", a.taskMaxOutputTokens),
 		slog.Float64("notice_ratio", a.noticeRatio),
 		slog.Int("worker_concurrency", a.workerConcurrency),
 		slog.Int("worker_poll_concurrency", a.workerPollConcurrency),

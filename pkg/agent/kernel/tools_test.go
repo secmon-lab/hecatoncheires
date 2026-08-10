@@ -121,7 +121,7 @@ func TestToolFactoryExpandsTheAgentPalette(t *testing.T) {
 	})
 	gt.NoError(t, err).Required()
 
-	sc := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{kernel.ToolSetsAll}}
+	sc := kernel.Scope{WorkspaceID: "ws-1", ActorUserID: "U1", ToolSets: []string{kernel.ToolSetsAll}}
 
 	t.Run("the channel case agent gets the mutating action tools", func(t *testing.T) {
 		tools, err := factory(ctx, newProcess(kernel.AgentCaseChannel, sc))
@@ -181,7 +181,10 @@ func TestToolFactoryWithdrawsActionToolsForAThreadBoundCase(t *testing.T) {
 	})
 	gt.NoError(t, err).Required()
 
-	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{agent.ToolSetCore, agent.ToolSetCoreRO}}
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetCore, agent.ToolSetCoreRO},
+	}
 	tools, err := factory(ctx, newProcess(kernel.AgentCaseChannel, sc))
 	gt.NoError(t, err).Required()
 
@@ -235,7 +238,7 @@ func TestToolFactoryWithholdsKnowledgeWritesForAPrivateCase(t *testing.T) {
 		return slices.Contains(toolNames(tools), "knowledge__create_knowledge")
 	}
 
-	base := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{agent.ToolSetKnowledge}}
+	base := kernel.Scope{WorkspaceID: "ws-1", ActorUserID: "U1", ToolSets: []string{agent.ToolSetKnowledge}}
 
 	t.Run("a public case may write", func(t *testing.T) {
 		sc := base
@@ -291,8 +294,10 @@ func TestToolFactoryWithholdsEverythingWithoutAnActor(t *testing.T) {
 		gt.Bool(t, len(tools) > 0).True()
 	})
 
+	// A sub-agent inherits its parent's metadata, so it is not required to carry
+	// an actor of its own and must not be starved when it does not.
 	t.Run("an agent that needs no actor is unaffected", func(t *testing.T) {
-		tools, err := factory(ctx, newProcess(kernel.AgentCaseChannel, sc))
+		tools, err := factory(ctx, newProcess(kernel.AgentTask, sc))
 		gt.NoError(t, err).Required()
 		gt.Bool(t, len(tools) > 0).True()
 	})
@@ -310,7 +315,7 @@ func TestToolFactoryFailsOnAnUnknownWorkspace(t *testing.T) {
 	})
 	gt.NoError(t, err).Required()
 
-	sc := kernel.Scope{WorkspaceID: "missing", ToolSets: []string{kernel.ToolSetsAll}}
+	sc := kernel.Scope{WorkspaceID: "missing", ActorUserID: "U1", ToolSets: []string{kernel.ToolSetsAll}}
 	tools, err := factory(ctx, newProcess(kernel.AgentCaseChannel, sc))
 	gt.Value(t, err).NotNil()
 	gt.Array(t, tools).Length(0)

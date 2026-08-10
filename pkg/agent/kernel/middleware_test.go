@@ -134,8 +134,8 @@ func newProbeRuntime(t *testing.T) *probeRuntime {
 
 	traces := agentarchive.NewMemoryTraceRepository()
 	budgets := kernel.Budgets{
-		Root: budget.Config{MaxSteps: 8, MaxTokens: 1000, NoticeRatio: 0.8},
-		Task: budget.Config{MaxSteps: 8, MaxTokens: 1000, NoticeRatio: 0.8},
+		Root: budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8},
+		Task: budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8},
 	}
 
 	reg := agentkit.NewRegistry()
