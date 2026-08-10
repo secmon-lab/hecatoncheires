@@ -153,6 +153,23 @@ type JobRunEventRepository interface {
 	// (not Set) so a duplicate EventID surfaces as ErrJobRunEventExists.
 	Append(ctx context.Context, ev *model.JobRunEvent) error
 
+	// AppendNext writes one event and allocates its Sequence itself, in the
+	// same atomic operation as the write. ev.Sequence is ignored on input
+	// and set on return, so a caller that needs to reference this event
+	// from a later one (ParentSequence) reads it back from ev.
+	//
+	// It exists because a durable agent run's transitions are spread
+	// across claims and instances, so no in-process counter can allocate
+	// for it: two instances appending to the same run would hand out the
+	// same number, and List — which orders by Sequence — would render the
+	// timeline in an order that never happened. Allocating inside the
+	// write is what makes concurrent appenders safe.
+	//
+	// Sequence values are strictly increasing but NOT guaranteed
+	// contiguous: an allocation whose write is rolled back leaves a gap.
+	// Ordering is the contract; density is not.
+	AppendNext(ctx context.Context, ev *model.JobRunEvent) error
+
 	// List returns events for (key, runID) in ascending Sequence order
 	// (not doc-ID order — doc IDs are UUIDv7 and may diverge under
 	// clock skew).

@@ -513,6 +513,8 @@ type failingJobRunEventRepository struct{}
 
 func (failingJobRunEventRepository) Append(context.Context, *model.JobRunEvent) error { return nil }
 
+func (failingJobRunEventRepository) AppendNext(context.Context, *model.JobRunEvent) error { return nil }
+
 func (failingJobRunEventRepository) List(context.Context, model.JobRunKey, string) ([]*model.JobRunEvent, error) {
 	return nil, errors.New("injected job run event read failure")
 }

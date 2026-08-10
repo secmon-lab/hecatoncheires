@@ -553,7 +553,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// The run log exists, so the attempt counts as started from here on.
 	sum.runID = runID
 
-	seq := runtrace.NewSequencer()
 	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
 		runtrace.Routing{
@@ -563,7 +562,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			RunID:       runID,
 			TraceID:     traceID,
 		},
-		seq,
 		r.clock,
 	)
 
@@ -1051,16 +1049,11 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		return finishErr
 	}
 
-	// Continue the run's event Sequence past the suspended turn's events so
-	// the resumed turn's events do not collide on Sequence (same RunID space).
-	startSeq := int64(1)
-	if existing, listErr := r.deps.Repo.JobRunEvent().List(ctx, key, runID); listErr == nil {
-		for _, e := range existing {
-			if e.Sequence >= startSeq {
-				startSeq = e.Sequence + 1
-			}
-		}
-	}
+	// The resumed turn's events continue past the suspended turn's without any
+	// bookkeeping here: the Sequence counter is durable and per-run, so it picks
+	// up where the earlier turn left it. Scanning the existing events to find the
+	// high-water mark — which is what this used to do — is no longer needed, and
+	// was never safe against a concurrent appender anyway.
 	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
 		runtrace.Routing{
@@ -1070,7 +1063,6 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 			RunID:       runID,
 			TraceID:     logRec.TraceID,
 		},
-		runtrace.NewSequencerStartingAt(startSeq),
 		r.clock,
 	)
 

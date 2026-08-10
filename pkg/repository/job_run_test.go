@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -614,6 +615,121 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 	ctx := context.Background()
+
+	// AppendNext is what a durable agent run appends through: its transitions
+	// are spread across claims and instances, so no in-process counter can hand
+	// out the Sequence. Allocation has to happen inside the write.
+	t.Run("AppendNext allocates a strictly increasing sequence per run", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		runID := fmt.Sprintf("run-alloc-%d", time.Now().UnixNano())
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		for i := range 3 {
+			ev := &model.JobRunEvent{
+				WorkspaceID: key.WorkspaceID,
+				CaseID:      key.CaseID,
+				JobID:       key.JobID,
+				RunID:       runID,
+				TraceID:     "trace-alloc",
+				EventID:     fmt.Sprintf("ev-alloc-%d", i),
+				OccurredAt:  now.Add(time.Duration(i) * time.Millisecond),
+				Kind:        model.JobRunEventKindLLMResponse,
+				Phase:       "execute",
+				LLMResponse: &model.LLMResponsePayload{Model: "claude-opus-4-7"},
+			}
+			gt.NoError(t, repo.JobRunEvent().AppendNext(ctx, ev)).Required()
+			// The caller reads the allocated number back off ev, which is what
+			// lets a later event point at this one via ParentSequence.
+			gt.Value(t, ev.Sequence).Equal(int64(i + 1))
+		}
+
+		got, err := repo.JobRunEvent().List(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(3).Required()
+		gt.Value(t, got[0].Sequence).Equal(int64(1))
+		gt.Value(t, got[1].Sequence).Equal(int64(2))
+		gt.Value(t, got[2].Sequence).Equal(int64(3))
+		gt.String(t, got[0].EventID).Equal("ev-alloc-0")
+		gt.String(t, got[2].EventID).Equal("ev-alloc-2")
+	})
+
+	// Each run has its own counter. Sharing one across runs would interleave two
+	// timelines and make List's ordering meaningless for both.
+	t.Run("AppendNext counts each run separately", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		stamp := time.Now().UnixNano()
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		for _, runID := range []string{
+			fmt.Sprintf("run-a-%d", stamp), fmt.Sprintf("run-b-%d", stamp),
+		} {
+			ev := &model.JobRunEvent{
+				WorkspaceID: key.WorkspaceID,
+				CaseID:      key.CaseID,
+				JobID:       key.JobID,
+				RunID:       runID,
+				TraceID:     "trace-sep",
+				EventID:     "ev-first",
+				OccurredAt:  now,
+				Kind:        model.JobRunEventKindLLMResponse,
+				Phase:       "execute",
+				LLMResponse: &model.LLMResponsePayload{Model: "claude-opus-4-7"},
+			}
+			gt.NoError(t, repo.JobRunEvent().AppendNext(ctx, ev)).Required()
+			gt.Value(t, ev.Sequence).Equal(int64(1))
+		}
+	})
+
+	// Concurrent appenders stand in for two instances driving the same run. No
+	// two may receive the same number, or the timeline would render in an order
+	// that never happened.
+	t.Run("AppendNext never hands the same sequence to two appenders", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		runID := fmt.Sprintf("run-race-%d", time.Now().UnixNano())
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		const appenders = 8
+		var wg sync.WaitGroup
+		seqs := make([]int64, appenders)
+		errs := make([]error, appenders)
+		for i := range appenders {
+			wg.Go(func() {
+				ev := &model.JobRunEvent{
+					WorkspaceID: key.WorkspaceID,
+					CaseID:      key.CaseID,
+					JobID:       key.JobID,
+					RunID:       runID,
+					TraceID:     "trace-race",
+					EventID:     fmt.Sprintf("ev-race-%d", i),
+					OccurredAt:  now,
+					Kind:        model.JobRunEventKindLLMResponse,
+					Phase:       "execute",
+					LLMResponse: &model.LLMResponsePayload{Model: "claude-opus-4-7"},
+				}
+				errs[i] = repo.JobRunEvent().AppendNext(ctx, ev)
+				seqs[i] = ev.Sequence
+			})
+		}
+		wg.Wait()
+
+		seen := make(map[int64]bool, appenders)
+		for i := range appenders {
+			gt.NoError(t, errs[i]).Required()
+			gt.Number(t, seqs[i]).GreaterOrEqual(1)
+			gt.Bool(t, seen[seqs[i]]).False() // no duplicate
+			seen[seqs[i]] = true
+		}
+
+		got, err := repo.JobRunEvent().List(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(appenders).Required()
+		for i := 1; i < len(got); i++ {
+			gt.Bool(t, got[i-1].Sequence < got[i].Sequence).True()
+		}
+	})
 
 	// Both backends collapse an empty payload slice to nil on the way back:
 	// Firestore's DataTo decodes an empty array as a nil slice, and the memory

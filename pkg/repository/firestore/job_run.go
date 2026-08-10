@@ -19,6 +19,11 @@ const (
 	jobRunsCollection      = "jobRuns"
 	jobRunLogsCollection   = "logs"
 	jobRunEventsCollection = "events"
+	// jobRunCountersCollection holds a run's storage-only counters as a
+	// subcollection, rather than encoding them into a document name.
+	jobRunCountersCollection = "counters"
+	// jobRunEventCounterDoc is the JobRunEvent Sequence allocator.
+	jobRunEventCounterDoc = "events"
 )
 
 type jobRunRepository struct {
@@ -468,6 +473,89 @@ func (r *jobRunEventRepository) Append(ctx context.Context, ev *model.JobRunEven
 			goerr.V("run_id", ev.RunID),
 			goerr.V("event_id", ev.EventID),
 			goerr.V("sequence", ev.Sequence))
+	}
+	return nil
+}
+
+// eventCounter is the per-run Sequence allocator's stored state.
+//
+// It is NOT a mirror of a domain model — there is no JobRunEvent counter in the
+// domain — so it carries no converter and no risk of drifting from one. It is
+// storage-only state, which is why it lives here rather than as a field on
+// JobRunLog: putting it on the log would make every log write a contender for
+// the same document as every event append.
+type eventCounter struct {
+	Next int64
+}
+
+// eventSeqDoc is the run's Sequence counter. A subcollection under the run log
+// rather than an underscore-joined name, per the Firestore naming policy.
+func (r *jobRunEventRepository) eventSeqDoc(key model.JobRunKey, runID string) *firestore.DocumentRef {
+	return r.client.
+		Collection("workspaces").Doc(key.WorkspaceID).
+		Collection("cases").Doc(fmt.Sprintf("%d", key.CaseID)).
+		Collection(jobRunsCollection).Doc(key.JobID).
+		Collection(jobRunLogsCollection).Doc(runID).
+		Collection(jobRunCountersCollection).Doc(jobRunEventCounterDoc)
+}
+
+// AppendNext allocates the Sequence and writes the event in one transaction, so
+// two instances appending to the same run cannot receive the same number.
+//
+// Firestore requires every read in a transaction to precede every write, which
+// is why the counter is read first and both documents are written after.
+func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRunEvent) error {
+	if ev == nil {
+		return goerr.New("job run event is nil")
+	}
+	key := model.JobRunKey{WorkspaceID: ev.WorkspaceID, CaseID: ev.CaseID, JobID: ev.JobID}
+	if err := key.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run key")
+	}
+	if ev.RunID == "" {
+		return goerr.New("run id is empty")
+	}
+
+	counterRef := r.eventSeqDoc(key, ev.RunID)
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		var next int64 = 1
+		snap, err := tx.Get(counterRef)
+		switch {
+		case err == nil:
+			var c eventCounter
+			if derr := snap.DataTo(&c); derr != nil {
+				return goerr.Wrap(derr, "read the job run event counter")
+			}
+			next = c.Next + 1
+		case status.Code(err) == codes.NotFound:
+			// First event of this run.
+		default:
+			return goerr.Wrap(err, "load the job run event counter")
+		}
+
+		ev.Sequence = next
+		if verr := ev.Validate(); verr != nil {
+			return goerr.Wrap(verr, "invalid job run event")
+		}
+		if serr := tx.Set(counterRef, eventCounter{Next: next}); serr != nil {
+			return goerr.Wrap(serr, "advance the job run event counter")
+		}
+		// Create, not Set: a duplicate EventID must surface rather than
+		// overwrite an event that is already part of the timeline.
+		if cerr := tx.Create(r.doc(key, ev.RunID, ev.EventID), ev); cerr != nil {
+			return goerr.Wrap(cerr, "append the job run event")
+		}
+		return nil
+	})
+	if err != nil {
+		if status.Code(err) == codes.AlreadyExists {
+			return goerr.Wrap(interfaces.ErrJobRunEventExists, "job run event already exists",
+				goerr.V("run_id", ev.RunID),
+				goerr.V("event_id", ev.EventID))
+		}
+		return goerr.Wrap(err, "append job run event with an allocated sequence",
+			goerr.V("run_id", ev.RunID),
+			goerr.V("event_id", ev.EventID))
 	}
 	return nil
 }

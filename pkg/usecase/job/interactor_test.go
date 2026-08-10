@@ -143,7 +143,7 @@ func TestJobInteractor_Solicit(t *testing.T) {
 			JobID:       key.JobID,
 			RunID:       runID,
 			TraceID:     runningLog.TraceID,
-		}, runtrace.NewSequencer(), func() time.Time { return now })
+		}, func() time.Time { return now })
 		handler.EndLLMCall(handler.StartLLMCall(ctx), &trace.LLMCallData{
 			Model:        "m",
 			InputTokens:  500,

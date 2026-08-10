@@ -138,7 +138,6 @@ func Open(ctx context.Context, p OpenParams) (*Recorder, error) {
 			RunID:       p.RunID,
 			TraceID:     p.TraceID,
 		},
-		NewSequencer(),
 		clock,
 	)
 
