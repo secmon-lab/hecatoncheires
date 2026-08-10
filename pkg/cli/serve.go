@@ -534,6 +534,10 @@ func cmdServe() *cli.Command {
 			// client, for the same reason the Job runtime is: there is nothing
 			// for an agent to run.
 			var agentKernel *agentkit.Kernel
+			// durableJobs is the agent runtime the simple-strategy Jobs run on. It
+			// is declared out here because the Job runtime built further down needs
+			// it, while its registration has to happen inside the Kernel build.
+			var durableJobs *job.DurableRuntime
 			if llmClient != nil {
 				agentProcessRepo, agentProcessCleanup, apErr := repoCfg.ConfigureAgentProcess(ctx)
 				if apErr != nil {
@@ -565,6 +569,10 @@ func cmdServe() *cli.Command {
 				agentRegistry := agentkit.NewRegistry()
 				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
+				}
+				durableJobs = &job.DurableRuntime{History: processHistory}
+				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter()); rErr != nil {
+					return goerr.Wrap(rErr, "failed to register the job agents")
 				}
 
 				k, kErr := agentkernel.Build(agentkernel.Deps{
@@ -600,6 +608,7 @@ func cmdServe() *cli.Command {
 				}
 				agentKernel = k
 				uc.Agent.BindAgentKernel(agentKernel)
+				durableJobs.Bind(agentKernel)
 				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
 			}
 
@@ -617,10 +626,14 @@ func cmdServe() *cli.Command {
 				HistoryRepo:    agentHistoryRepo,
 				TraceRepo:      agentTraceRepo,
 				SlotLimit:      jobCfg.Limit(),
+				Durable:        durableJobs,
 			})
 			if jobErr != nil {
 				return goerr.Wrap(jobErr, "failed to build job runtime")
 			}
+			// The last of the three wiring steps: a finished durable run closes
+			// itself out through the runner, which only exists now.
+			durableJobs.AttachRunner(jobRunner)
 			logging.Default().Info("Agent Job runtime configured", logAttrsToArgs(jobCfg.LogAttrs())...)
 			uc.Case.SetEventPublisher(jobUC)
 			// The web UI's manual Run button drives the same runner through

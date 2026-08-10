@@ -169,6 +169,12 @@ type jobRuntimeDeps struct {
 	// still gets a fully wired runtime.
 	HistoryRepo gollem.HistoryRepository
 	TraceRepo   trace.Repository
+
+	// Durable, when non-nil, is the agent runtime the simple-strategy Jobs run
+	// on. The caller creates it, hands it here, then registers and binds it
+	// around the Kernel build — the order agentkit requires. Nil keeps every
+	// strategy on the in-process executors.
+	Durable *job.DurableRuntime
 }
 
 // registryHasInteractiveJob reports whether any enabled Job in any workspace
@@ -214,8 +220,20 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		return buildJobTools(deps, adapters, c, ws)
 	})
 
-	executors := map[model.JobStrategy]jobagent.JobExecutor{
-		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
+	// The simple strategy runs on the durable runtime when one is wired, and on
+	// the in-process executor otherwise. Registering both would be harmless — the
+	// runner prefers the agent — but leaving the executor out makes it visible
+	// which runtime actually drives the strategy.
+	//
+	// `serve` wires a durable runtime; the `tick` CLI deliberately does not, so a
+	// scheduled sweep still executes its runs itself. Spawning from tick instead
+	// would make a scheduled run depend on a serve instance being up to execute
+	// it, which is a change to the command's operational contract rather than to
+	// how an agent loop is driven. That is a decision to take explicitly, not a
+	// side effect of this migration.
+	executors := map[model.JobStrategy]jobagent.JobExecutor{}
+	if deps.Durable == nil {
+		executors[model.JobStrategySimple] = jobagent.NewSingleLoopJobExecutor()
 	}
 
 	// Shared history repository: the JobRunner persists each run's conversation
@@ -283,6 +301,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		SlackNotifier: slackNotifier,
 		Reflector:     reflector,
 		HistoryRepo:   historyRepo,
+		Durable:       deps.Durable,
 	}
 	// The interactive-Job question form is Block Kit posted/updated directly
 	// via the Slack service (the narrow SlackNotifier cannot carry blocks).

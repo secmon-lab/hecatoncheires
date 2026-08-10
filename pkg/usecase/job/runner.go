@@ -229,6 +229,16 @@ type RunnerDeps struct {
 	// DefaultUnansweredTimeout. The scheduled sweep uses the same bound.
 	UnansweredTimeout time.Duration
 
+	// Durable, when set, is the agent runtime a Job runs on. A strategy with a
+	// registered agent there is Spawned instead of executed in-process: Run
+	// returns as soon as the run is recorded, and the run's own completion
+	// handler finishes it.
+	//
+	// Nil, or a strategy with no agent registered, keeps the in-process
+	// executor path. That is what lets the two runtimes coexist while the
+	// remaining strategies move over.
+	Durable *DurableRuntime
+
 	// NewRunID generates a fresh RunID for each Run. nil → UUIDv7.
 	NewRunID func() string
 	// NewTraceID generates a fresh TraceID for each Run. nil → UUIDv7.
@@ -524,11 +534,21 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
 	sum.strategy = string(strategy)
-	executor, execLookupErr := r.deps.executorFor(strategy)
-	if execLookupErr != nil {
-		return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
-			goerr.V("job_id", j.ID),
-			goerr.V("strategy", string(strategy))))
+
+	// A strategy that runs on the durable runtime needs no in-process executor,
+	// and demanding one would make the migration's intermediate state
+	// unrunnable: the wiring stops registering an executor for a strategy the
+	// moment its agent exists.
+	durableAgent, onDurableRuntime := r.deps.Durable.agentFor(strategy)
+	var executor job.JobExecutor
+	if !onDurableRuntime {
+		found, execLookupErr := r.deps.executorFor(strategy)
+		if execLookupErr != nil {
+			return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
+				goerr.V("job_id", j.ID),
+				goerr.V("strategy", string(strategy))))
+		}
+		executor = found
 	}
 
 	logRec := &model.JobRunLog{
@@ -587,6 +607,39 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// exactly this run's history. Always set (the planexec executor requires a
 	// non-empty HistoryKey); HistoryRepository may be nil for the single-loop
 	// path, which then simply does not persist.
+	// A strategy with an agent on the durable runtime is Spawned instead of run
+	// here: the LLM calls, the tool calls and the completion marker all happen
+	// afterwards on the agent worker, one checkpointed transition at a time.
+	//
+	// The prompts, the run log and the Slack starting marker above are shared with
+	// the in-process path, so the two differ only in who drives the loop.
+	if onDurableRuntime {
+		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		pid, spawnErr := r.deps.Durable.spawn(ctx, durableAgent, spawnParams{
+			job:          j,
+			event:        ev,
+			key:          key,
+			runID:        runID,
+			systemPrompt: systemPrompt,
+			userPrompt:   userPrompt,
+		})
+		if spawnErr != nil {
+			// Nothing is running, so this is the run's outcome: record it rather
+			// than leaving a RUNNING log nobody will finish.
+			stageAt = r.clock()
+			finishErr := r.finishRun(ctx, j, c, key, logRec, handler,
+				channelID, sessionThreadTS, runID, traceID, spawnErr, sum)
+			sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+			sum.outcome = outcomeFailed
+			return finishErr
+		}
+		sum.outcome = outcomeSpawned
+		logging.From(ctx).Debug("job run spawned on the agent runtime",
+			slog.String("job_id", j.ID), slog.String("run_id", runID),
+			slog.String("process_id", string(pid)))
+		return nil
+	}
+
 	execReq := job.ExecuteRequest{
 		JobID:             j.ID,
 		SystemPrompt:      systemPrompt,

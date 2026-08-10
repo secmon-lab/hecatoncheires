@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
@@ -18,7 +20,9 @@ import (
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -474,6 +478,189 @@ func TestJobRunner_SuccessClearsLease(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
 	gt.Bool(t, run.LeaseUntil.IsZero()).True()
+}
+
+// wireDurableJobRuntime reproduces the CLI's wiring order — register, build,
+// bind — and starts the worker for the duration of the test.
+func wireDurableJobRuntime(
+	t *testing.T, runner *job.JobRunner, durable *job.DurableRuntime,
+	repo interfaces.Repository, registry *model.WorkspaceRegistry, llm gollem.LLMClient,
+	serveOpts ...agentkit.ServeOption,
+) {
+	t.Helper()
+
+	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	reg := agentkit.NewRegistry()
+	gt.NoError(t, durable.Register(reg, cfg.Limiter())).Required()
+
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    agentprocmemory.New(),
+		History: durable.History,
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: agentkernel.Budgets{Root: cfg, Task: cfg},
+		Agents:  reg,
+		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry},
+	})
+	gt.NoError(t, err).Required()
+	durable.Bind(k)
+	durable.AttachRunner(runner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	opts := append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, serveOpts...)
+	go func() { served <- agentkernel.Serve(ctx, k, opts...) }()
+	t.Cleanup(func() {
+		cancel()
+		<-served
+	})
+}
+
+// A simple-strategy Job on the durable runtime must record the same run the
+// in-process executor did: Run returns as soon as the run exists, and the run's
+// own completion handler closes the log with the usage agentkit metered.
+func TestJobRunner_DurableSimpleRunRecordsItsOutcome(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-summarize",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		// No executor for the simple strategy: the durable path must be the one
+		// that runs, not a fallback into an in-process executor.
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	// Run returned before the agent answered, so the outcome arrives later.
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).NotEqual("")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	log := logs[0]
+	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindSingleLoop)
+	// The usage comes off the Process, which is the only place a durable run's
+	// total survives — its transitions span claims and possibly instances.
+	gt.Value(t, log.InputTokens).Equal(int64(120))
+	gt.Value(t, log.OutputTokens).Equal(int64(34))
+	gt.Value(t, log.LLMCallCount).Equal(int64(1))
+
+	// And the per-call timeline the run-detail page reads.
+	events, err := repo.JobRunEvent().List(ctx, key, log.RunID)
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
+	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+}
+
+// A durable run whose agent fails must record the failure, not leave a RUNNING
+// log that nothing ever finishes.
+func TestJobRunner_DurableSimpleRunRecordsAFailure(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-failing",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := failingLLM("the model is unreachable")
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	// One attempt: the point is the terminal failure, not agentkit's retry
+	// schedule (pkg/agent covers that).
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm, agentkit.WithMaxStepAttempts(1))
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusFailed)
+	gt.String(t, run.LastError).Contains("the model is unreachable")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)
+}
+
+// awaitJobRunStatus waits for the run summary to reach want.
+func awaitJobRunStatus(t *testing.T, repo interfaces.Repository, key model.JobRunKey, want model.JobRunStatus) *model.JobRun {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		run, err := repo.JobRun().Get(ctx, key)
+		if err == nil && run != nil && run.LastStatus == want {
+			return run
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return nil
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// singleReplyLLM answers every turn with one text and the given token usage.
+func singleReplyLLM(text string, input, output int) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return &gollem.Response{Texts: []string{text}, InputToken: input, OutputToken: output}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// failingLLM refuses every turn, which is how a durable run reaches a failure.
+func failingLLM(msg string) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return nil, goerr.New(msg)
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
 }
 
 func TestJobRunner_InvalidJob(t *testing.T) {

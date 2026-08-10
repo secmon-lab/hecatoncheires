@@ -24,6 +24,12 @@ const (
 	outcomeFailed runOutcome = "failed"
 	// outcomeSuspended is an interactive run that asked the user and paused.
 	outcomeSuspended runOutcome = "suspended"
+	// outcomeSpawned is a run handed to the durable agent runtime. It is
+	// distinct from completed on purpose: the attempt recorded the run and
+	// returned, and whether the run itself succeeds is reported later by its own
+	// completion handler, on whichever instance drove it. Counting it as
+	// completed here would claim an outcome this attempt never observed.
+	outcomeSpawned runOutcome = "spawned"
 	// outcomeSkippedLease is a trigger that found another runner holding the
 	// (workspace, case, job) lease.
 	outcomeSkippedLease runOutcome = "skipped_lease"

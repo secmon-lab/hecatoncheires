@@ -107,6 +107,7 @@ exempt_name := {
 	"RegisterAgents",
 	"Bind",
 	"BindAgentKernel",
+	"AttachRunner",
 }
 
 is_exempt if {
