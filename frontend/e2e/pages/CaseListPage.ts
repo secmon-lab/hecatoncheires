@@ -146,22 +146,22 @@ export class CaseListPage extends BasePage {
   }
 
   /**
-   * Get all case titles from the table
+   * Open the first case the currently rendered page links to.
+   *
+   * Do not snapshot the rows first and then click one by its text: the list
+   * query is cache-and-network, so the rows rendered from the cache are
+   * replaced when the network result lands, and rows other workers closed or
+   * deleted in the shared test workspace disappear in that swap. A row index
+   * or title captured before it can no longer resolve afterwards. Resolving
+   * the row at click time survives the swap.
+   *
+   * Access-denied rows expose no detail page and carry no link, so matching
+   * the link (not the row) skips them.
    */
-  async getCaseTitles(): Promise<string[]> {
+  async clickFirstCase(): Promise<void> {
     await this.waitForTableLoad();
-    const rows = await this.casesTable.locator('tbody tr').all();
-    const titles: string[] = [];
-
-    for (const row of rows) {
-      const titleCell = row.locator('td').nth(1); // Title is usually the second column
-      const text = await titleCell.textContent();
-      if (text) {
-        titles.push(text.trim());
-      }
-    }
-
-    return titles;
+    await this.casesTable.locator('tbody a[data-testid^="case-row-link-"]').first().click();
+    await this.waitForNavigation();
   }
 
   /**
