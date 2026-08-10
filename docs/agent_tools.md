@@ -217,25 +217,35 @@ The agent runs in several contexts, and **each wires a different subset**. This
 matrix is the answer to "can my Job call `slack__get_messages`?" (yes) or "can
 the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 
-| Tool group | Mention agent (channel-mode case) | Job — channel-mode | Job — thread-mode | Thread-case investigation | Proposal sub-agent (case draft) |
-|------------|:---:|:---:|:---:|:---:|:---:|
-| `core` read + Actions (`actionwriter`) | ✓ (full, incl. archive / delete-step) | ✓ (Job subset, no archive / delete-step) | — (thread mode has no Actions) | — | read-only `core__list_actions` / `core__get_action` |
-| `case__*` (casewriter) | ✓ | ✓ | ✓ | ✓ (mention turns only; no case exists on a create turn) | — (no case exists yet) |
-| `slack__search_messages`, `slack__get_messages` (read) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `slack__post_to_case_channel` | — | ✓ | ✓ | — | — |
-| `notion__*` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `github__*` | ✓ | — | — | ✓ | ✓ |
-| `jira_*` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
-| `memo__*` | ✓ (if memos enabled) | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
-| `wsmeta` | — | — | — | — | planner only |
+| Tool group | Mention agent (channel-mode case) | `assist` batch | Job — channel-mode | Job — thread-mode | Thread-case investigation | Proposal sub-agent (case draft) |
+|------------|:---:|:---:|:---:|:---:|:---:|:---:|
+| `core` read + Actions (`actionwriter`) | ✓ (full, incl. archive / delete-step) | ✓ (full) | ✓ (Job subset, no archive / delete-step) | — (thread mode has no Actions) | — | read-only `core__list_actions` / `core__get_action` |
+| `case__*` (casewriter) | ✓ | — | ✓ | ✓ | ✓ (mention turns only; no case exists on a create turn) | — (no case exists yet) |
+| `slack__search_messages`, `slack__get_messages` (read) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `slack__post_message` | — | ✓ (pinned to the case channel) | — | — | — | — |
+| `slack__post_to_case_channel` | — | — | ✓ | ✓ | — | — |
+| `notion__*` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `github__*` | ✓ | ✓ | — | — | ✓ | ✓ |
+| `jira_*` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | — | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
+| `memo__*` | ✓ (if memos enabled) | — | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
+| `wsmeta` | — | — | — | — | — | planner only |
 
 Notes:
 
 - **"Mention agent"** is the case-bound agent that runs when a human @-mentions
   the bot in a channel-mode case channel (`pkg/usecase/agent/casebound`). It
   gets the widest palette because a human is in the loop.
+- **`assist`** is the batch pass over every open case (`hecatoncheires assist`).
+  Its palette is the action tools plus Slack read **and post**: posting its
+  findings into the case channel is the whole point of the command, so unlike
+  the mention agent it gets `slack__post_message` as a tool it may call at will.
+  It has no case-editing, memo, or knowledge tools. A ✓ above still requires the
+  integration to be wired, and the `assist` command wires only the Slack **bot**
+  token today — so Notion / GitHub / Jira / web fetch and the User-token Slack
+  search resolve to nothing there in practice. (Source of truth:
+  `agent.KnownToolSetIDsAssist`.)
 - **Jobs** (`[[job]]`, both `simple` and `planexec` strategy) run **unattended**.
   They get case + action writes, knowledge, memo, web fetch, the Slack read
   tools (`slack__search_messages` / `slack__get_messages`), Notion read tools,

@@ -99,6 +99,8 @@ func defaultToolSets(name agentkit.AgentName) ([]string, error) {
 		return agent.KnownToolSetIDsNoCore, nil
 	case AgentWorkspace:
 		return agent.KnownToolSetIDsWorkspaceChannel, nil
+	case AgentAssist:
+		return agent.KnownToolSetIDsAssist, nil
 	case AgentProposal, AgentTask:
 		return agent.KnownToolSetIDs, nil
 	default:
@@ -202,6 +204,15 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 
 	if entry != nil {
 		deps.Core.StatusSet = entry.ActionStatusSet
+	}
+
+	// The Slack posting tool is pinned to the channel of the case the run is on.
+	// It is taken from the Case rather than from Scope.ChannelID because the
+	// scope's channel/thread pair locates the *thread a run reports into*, and an
+	// unattended run (assist) has no such thread while still having a channel to
+	// write to.
+	if target != nil {
+		deps.Slack.ChannelID = target.SlackChannelID
 	}
 
 	// Actions exist only in channel-mode cases. A thread-mode case tracks its

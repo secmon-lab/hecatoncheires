@@ -360,6 +360,15 @@ includes:
 
 Use these labels to slice traces in any downstream observability tool.
 
+Agents that run on the agentkit runtime write **one trace object per claim**,
+not per turn, because a durable run is picked up and put down many times and
+`trace.Repository.Save` overwrites by id — a per-run id would let a later,
+partial claim replace a complete earlier archive. Their labels differ
+accordingly: `session_id` carries the **root Process id** (the identifier that
+spans a whole run), the Slack session id moves to `slack_session_id`, and
+`process_id`, `agent`, `job_id` and `job_run_id` are added. See
+`claimTraceMetadata` in `pkg/agent/kernel/middleware.go`.
+
 The agent tools available within these sessions are described in
 [Configuration](../configuration.md#agent-tool-registry-slack-mention--assist).
 They share the same GitHub App installation as the Source pipeline.
@@ -373,14 +382,24 @@ agent page (`/ws/{workspace}/cases/{id}/agent`) alongside scheduled and
 lifecycle Job runs, through the same `caseJobRunLogs` read path.
 
 - Both mention hosts — `casebound` (channel-mode) and `threadcase`
-  `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`
-  (`runtrace.Recorder` + `runtrace.Handler`), the same machinery the Job
-  runner uses.
+  `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`, the same
+  machinery the Job runner uses. `threadcase` still uses `runtrace.Recorder` +
+  `runtrace.Handler`; `casebound` runs on agentkit, where a run outlives the
+  request that started it, so it opens the log with `runtrace.Open` after Spawn
+  and closes it with `runtrace.FinishRun` from the completion handler.
 - Mention runs are not configured Jobs, so each mention turn gets its own
   fresh per-turn JobID and is tagged `EventType = model.EventTypeMention`;
   the page shows a localized "Mention" label (resolved from the eventType, not
-  the opaque JobID). The `JobRunLog.TraceID` matches the Cloud Storage trace's
-  `traceID`, so the two sinks correlate.
+  the opaque JobID).
+- **Token and call totals for an agentkit-hosted run come from
+  `Process.Metrics`**, not from a trace handler: the run's transitions are
+  spread across claims and possibly instances, so only the Process row
+  accumulates the whole total.
+- **The per-call event timeline is not yet available for agentkit-hosted
+  runs.** `JobRunEvent` rows need a sequence allocator that survives a run
+  moving between instances; until that exists, a `casebound` run shows its
+  totals and its outcome on the page but no per-call rows. `threadcase` and
+  Job runs are unaffected.
 - Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
   mentions in an already-created case are listed.
 

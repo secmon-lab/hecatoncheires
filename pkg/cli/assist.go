@@ -3,8 +3,12 @@ package cli
 import (
 	"context"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/m-mizutani/goerr/v2"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -21,6 +25,7 @@ func cmdAssist() *cli.Command {
 	var repoCfg config.Repository
 	var llmCfg config.LLM
 	var embCfg config.Embedding
+	var agentCfg config.Agent
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -56,6 +61,7 @@ func cmdAssist() *cli.Command {
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
+	flags = append(flags, agentCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "assist",
@@ -114,6 +120,50 @@ func cmdAssist() *cli.Command {
 				usecase.WithEmbedClient(embedClient),
 				usecase.WithSlackService(slackSvc),
 			)
+
+			// Build the agent runtime this pass runs on. Registration must
+			// complete before the Kernel is built, and the Kernel must be bound
+			// before the first Spawn.
+			//
+			// The Process store is in-process ON PURPOSE, unlike serve's. The
+			// assist agent is registered only in this command, so a Process left
+			// in a SHARED store would be claimed by a serve worker that cannot
+			// resolve the agent and would fail it outright. Assist has never been
+			// resumable across a crash — it is one foreground pass — so nothing
+			// is lost by keeping its runs where only this pass can see them.
+			budgets, bErr := agentCfg.Budgets()
+			if bErr != nil {
+				return bErr
+			}
+			agentRegistry := agentkit.NewRegistry()
+			if err := uc.Assist.Register(agentRegistry, budgets.Root.Limiter(),
+				agentarchive.NewMemoryHistoryStore()); err != nil {
+				return goerr.Wrap(err, "failed to register the assist agent")
+			}
+			agentKernel, err := agentkernel.Build(agentkernel.Deps{
+				Repo:    agentprocmemory.New(),
+				History: agentarchive.NewMemoryHistoryStore(),
+				LLM:     llmClient,
+				Trace:   agentarchive.NewMemoryTraceRepository(),
+				Budgets: budgets,
+				Agents:  agentRegistry,
+				// Only the clients this command actually wires. Assist has never
+				// had Notion / GitHub / Jira / WebFetch or the User-token Slack
+				// clients here, so the palette it resolves is unchanged.
+				Tools: agentkernel.ToolDeps{
+					Repo:         repo,
+					Registry:     registry,
+					SlackBot:     slackSvc,
+					ActionUC:     usecase.NewActionToolAdapter(uc.Action),
+					ActionStepUC: usecase.NewActionStepToolAdapter(uc.ActionStep),
+					CaseRefUC:    uc.Case,
+				},
+			})
+			if err != nil {
+				return goerr.Wrap(err, "failed to build the agent runtime")
+			}
+			uc.Assist.Bind(agentKernel)
+			logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
 
 			logging.Default().Info("Starting assist",
 				"workspace", workspaceID,

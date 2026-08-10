@@ -5,22 +5,20 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"text/template"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
-	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
-	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
-	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
@@ -37,52 +35,40 @@ type AssistOption struct {
 	MessageCount int
 }
 
+// assistAgentVersion is the strategy state version stamped on every assist
+// Process. Bump it only alongside a DecodeState that still reads the older shape.
+const assistAgentVersion = 1
+
 // AssistUseCase handles periodic AI-powered case assistance
 type AssistUseCase struct {
 	deps AssistDeps
+
+	// agent and kernel are filled by Register and Bind. They cannot be
+	// constructor arguments: registering the agent needs this UseCase as its
+	// completion handler, and building the Kernel needs the registry that
+	// registration fills.
+	agent  agentkit.Agent[react.Input]
+	kernel *agentkit.Kernel
+
+	// serveOpts tunes the worker drain runs. Production leaves it empty and
+	// takes agentkit's defaults; tests shorten the retry schedule so a
+	// deliberately failing run does not spend its whole backoff.
+	serveOpts []agentkit.ServeOption
 }
 
-// AssistDeps groups the dependencies AssistUseCase needs. Required fields are
-// marked below; the rest can be left zero to disable the corresponding tool
-// or behaviour.
+// AssistDeps groups the dependencies AssistUseCase needs. All three are
+// required.
 //
-// SlackRetriever, when supplied, lets slack__get_messages read public channels
-// without bot membership via the User token (Slack contract: only user tokens
-// can access public channels they are not in).
+// It carries no tool clients. The assist agent's tools are built per claim by
+// the agent runtime's tool factory from agentkernel.ToolDeps, which the CLI
+// assembles; listing them here as well would leave two wirings to keep in sync,
+// and the one this usecase held would be the dead one.
 type AssistDeps struct {
-	Repo     interfaces.Repository    // required
-	Registry *model.WorkspaceRegistry // required
-	LLM      gollem.LLMClient         // required
-
-	// ActionUC routes core__create_action through the unified usecase entry
-	// point so assist-driven creates trigger the same Slack post and event
-	// records as GraphQL/Slack-modal creates. Required.
-	ActionUC *ActionUseCase
-
-	// CaseUC backs the case_ref read tools
-	// (core__search_referenceable_cases / core__get_referenceable_cases).
-	// Optional: nil disables those tools (no case_ref fields configured).
-	CaseUC *CaseUseCase
-
-	// Optional Slack tool clients. SlackService is the Bot-token client;
-	// SlackSearch and SlackRetriever sit on the User OAuth Token.
-	SlackService   slack.Service
-	SlackSearch    slacktool.SearchService
-	SlackRetriever slacktool.MessageRetriever
-
-	// Optional integrations.
-	NotionTool     notiontool.Client
-	GitHubClient   *githubtool.Client
-	WebFetchClient *webfetch.Client
-	EmbedClient    interfaces.EmbedClient
-
-	// JiraTools carries the already-expanded Jira read tools (see
-	// pkg/agent/tool/jira). Unlike NotionTool/GitHubClient/WebFetchClient
-	// this is not a client type: the Jira integration is a gollem.ToolSet
-	// with no exported ToolSet-to-[]Tool helper, so config.Jira.Configure
-	// expands it once at startup and hands the result through as a plain
-	// tool slice. nil/empty means Jira is not configured.
-	JiraTools []gollem.Tool
+	Repo     interfaces.Repository
+	Registry *model.WorkspaceRegistry
+	// LLM generates the structured summary each finished run is logged as. The
+	// run itself uses the Kernel's model.
+	LLM gollem.LLMClient
 }
 
 // NewAssistUseCase creates a new AssistUseCase from a deps bundle. See AssistDeps.
@@ -90,9 +76,36 @@ func NewAssistUseCase(deps AssistDeps) *AssistUseCase {
 	return &AssistUseCase{deps: deps}
 }
 
-// RunAssist iterates all workspaces and open cases, running the assist agent for each
+// Register registers the assist agent and wires this UseCase as its completion
+// handler. Call it before building the Kernel, and Bind after.
+func (uc *AssistUseCase) Register(reg *agentkit.Registry, limiter agentkit.Limiter, store agentkit.HistoryStore) error {
+	handle, err := react.Register(reg, agentkernel.AgentAssist, assistAgentVersion, limiter,
+		agentkit.WithHistoryStore[react.Output](store),
+		agentkit.WithOnFinish(uc.onFinish),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "register the assist agent")
+	}
+	uc.agent = handle
+	return nil
+}
+
+// Bind hands over the Kernel the registered agent runs on.
+func (uc *AssistUseCase) Bind(k *agentkit.Kernel) { uc.kernel = k }
+
+// RunAssist iterates all workspaces and open cases, running the assist agent
+// for each.
+//
+// It spawns one durable Process per case and then drives the worker in the
+// foreground until every one of them has finished, because assist is a batch
+// command: the command's exit is what tells the operator (or the scheduler that
+// invoked it) that the pass is over.
 func (uc *AssistUseCase) RunAssist(ctx context.Context, opts AssistOption) error {
 	logger := logging.From(ctx)
+
+	if err := uc.ready(); err != nil {
+		return err
+	}
 
 	if opts.LogCount <= 0 {
 		opts.LogCount = 7
@@ -114,6 +127,7 @@ func (uc *AssistUseCase) RunAssist(ctx context.Context, opts AssistOption) error
 		entries = []*model.WorkspaceEntry{entry}
 	}
 
+	var spawned []agentkit.ProcessID
 	for _, entry := range entries {
 		wsID := entry.Workspace.ID
 		if entry.AssistPrompt == "" {
@@ -121,105 +135,244 @@ func (uc *AssistUseCase) RunAssist(ctx context.Context, opts AssistOption) error
 			continue
 		}
 
-		if err := uc.processWorkspace(ctx, entry, opts); err != nil {
+		pids, err := uc.processWorkspace(ctx, entry, opts)
+		spawned = append(spawned, pids...)
+		if err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to process workspace", goerr.V("workspaceID", wsID)), "failed to process workspace")
 		}
 	}
 
+	return uc.drain(ctx, spawned)
+}
+
+// ready reports whether the agent runtime has been wired.
+func (uc *AssistUseCase) ready() error {
+	if uc.kernel == nil || uc.agent.Name() == "" {
+		return goerr.New("assist usecase is not bound to an agent runtime")
+	}
 	return nil
 }
 
-func (uc *AssistUseCase) processWorkspace(ctx context.Context, entry *model.WorkspaceEntry, opts AssistOption) error {
+// processWorkspace spawns one run per open case and returns their ids. A case
+// that cannot be prepared is reported and skipped, so one bad case does not
+// cost the rest of the workspace its pass.
+func (uc *AssistUseCase) processWorkspace(ctx context.Context, entry *model.WorkspaceEntry, opts AssistOption) ([]agentkit.ProcessID, error) {
 	logger := logging.From(ctx)
 	wsID := entry.Workspace.ID
 
 	openStatus := types.CaseStatusOpen
 	cases, err := uc.deps.Repo.Case().List(ctx, wsID, interfaces.WithStatus(openStatus))
 	if err != nil {
-		return goerr.Wrap(err, "failed to list open cases",
+		return nil, goerr.Wrap(err, "failed to list open cases",
 			goerr.V("workspaceID", wsID),
 		)
 	}
 
 	logger.Info("processing workspace", "workspaceID", wsID, "openCases", len(cases))
 
+	pids := make([]agentkit.ProcessID, 0, len(cases))
 	for _, c := range cases {
-		if err := uc.processCase(ctx, entry, c, opts); err != nil {
+		pid, err := uc.processCase(ctx, entry, c, opts)
+		if err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to process case",
 				goerr.V("workspaceID", wsID),
 				goerr.V("caseID", c.ID),
 				goerr.V("caseTitle", c.Title),
 			), "failed to process case")
 			// Continue processing remaining cases
+			continue
 		}
+		pids = append(pids, pid)
 	}
 
-	return nil
+	return pids, nil
 }
 
-func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.WorkspaceEntry, c *model.Case, opts AssistOption) error {
+// processCase spawns one assist run for one case. It returns as soon as the run
+// is recorded; the agent worker drives it and onFinish writes its log.
+func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.WorkspaceEntry, c *model.Case, opts AssistOption) (agentkit.ProcessID, error) {
 	logger := logging.From(ctx)
 	wsID := entry.Workspace.ID
 
 	logger.Info("processing case", "workspaceID", wsID, "caseID", c.ID, "caseTitle", c.Title)
 
-	// Build system prompt
 	systemPrompt, err := uc.buildAssistSystemPrompt(ctx, entry, c, opts)
 	if err != nil {
-		return goerr.Wrap(err, "failed to build system prompt")
+		return "", goerr.Wrap(err, "failed to build system prompt")
 	}
 
-	// Build tools — core (action) plus Slack (read-only + post_message)
-	// plus Notion when configured.
-	coreTools := core.NewForAssist(core.Deps{
-		Repo:        uc.deps.Repo,
+	// The tools are no longer assembled here: the agent runtime's tool factory
+	// builds the assist palette from this scope on every claim (see
+	// agent.KnownToolSetIDsAssist). The Slack posting tool's channel comes from
+	// the case the run is pinned to.
+	scope := agentkernel.Scope{
 		WorkspaceID: wsID,
 		CaseID:      c.ID,
-		StatusSet:   entry.ActionStatusSet,
-		ActionUC:    NewActionToolAdapter(uc.deps.ActionUC),
-		CaseRefUC:   uc.deps.CaseUC,
-	})
-	slackTools := slacktool.NewForAssist(slacktool.Deps{
-		Bot:       uc.deps.SlackService,
-		Search:    uc.deps.SlackSearch,
-		Retriever: uc.deps.SlackRetriever,
-		ChannelID: c.SlackChannelID,
-	})
-	notionTools := notiontool.New(notiontool.Deps{Client: uc.deps.NotionTool})
-	githubTools := githubtool.New(uc.deps.GitHubClient)
-	webfetchTools := webfetch.New(uc.deps.WebFetchClient)
-	jiraTools := uc.deps.JiraTools
-
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(jiraTools))
-	allTools = append(allTools, coreTools...)
-	allTools = append(allTools, slackTools...)
-	allTools = append(allTools, notionTools...)
-	allTools = append(allTools, githubTools...)
-	allTools = append(allTools, webfetchTools...)
-	allTools = append(allTools, jiraTools...)
-
-	// Create and execute the agent
-	agent := gollem.New(uc.deps.LLM,
-		gollem.WithSystemPrompt(systemPrompt),
-		gollem.WithTools(allTools...),
-		gollem.WithPromptCache(true),
-	)
-
-	resp, err := agent.Execute(ctx, gollem.Text(entry.AssistPrompt))
-	if err != nil {
-		return goerr.Wrap(err, "failed to execute assist agent",
-			goerr.V("caseID", c.ID),
-		)
+		ToolSets:    []string{agentkernel.ToolSetsAll},
+		PrivateCase: c.IsPrivate,
+	}
+	if err := agentkernel.ValidateSpawn(agentkernel.AgentAssist, scope); err != nil {
+		return "", goerr.Wrap(err, "validate the assist scope", goerr.V("caseID", c.ID))
 	}
 
-	// Generate and save execution log
-	if err := uc.saveAssistLog(ctx, wsID, c.ID, entry.AssistLanguage, resp); err != nil {
+	// No subject and no idempotency key: assist takes no per-case lock today, and
+	// two concurrent passes over the same case already both run. Adding a lock
+	// here would change behaviour beyond moving the runtime.
+	pid, err := uc.agent.Spawn(ctx, uc.kernel,
+		react.Input{SystemPrompt: systemPrompt, Prompt: entry.AssistPrompt},
+		agentkit.WithMetadata(scope.Metadata()),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "spawn the assist agent", goerr.V("caseID", c.ID))
+	}
+	return pid, nil
+}
+
+// drain runs the agent worker in the foreground until every spawned run has
+// reached a terminal state.
+//
+// The command owns this loop because it is a batch pass: nothing else would ever
+// execute these Processes. The kernel it drives is built on an in-process store
+// (see cmdAssist), so a run cannot be claimed by a serve instance that has no
+// assist agent registered — which would fail it as an unknown agent.
+func (uc *AssistUseCase) drain(ctx context.Context, pids []agentkit.ProcessID) error {
+	if len(pids) == 0 {
+		return nil
+	}
+	logger := logging.From(ctx)
+	logger.Info("draining assist runs", "count", len(pids))
+
+	serveCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	served := make(chan error, 1)
+	opts := append([]agentkit.ServeOption{agentkernel.NoDuplicateSideEffects()}, uc.serveOpts...)
+	async.DispatchCancelable(serveCtx, func(c context.Context) error {
+		err := uc.kernel.Serve(c, opts...)
+		served <- err
+		// Reported to the caller through `served`, not returned: the normal exit
+		// here is the cancellation drain performs itself, and returning that would
+		// have the async helper report every assist pass as a failure.
+		return nil
+	})
+
+	pending := make(map[agentkit.ProcessID]bool, len(pids))
+	for _, pid := range pids {
+		pending[pid] = true
+	}
+	failed := 0
+	for len(pending) > 0 {
+		for pid := range pending {
+			proc, err := uc.kernel.GetProcess(ctx, pid)
+			if err != nil {
+				// A run whose row cannot be read will never be observed to
+				// finish, so stop waiting on it rather than spinning forever.
+				errutil.Handle(ctx, goerr.Wrap(err, "read an assist run",
+					goerr.V("process", pid)), "read an assist run")
+				delete(pending, pid)
+				failed++
+				continue
+			}
+			if proc.Status.Terminal() {
+				delete(pending, pid)
+				if uc.reportIfUnsuccessful(ctx, proc) {
+					failed++
+				}
+			}
+		}
+		if len(pending) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			stop()
+			<-served
+			return goerr.Wrap(ctx.Err(), "assist pass interrupted while runs were still going",
+				goerr.V("unfinished", len(pending)))
+		case <-time.After(assistDrainPollInterval):
+		}
+	}
+
+	stop()
+	// Serve returns the context error it stopped on; that is the expected exit
+	// here, not a failure of the pass.
+	if err := <-served; err != nil && !errors.Is(err, context.Canceled) {
+		return goerr.Wrap(err, "run the assist agent worker")
+	}
+	logger.Info("assist runs finished", "count", len(pids), "failed", failed)
+	return nil
+}
+
+// reportIfUnsuccessful reports a run that did not succeed and says whether it
+// counted as a failure.
+//
+// The pass itself still succeeds: assist walks every open case, and one case the
+// agent could not get through must not cost the rest of the workspace its pass —
+// which is what the pre-agentkit loop did by routing each case's error through
+// errutil.Handle. What must NOT happen is the failure going unmentioned, leaving
+// the command to report a clean pass over runs that produced nothing.
+func (uc *AssistUseCase) reportIfUnsuccessful(ctx context.Context, proc *agentkit.Process) bool {
+	switch proc.Status {
+	case agentkit.ProcessSucceeded:
+		return false
+	case agentkit.ProcessFailed:
+		sc := agentkernel.ScopeFrom(proc.Metadata)
+		err := goerr.New("assist run failed",
+			goerr.V("process", proc.ID),
+			goerr.V("workspace_id", sc.WorkspaceID),
+			goerr.V("case_id", sc.CaseID))
+		if proc.Failure != nil {
+			err = goerr.With(err,
+				goerr.V("failure_code", string(proc.Failure.Code)),
+				goerr.V("failure_message", proc.Failure.Message))
+		}
+		errutil.Handle(ctx, err, "assist run failed")
+		return true
+	default:
+		// Cancelled, or any terminal status added later: someone or something
+		// stopped this run deliberately, so it is reported without a stack.
+		sc := agentkernel.ScopeFrom(proc.Metadata)
+		errutil.Handle(ctx, goerr.New("assist run did not complete",
+			goerr.V("process", proc.ID),
+			goerr.V("status", string(proc.Status)),
+			goerr.V("workspace_id", sc.WorkspaceID),
+			goerr.V("case_id", sc.CaseID),
+			goerr.T(errutil.TagBenign)), "assist run did not complete")
+		return true
+	}
+}
+
+// assistDrainPollInterval is how often drain re-reads the runs it is waiting on.
+// It bounds only the delay between the last run finishing and the command
+// exiting, so a coarse value costs nothing.
+const assistDrainPollInterval = 200 * time.Millisecond
+
+// onFinish writes the run's assist log. agentkit calls it once, after the
+// terminal transition committed.
+func (uc *AssistUseCase) onFinish(ctx context.Context, pid agentkit.ProcessID, res agentkit.FinishResult[react.Output]) error {
+	if res.Status != agentkit.ProcessSucceeded || res.Output == nil {
+		// A failed or cancelled run has nothing to summarise — a log records what
+		// a pass concluded, and this one concluded nothing. drain reports the
+		// failure itself (reportIfUnsuccessful), reading it off the Process rather
+		// than from here, so a lost completion callback cannot swallow it.
+		return nil
+	}
+	proc, err := uc.kernel.GetProcess(ctx, pid)
+	if err != nil {
+		return goerr.Wrap(err, "read the finished assist run", goerr.V("process", pid))
+	}
+	sc := agentkernel.ScopeFrom(proc.Metadata)
+
+	language := ""
+	if entry, err := uc.deps.Registry.Get(sc.WorkspaceID); err == nil && entry != nil {
+		language = entry.AssistLanguage
+	}
+
+	if err := uc.saveAssistLog(ctx, sc.WorkspaceID, sc.CaseID, language, res.Output.Text()); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "failed to save assist log",
-			goerr.V("workspaceID", wsID),
-			goerr.V("caseID", c.ID),
+			goerr.V("workspaceID", sc.WorkspaceID),
+			goerr.V("caseID", sc.CaseID),
 		), "failed to save assist log")
 	}
-
 	return nil
 }
 
@@ -366,10 +519,13 @@ type assistLogSummary struct {
 	NextSteps string `json:"next_steps"`
 }
 
-func (uc *AssistUseCase) saveAssistLog(ctx context.Context, wsID string, caseID int64, language string, resp *gollem.ExecuteResponse) error {
-	// Build summary from agent response
-	agentOutput := strings.Join(resp.Texts, "\n")
-
+// saveAssistLog summarises one finished assist run into an AssistLog.
+//
+// agentOutput is the run's final text. It arrives as an already-joined string
+// rather than the runtime's own response type because the run is durable: the
+// summary is produced after the terminal transition committed, from what the
+// Process stored, not from a live agent handle.
+func (uc *AssistUseCase) saveAssistLog(ctx context.Context, wsID string, caseID int64, language string, agentOutput string) error {
 	// Create a new session with JSON response schema to generate structured summary
 	schema := &gollem.Parameter{
 		Title:       "AssistLogSummary",

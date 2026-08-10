@@ -59,12 +59,18 @@ type BusyTurn struct {
 	StartedAt time.Time
 }
 
-// Locator answers "who holds this subject". It is deliberately narrower than
-// agentkit.Repository: the application does not call the persistence SPI, and
-// the only thing a host legitimately needs from it is what to put in a busy
-// message.
+// Locator answers "who already holds this" — by subject, or by the trigger that
+// started a run. It is deliberately narrower than agentkit.Repository: the
+// application does not call the persistence SPI, and a host legitimately needs
+// only these two answers from it.
 type Locator interface {
+	// Busy names the run holding subject, or (nil, nil) when none does.
 	Busy(ctx context.Context, subject agentkit.SubjectRef) (*BusyTurn, error)
+	// ByTrigger names the run an earlier delivery of the same trigger already
+	// started, or "" when there is none. Spawn resolves an idempotency key
+	// silently — it returns the existing id without saying that it is existing —
+	// so asking first is the only way to tell a re-delivery from a fresh event.
+	ByTrigger(ctx context.Context, key string) (agentkit.ProcessID, error)
 }
 
 type repoLocator struct {
@@ -92,4 +98,21 @@ func (l *repoLocator) Busy(ctx context.Context, subject agentkit.SubjectRef) (*B
 			goerr.V("subject_kind", subject.Kind))
 	}
 	return &BusyTurn{ProcessID: proc.ID, StartedAt: proc.CreatedAt}, nil
+}
+
+// ByTrigger returns the Process an earlier delivery of key created, or "" when
+// none did. Unlike Busy this also finds a run that has already finished, which
+// is the point: a Slack re-delivery can arrive after the first turn answered.
+func (l *repoLocator) ByTrigger(ctx context.Context, key string) (agentkit.ProcessID, error) {
+	if key == "" {
+		return "", nil
+	}
+	proc, err := l.repo.FindProcessByIdempotencyKey(ctx, key)
+	if err != nil {
+		if errors.Is(err, agentkit.ErrProcessNotFound) {
+			return "", nil
+		}
+		return "", goerr.Wrap(err, "find the process for the trigger key")
+	}
+	return proc.ID, nil
 }

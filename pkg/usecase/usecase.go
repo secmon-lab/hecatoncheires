@@ -303,20 +303,13 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
+		// The assist agent's tools are built by the agent runtime's tool factory,
+		// so the clients that used to be listed here now reach it through
+		// agentkernel.ToolDeps in cmdAssist.
 		uc.Assist = NewAssistUseCase(AssistDeps{
-			Repo:           repo,
-			Registry:       registry,
-			LLM:            uc.llmClient,
-			ActionUC:       uc.Action,
-			CaseUC:         uc.Case,
-			SlackService:   uc.slackService,
-			SlackSearch:    uc.slackSearch,
-			SlackRetriever: uc.slackRetriever,
-			NotionTool:     uc.notionTool,
-			GitHubClient:   uc.githubClient,
-			WebFetchClient: uc.webfetchClient,
-			EmbedClient:    uc.embedClient,
-			JiraTools:      uc.jiraTools,
+			Repo:     repo,
+			Registry: registry,
+			LLM:      uc.llmClient,
 		})
 
 		// MentionProposal is wired only when the persistent History/Trace archive

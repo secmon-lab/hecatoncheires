@@ -1,17 +1,30 @@
 package usecase_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
+	"github.com/gollem-dev/gollem"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
@@ -174,6 +187,147 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 	})
 }
 
+// wireAssistRuntime reproduces cmdAssist's wiring order — register, build, bind —
+// so RunAssist has an agent runtime to spawn onto. The Process store is
+// in-process, like the real command's.
+func wireAssistRuntime(t *testing.T, assistUC *usecase.AssistUseCase, repo interfaces.Repository,
+	registry *model.WorkspaceRegistry, llm gollem.LLMClient, bot slack.Service,
+) {
+	t.Helper()
+	history := agentarchive.NewMemoryHistoryStore()
+	reg := agentkit.NewRegistry()
+	gt.NoError(t, assistUC.Register(reg, testAgentBudget.Limiter(), history)).Required()
+
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    agentprocmemory.New(),
+		History: history,
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
+		Agents:  reg,
+		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry, SlackBot: bot},
+	})
+	gt.NoError(t, err).Required()
+	assistUC.Bind(k)
+}
+
+// assistLLM answers the agent turn with agentText and the summary turn with the
+// supplied JSON. The two are told apart by call order: the summary is produced in
+// the completion handler, after the agent run committed.
+func assistLLM(agentText, summaryJSON string) gollem.LLMClient {
+	var n atomic.Int32
+	return &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+					if int(n.Add(1)) == 1 {
+						return &gollem.Response{Texts: []string{agentText}}, nil
+					}
+					return &gollem.Response{Texts: []string{summaryJSON}}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// A finished assist run must record its AssistLog, and RunAssist must not return
+// until it has: the command's exit is what tells its scheduler the pass is over.
+func TestAssistUseCase_RunAssistRecordsALogPerCase(t *testing.T) {
+	repo := memory.New()
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+	caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Assist target", "needs help", []string{}, nil, false, false, "", "")
+	gt.NoError(t, err).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:      model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+		AssistPrompt:   "Check deadlines.",
+		AssistLanguage: "Japanese",
+	})
+
+	llm := assistLLM("I reviewed the case and nothing is overdue.",
+		`{"summary":"reviewed the case","actions":"","reasoning":"nothing overdue","next_steps":""}`)
+
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry, LLM: llm})
+	wireAssistRuntime(t, assistUC, repo, registry, llm, nil)
+
+	gt.NoError(t, assistUC.RunAssist(ctx, usecase.AssistOption{})).Required()
+
+	logs, _, err := repo.AssistLog().List(ctx, testWorkspaceID, c.ID, 10, 0)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.String(t, logs[0].Summary).Equal("reviewed the case")
+	gt.String(t, logs[0].Reasoning).Equal("nothing overdue")
+	gt.String(t, logs[0].Actions).Equal("")
+	gt.String(t, logs[0].NextSteps).Equal("")
+	gt.Number(t, logs[0].CaseID).Equal(c.ID)
+}
+
+// A run whose agent fails must leave no AssistLog: a log records what a pass
+// concluded, and a failed pass concluded nothing.
+func TestAssistUseCase_RunAssistWritesNoLogForAFailedRun(t *testing.T) {
+	repo := memory.New()
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+	caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Assist target", "needs help", []string{}, nil, false, false, "", "")
+	gt.NoError(t, err).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:    model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+		AssistPrompt: "Check deadlines.",
+	})
+
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+					return nil, goerr.New("the model is unreachable")
+				},
+			}, nil
+		},
+	}
+
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry, LLM: llm})
+	wireAssistRuntime(t, assistUC, repo, registry, llm, nil)
+	// One attempt: the point here is the terminal failure, not agentkit's retry
+	// schedule (which pkg/agent covers).
+	usecase.SetAssistServeOptionsForTest(assistUC, agentkit.WithMaxStepAttempts(1))
+
+	// errutil.Handle logs through the context logger, so capturing it is how the
+	// report is observed. A failure that is merely counted and never reported is
+	// the defect this guards: the command would print a clean pass.
+	var logged bytes.Buffer
+	ctx = logging.With(ctx, logging.New(&logged, slog.LevelInfo, logging.FormatJSON, false))
+
+	// The pass itself succeeds — one failed case does not fail the command — and
+	// drain still returns once the run reached its terminal state.
+	gt.NoError(t, assistUC.RunAssist(ctx, usecase.AssistOption{})).Required()
+
+	logs, _, err := repo.AssistLog().List(ctx, testWorkspaceID, c.ID, 10, 0)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(0)
+
+	report := logged.String()
+	gt.String(t, report).Contains("assist run failed")
+	gt.String(t, report).Contains("the model is unreachable")
+	gt.String(t, report).Contains(fmt.Sprintf("\"case_id\":%d", c.ID))
+}
+
+// RunAssist must refuse before doing anything when the agent runtime was never
+// bound: spawning is the only thing it does, so an unbound pass would silently
+// process nothing.
+func TestAssistUseCase_RunAssistRefusesWhenUnbound(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry})
+
+	gt.Error(t, assistUC.RunAssist(context.Background(), usecase.AssistOption{}))
+}
+
 func TestAssistUseCase_RunAssist_SkipsWorkspaceWithoutAssistConfig(t *testing.T) {
 	repo := memory.New()
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
@@ -185,7 +339,10 @@ func TestAssistUseCase_RunAssist_SkipsWorkspaceWithoutAssistConfig(t *testing.T)
 		// AssistPrompt is empty - should be skipped
 	})
 
-	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry})
+	llm := assistLLM("unused", "{}")
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry, LLM: llm})
+	wireAssistRuntime(t, assistUC, repo, registry, llm, nil)
+
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
 }
@@ -196,7 +353,9 @@ func TestAssistUseCase_RunAssist_DefaultOptions(t *testing.T) {
 
 	// Empty registry - no workspaces to process
 	registry := model.NewWorkspaceRegistry()
-	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry})
+	llm := assistLLM("unused", "{}")
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry, LLM: llm})
+	wireAssistRuntime(t, assistUC, repo, registry, llm, nil)
 
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
@@ -214,7 +373,9 @@ func TestAssistUseCase_RunAssist_WorkspaceFilter(t *testing.T) {
 		Workspace: model.Workspace{ID: "ws-2", Name: "Workspace 2"},
 	})
 
-	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry})
+	llm := assistLLM("unused", "{}")
+	assistUC := usecase.NewAssistUseCase(usecase.AssistDeps{Repo: repo, Registry: registry, LLM: llm})
+	wireAssistRuntime(t, assistUC, repo, registry, llm, nil)
 
 	// Filter to non-existent workspace should fail
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{WorkspaceID: "ws-nonexistent"})

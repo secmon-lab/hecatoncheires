@@ -1,0 +1,100 @@
+package runtrace_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gt"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+)
+
+func durableKey() model.JobRunKey {
+	return model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "job-mention-1"}
+}
+
+// openDurableRun opens a run log the way a host does before spawning, WITHOUT
+// keeping the Recorder — which is the situation FinishRun exists for.
+func openDurableRun(t *testing.T, repo *memory.Memory, started time.Time) {
+	t.Helper()
+	_, err := runtrace.Open(context.Background(), openParams(repo, started))
+	gt.NoError(t, err).Required()
+}
+
+// TestFinishRunClosesALogItDidNotOpen is the property a durable run needs: the
+// instance that commits the terminal transition is not necessarily the one that
+// opened the log, so the run has to be finishable from the record alone.
+func TestFinishRunClosesALogItDidNotOpen(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	started := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	ended := started.Add(30 * time.Second)
+
+	openDurableRun(t, repo, started)
+
+	runtrace.FinishRun(ctx, repo, durableKey(), "run-abc", runtrace.Usage{
+		InputTokens:              1200,
+		OutputTokens:             340,
+		CacheCreationInputTokens: 100,
+		CacheReadInputTokens:     900,
+		LLMCalls:                 3,
+		ToolCalls:                5,
+	}, nil, ended)
+
+	log, err := repo.JobRunLog().Get(ctx, durableKey(), "run-abc")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
+	gt.Bool(t, log.EndedAt.Equal(ended)).True()
+	gt.Value(t, log.InputTokens).Equal(int64(1200))
+	gt.Value(t, log.OutputTokens).Equal(int64(340))
+	gt.Value(t, log.CacheCreationInputTokens).Equal(int64(100))
+	gt.Value(t, log.CacheReadInputTokens).Equal(int64(900))
+	gt.Value(t, log.LLMCallCount).Equal(int64(3))
+	gt.Value(t, log.ToolCallCount).Equal(int64(5))
+	gt.String(t, log.Error).Equal("")
+
+	// The summary doc is what the case agent page lists from, so a finished run
+	// that never materialised it would be invisible rather than incomplete.
+	run, err := repo.JobRun().Get(ctx, durableKey())
+	gt.NoError(t, err).Required()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+	gt.Value(t, run.LastRunID).Equal("run-abc")
+}
+
+func TestFinishRunRecordsAFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	started := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	ended := started.Add(time.Minute)
+
+	openDurableRun(t, repo, started)
+
+	runtrace.FinishRun(ctx, repo, durableKey(), "run-abc", runtrace.Usage{LLMCalls: 1},
+		goerr.New("step budget exhausted (64/64)"), ended)
+
+	log, err := repo.JobRunLog().Get(ctx, durableKey(), "run-abc")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.Stage).Equal(model.JobRunStageFailed)
+	gt.String(t, log.Error).Contains("step budget exhausted")
+
+	run, err := repo.JobRun().Get(ctx, durableKey())
+	gt.NoError(t, err).Required()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusFailed)
+}
+
+// TestFinishRunToleratesAMissingLog pins that the run record is observability:
+// a log that cannot be read must not turn into an error the caller has to
+// handle, because the caller is a completion handler whose real job is posting
+// the agent's answer.
+func TestFinishRunToleratesAMissingLog(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+
+	runtrace.FinishRun(ctx, repo, durableKey(), "never-opened", runtrace.Usage{}, nil, time.Now().UTC())
+	runtrace.FinishRun(ctx, repo, durableKey(), "", runtrace.Usage{}, nil, time.Now().UTC())
+	runtrace.FinishRun(ctx, nil, durableKey(), "run-abc", runtrace.Usage{}, nil, time.Now().UTC())
+}

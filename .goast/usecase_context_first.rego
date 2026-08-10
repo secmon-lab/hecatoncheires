@@ -98,6 +98,15 @@ exempt_name := {
 	"ToolCallFromTrace",
 	# in-memory counters (mutex-guarded, no external I/O)
 	"Next",
+	# agent-runtime startup wiring. These run once at process start, before any
+	# request exists: Register/RegisterAgents fill an in-memory agentkit.Registry
+	# and Bind/BindAgentKernel are field setters. None performs I/O, so there is
+	# no cancellation or deadline to propagate. A host that later does real work
+	# in one of these must be renamed rather than left on this list.
+	"Register",
+	"RegisterAgents",
+	"Bind",
+	"BindAgentKernel",
 }
 
 is_exempt if {

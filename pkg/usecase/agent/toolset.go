@@ -55,6 +55,13 @@ const (
 	// KnownToolSetIDsWorkspaceChannel (never the default lists) so it is not
 	// offered to the per-case mention / proposal planners.
 	ToolSetCaseMulti = "case_multi"
+	// ToolSetSlackWrite is the read-only Slack set PLUS slack__post_message,
+	// pinned to the channel of the case the run is on. Like ToolSetKnowledge it
+	// REPLACES the read-only set rather than adding to it, so no tool is offered
+	// twice. Only the assist agent asks for it: assist exists to write its
+	// findings back into the case channel, whereas a mention turn's reply is
+	// posted by its host, not by a tool the model may call at will.
+	ToolSetSlackWrite = "slack_write"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -120,6 +127,19 @@ var KnownToolSetIDsCaseChannel = []string{
 	ToolSetKnowledge,
 }
 
+// KnownToolSetIDsAssist is the palette of the assist agent: the mutating action
+// tools, Slack read plus post, and the read-only auxiliary sets. It deliberately
+// omits case_write, memo and knowledge — assist runs unattended on every open
+// case of a workspace, and today's assist agent has none of them.
+var KnownToolSetIDsAssist = []string{
+	ToolSetCore,
+	ToolSetSlackWrite,
+	ToolSetNotion,
+	ToolSetGitHub,
+	ToolSetWebFetch,
+	ToolSetJira,
+}
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -141,9 +161,13 @@ type ToolSetResolver struct {
 	// (ToolSetKnowledge). Empty unless a mutator is wired.
 	knowledgeWrite []gollem.Tool
 	slack          []gollem.Tool
-	notion         []gollem.Tool
-	github         []gollem.Tool
-	webfetch       []gollem.Tool
+	// slackWrite is the Slack set including post_message (ToolSetSlackWrite).
+	// Without a case channel it degrades to the same tools as slack, so a case
+	// with no Slack channel keeps its Slack reads.
+	slackWrite []gollem.Tool
+	notion     []gollem.Tool
+	github     []gollem.Tool
+	webfetch   []gollem.Tool
 	// jira is the already-expanded Jira read tool set (see
 	// pkg/agent/tool/jira). Unlike notion/github/webfetch this is not built
 	// from a client here: it is handed in pre-expanded via ToolSetDeps.Jira
@@ -251,12 +275,18 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	if d.CaseMulti.CaseUC != nil {
 		caseMulti = casemulti.New(d.CaseMulti)
 	}
+	// The posting tool needs the channel of the case the run is on; NewForAssist
+	// degrades to the read-only set without one. It is built unconditionally so
+	// that a case with no Slack channel still keeps its Slack READS — withholding
+	// the whole set there would take away tools that work.
+	slackWrite := slacktool.NewForAssist(d.Slack)
 	return &ToolSetResolver{
 		core:           coreTools,
 		coreFull:       coreFullTools,
 		memo:           memoTools,
 		knowledgeWrite: knowledgeWrite,
 		slack:          slacktool.NewReadOnly(d.Slack),
+		slackWrite:     slackWrite,
 		notion:         notiontool.New(d.Notion),
 		github:         githubtool.New(d.GitHub),
 		webfetch:       webfetch.New(d.WebFetch),
@@ -293,6 +323,13 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 		base = r.knowledgeWrite
 	}
 
+	// slack_write already contains the read tools, so a request naming both
+	// resolves to the write set alone — offering a tool twice makes the model's
+	// tool list ambiguous.
+	if slices.Contains(ids, ToolSetSlackWrite) && len(r.slackWrite) > 0 {
+		ids = withoutToolSet(ids, ToolSetSlackRO)
+	}
+
 	// Pre-compute capacity to avoid repeated growth.
 	total := len(base)
 	for _, id := range ids {
@@ -302,6 +339,18 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 	out = append(out, base...)
 	for _, id := range ids {
 		out = append(out, r.setFor(id)...)
+	}
+	return out
+}
+
+// withoutToolSet returns ids with drop removed, leaving the caller's slice
+// untouched.
+func withoutToolSet(ids []string, drop string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != drop {
+			out = append(out, id)
+		}
 	}
 	return out
 }
@@ -320,6 +369,8 @@ func (r *ToolSetResolver) setFor(id string) []gollem.Tool {
 		return r.coreFull
 	case ToolSetSlackRO:
 		return r.slack
+	case ToolSetSlackWrite:
+		return r.slackWrite
 	case ToolSetNotion:
 		return r.notion
 	case ToolSetGitHub:
