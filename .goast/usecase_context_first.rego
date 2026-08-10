@@ -108,6 +108,23 @@ exempt_name := {
 	"Bind",
 	"BindAgentKernel",
 	"AttachRunner",
+	# agentkit Strategy methods. Their signatures are fixed by the library, and
+	# every one of them is pure: Version reports a constant, Init builds the
+	# initial state (agentkit gives it no ctx and no Syscalls precisely so a
+	# strategy author cannot perform effects there), and the four codecs only
+	# marshal. The transition method that DOES take a ctx is Step, which is not
+	# exempted here because it has one.
+	#
+	# The proper fix is relocating the plan-execute Strategy to pkg/agent/, next to
+	# the ReAct one, which is where runtime machinery with library-fixed method
+	# sets already lives. It shares unexported schema and prompt helpers with the
+	# runtime it is replacing, so the move happens when that runtime is deleted.
+	"Version",
+	"Init",
+	"EncodeState",
+	"DecodeState",
+	"EncodeOutput",
+	"DecodeOutput",
 }
 
 is_exempt if {
