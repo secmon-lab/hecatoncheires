@@ -507,11 +507,19 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 				{ID: "note", Text: "Anything else?", Type: "free_text"},
 			},
 		}
+		// A run suspended on the durable agent runtime also records the Process and
+		// the await its answer must reach: the resume arrives out of band, on an
+		// instance that never saw the run start, and without the pair there is
+		// nothing to respond to.
+		log.AgentProcessID = "01JQZ0000000000000000AGENT"
+		log.AgentAwaitKey = "question:2"
 		gt.NoError(t, repo.JobRunLog().Suspend(ctx, log)).Required()
 
 		got, err := repo.JobRunLog().Get(ctx, key, "run-suspend")
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Stage).Equal(model.JobRunStageAwaitingInput)
+		gt.String(t, got.AgentProcessID).Equal("01JQZ0000000000000000AGENT")
+		gt.String(t, got.AgentAwaitKey).Equal("question:2")
 		gt.Bool(t, got.EndedAt.IsZero()).True()
 		gt.Value(t, got.PendingInteraction).NotNil().Required()
 		gt.String(t, got.PendingInteraction.PostedChannelID).Equal("C999")
@@ -524,15 +532,21 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, got.PendingInteraction.Items[1].ID).Equal("note")
 		gt.String(t, got.PendingInteraction.Items[1].Type).Equal("free_text")
 
-		// Resume: back to RUNNING with the pending interaction cleared.
+		// Resume: back to RUNNING with the pending interaction cleared, and the
+		// await pair cleared with it — a second submit of the same form must find
+		// nothing to answer rather than responding twice.
 		log.Stage = model.JobRunStageRunning
 		log.PendingInteraction = nil
+		log.AgentProcessID = ""
+		log.AgentAwaitKey = ""
 		gt.NoError(t, repo.JobRunLog().Resume(ctx, log)).Required()
 
 		resumed, err := repo.JobRunLog().Get(ctx, key, "run-suspend")
 		gt.NoError(t, err).Required()
 		gt.Value(t, resumed.Stage).Equal(model.JobRunStageRunning)
 		gt.Value(t, resumed.PendingInteraction).Nil()
+		gt.String(t, resumed.AgentProcessID).Equal("")
+		gt.String(t, resumed.AgentAwaitKey).Equal("")
 	})
 
 	t.Run("Suspend rejects non-AWAITING_INPUT stage", func(t *testing.T) {

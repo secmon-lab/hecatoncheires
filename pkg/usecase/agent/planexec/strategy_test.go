@@ -713,6 +713,157 @@ func TestPlannerToolCallsAreBounded(t *testing.T) {
 	gt.String(t, seen[5]).Contains("rejected")
 }
 
+// recordingAsker captures the question and the await key it must be answered on.
+type recordingAsker struct {
+	mu       sync.Mutex
+	asked    []planexec.Question
+	pid      agentkit.ProcessID
+	key      agentkit.AwaitKey
+	workspce string
+}
+
+func (a *recordingAsker) Ask(_ context.Context, pid agentkit.ProcessID, meta map[string]string,
+	key agentkit.AwaitKey, q planexec.Question,
+) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.asked = append(a.asked, q)
+	a.pid, a.key, a.workspce = pid, key, meta["workspace_id"]
+	return nil
+}
+
+func (a *recordingAsker) target() (agentkit.ProcessID, agentkit.AwaitKey) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pid, a.key
+}
+
+func (a *recordingAsker) questions() []planexec.Question {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]planexec.Question, len(a.asked))
+	copy(out, a.asked)
+	return out
+}
+
+// A host that waits in-band keeps ONE Process across the human's reply: the run
+// parks on a question await, the answer is delivered with Respond, and the same
+// run finishes with its budget and history intact.
+func TestQuestionSuspendsAndResumesTheSameRun(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`the thread does not say which environment`,
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+		// After the answer the run replans and finalises.
+		`{"finalize":{"reason":"the environment is known"}}`,
+		`Production broke.`,
+	}}
+	asker := &recordingAsker{}
+	rt := newRuntime(t, planner.client(), generousBudget(), nil, nil,
+		planexec.Config[planexec.TextResult]{TextOnly: true, Asker: asker})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- rt.kernel.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	defer func() { cancel(); <-served }()
+
+	in := textInput()
+	in.AllowQuestion = true
+	in.SuspendOnQuestion = true
+	pid, err := rt.agent.Spawn(ctx, rt.kernel, in,
+		agentkit.WithMetadata(map[string]string{"workspace_id": "ws-1"}))
+	gt.NoError(t, err).Required()
+
+	// The run parks on its question, and the asker was told where to send the
+	// answer.
+	var askPID agentkit.ProcessID
+	var askKey agentkit.AwaitKey
+	for {
+		askPID, askKey = asker.target()
+		if askKey != "" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return
+		case <-time.After(3 * time.Millisecond):
+		}
+	}
+	gt.Value(t, askPID).Equal(pid)
+	gt.Value(t, asker.workspce).Equal("ws-1")
+	questions := asker.questions()
+	gt.Array(t, questions).Length(1).Required()
+	gt.String(t, questions[0].Reason).Equal("which environment?")
+
+	// Answering continues the same Process.
+	answer := planexec.RenderAnswers(questions[0], []planexec.QuestionAnswer{
+		{ID: "env", Choice: "production"},
+	})
+	gt.NoError(t, rt.kernel.Respond(ctx, pid, askKey, []byte(answer))).Required()
+
+	for {
+		proc, gerr := rt.kernel.GetProcess(ctx, pid)
+		gt.NoError(t, gerr).Required()
+		if proc.Status.Terminal() {
+			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+			out := decodeText(t, proc.Output)
+			gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+			gt.String(t, out.Text).Contains("Production broke.")
+			break
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return
+		case <-time.After(3 * time.Millisecond):
+		}
+	}
+
+	// The replan round that followed was told what the user answered.
+	seen := planner.seen()
+	gt.String(t, seen[len(seen)-2]).Contains("production")
+}
+
+// A run told to wait in-band with no asker must fail loudly: it would otherwise
+// park on an await nobody can see, and wait forever.
+func TestSuspendOnQuestionRequiresAnAsker(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`nothing conclusive`,
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which?","type":"select","options":["a","b"]}]}}`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil, nil)
+
+	in := textInput()
+	in.AllowQuestion = true
+	in.SuspendOnQuestion = true
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessFailed)
+}
+
+func TestRenderAnswersLabelsEachAnswer(t *testing.T) {
+	q := planexec.Question{
+		Reason: "which environment?",
+		Items: []planexec.QuestionItem{
+			{ID: "env", Text: "Which environment?", Type: planexec.QuestionItemSelect},
+			{ID: "note", Text: "Anything else?", Type: planexec.QuestionItemFreeText},
+		},
+	}
+	got := planexec.RenderAnswers(q, []planexec.QuestionAnswer{
+		{ID: "env", Choice: "production"},
+		{ID: "note", FreeText: "started after the 14:00 deploy"},
+		{ID: "gone", Choice: "x"},
+	})
+	gt.String(t, got).Contains("## env — Which environment?")
+	gt.String(t, got).Contains("Answer (select): production")
+	gt.String(t, got).Contains("## note — Anything else?")
+	gt.String(t, got).Contains("Answer (free_text): started after the 14:00 deploy")
+	// An answer whose question is gone is kept rather than dropped.
+	gt.String(t, got).Contains("unknown question id")
+}
+
 func TestRegisterRequiresALimiterAndATaskAgent(t *testing.T) {
 	reg := agentkit.NewRegistry()
 	cfg := generousBudget()

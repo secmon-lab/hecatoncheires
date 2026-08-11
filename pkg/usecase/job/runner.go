@@ -1066,6 +1066,41 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
 	sum.strategy = string(strategy)
+
+	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
+	ctx = withQuiet(ctx, j.Quiet)
+
+	// A run on the durable runtime is still the SAME Process, parked on the
+	// question it asked. Answering it is the whole resume: its budget, its history
+	// and its run id all carried across the wait, so there is nothing to rebuild
+	// and nothing to re-enter.
+	if logRec.AgentProcessID != "" {
+		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		// Back to RUNNING first, clearing the question and the await it named, so a
+		// crash between here and the Respond leaves a RUNNING log rather than one
+		// stuck at AWAITING_INPUT — and a second submit of the same form finds
+		// nothing to answer instead of responding twice.
+		logRec.Stage = model.JobRunStageRunning
+		logRec.PendingInteraction = nil
+		logRec.EndedAt = time.Time{}
+		awaitKey, processID := logRec.AgentAwaitKey, logRec.AgentProcessID
+		logRec.AgentAwaitKey = ""
+		logRec.AgentProcessID = ""
+		if resumeErr := r.deps.Repo.JobRunLog().Resume(ctx, logRec); resumeErr != nil {
+			return goerr.Wrap(resumeErr, "transition run log to running for resume",
+				goerr.V("run_id", runID))
+		}
+		if err := r.resumeDurable(ctx, processID, awaitKey, logRec, pending, answers); err != nil {
+			stageAt = r.clock()
+			finishErr := r.finishRun(ctx, j, nil, key, logRec, nil, "", "", runID, logRec.TraceID, err, sum)
+			sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+			sum.outcome = outcomeFailed
+			return finishErr
+		}
+		sum.outcome = outcomeSpawned
+		return nil
+	}
+
 	executor, execLookupErr := r.deps.executorFor(strategy)
 	if execLookupErr != nil {
 		return goerr.Wrap(execLookupErr, "select executor for resume",
@@ -1076,9 +1111,6 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		return goerr.New("executor does not support resume",
 			goerr.V("job_id", j.ID), goerr.V("strategy", string(strategy)))
 	}
-
-	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
-	ctx = withQuiet(ctx, j.Quiet)
 
 	// Reconstruct the triggering Event from the run log's provenance so the
 	// prompts render with the same framing as the original turn.

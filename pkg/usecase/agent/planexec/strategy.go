@@ -32,6 +32,10 @@ const (
 	// for the same reason every other step is: one transition is one LLM call or
 	// one tool call, so a crash costs at most one of them.
 	phasePlannerTool = "planner_tool"
+	// phaseAnswer folds a human's answer back into the run. It is reached only by
+	// a host that asked to wait in-band (Input.SuspendOnQuestion); every other host
+	// ends the turn on a question instead.
+	phaseAnswer = "answer"
 )
 
 // Model roles. A host binds them to a specific model through the Kernel; an
@@ -62,6 +66,15 @@ type Input struct {
 	AllowQuestion       bool `json:"allow_question,omitempty"`
 	AllowDirect         bool `json:"allow_direct,omitempty"`
 	AllowSubAgentWrites bool `json:"allow_sub_agent_writes,omitempty"`
+	// SuspendOnQuestion keeps the run open across the human's reply instead of
+	// ending the turn on it: the run parks on a question await and continues when
+	// the host calls Kernel.Respond with the answer.
+	//
+	// A host should set it ONLY when its own record spans the wait — an
+	// interactive Job, whose run id covers the whole exchange. For a Slack thread
+	// it is the wrong trade: the run would hold the thread's subject for as long as
+	// the person takes to answer, blocking every later turn on that thread.
+	SuspendOnQuestion bool `json:"suspend_on_question,omitempty"`
 
 	// Progress locates the thread milestone lines are drawn into. A zero value
 	// draws nothing.
@@ -101,6 +114,23 @@ type Progress interface {
 	// Render draws lines as one message and returns its id. An empty messageTS
 	// means "post a new one"; anything else means "update that one".
 	Render(ctx context.Context, target ProgressTarget, messageTS string, lines []string) (string, error)
+}
+
+// Asker delivers a run's question to whoever can answer it, for a host that waits
+// in-band (Input.SuspendOnQuestion). The host implements it; planexec holds no
+// Slack dependency.
+//
+// pid and key are what the answer must be Responded to — the host records the
+// pair alongside whatever it posts, because the reply arrives later, out of band,
+// on an instance that never saw this transition. meta is the run's Process
+// metadata, which is what lets one registered Asker serve every run.
+//
+// It posts before the run suspends, so a transition that is replayed would post
+// twice. That is why every Serve in this application bounds unclean reclaims to 0
+// (agentkernel.Serve): a replay fails the run instead of re-posting.
+type Asker interface {
+	Ask(ctx context.Context, pid agentkit.ProcessID, meta map[string]string,
+		key agentkit.AwaitKey, q Question) error
 }
 
 // OutputKind discriminates how a turn ended.
@@ -164,6 +194,10 @@ type Config[T Validatable] struct {
 	Decode func([]byte) (*T, error)
 	// Finalizers run in order after T.Validate(); the first rejection wins.
 	Finalizers []Finalizer[T]
+	// Asker delivers a question for a host that waits in-band. Required when a run
+	// sets Input.SuspendOnQuestion — without one there would be nobody to show the
+	// question to, and the run would park on an await nothing can answer.
+	Asker Asker
 	// TextOnly generates the terminal output as prose instead of JSON and puts it
 	// in Output.Text.
 	TextOnly bool
@@ -212,6 +246,9 @@ type state struct {
 	// within one planning phase, so a model that only ever calls tools cannot spin
 	// forever inside a single round.
 	PlannerToolRounds int `json:"planner_tool_rounds,omitempty"`
+	// AnswerKey is the await a suspended run is waiting on. It is per-round so a
+	// follow-up question opens a fresh await rather than reusing a closed one.
+	AnswerKey agentkit.AwaitKey `json:"answer_key,omitempty"`
 }
 
 // taskRef ties a planned task to the child Process running it. The plan fields
@@ -304,6 +341,8 @@ func (s *strategy[T]) Step(ctx context.Context, sys agentkit.Syscalls, st state)
 		return s.stepFinal(ctx, sys, st)
 	case phasePlannerTool:
 		return s.stepPlannerTool(ctx, sys, st)
+	case phaseAnswer:
+		return s.stepAnswer(ctx, sys, st)
 	default:
 		return st, agentkit.Decision[Output[T]]{}, goerr.New("planexec: unknown phase",
 			goerr.V("phase", st.Phase))
@@ -530,11 +569,14 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 	st.PlannerToolRounds = 0
 	switch {
 	case rr.Question != nil:
+		st = s.note(ctx, st, "❓ Asked a question")
+		if st.Input.SuspendOnQuestion {
+			return s.askAndWait(ctx, sys, st, rr.Question)
+		}
 		// The turn ENDS on a question rather than waiting on an await. Holding the
 		// run open while a person takes minutes or hours would pin its subject and
 		// block every later turn on the thread; the answer arrives as a fresh run
 		// that inherits this one's history.
-		st = s.note(ctx, st, "❓ Asked a question")
 		return st, agentkit.Done(Output[T]{
 			Kind: OutputQuestion, Question: rr.Question, Observations: st.Observations,
 		}), nil
@@ -545,6 +587,100 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 		st.Round++
 		return s.launchRound(ctx, sys, st, rr.Tasks)
 	}
+}
+
+// RenderAnswers turns a human's answers into the user turn a suspended run
+// continues from. The host calls it and passes the result to Kernel.Respond, so
+// the encoding of an answer stays the host's business and planexec only sees a
+// string.
+//
+// Each answer is labelled with the question it belongs to, because the planner
+// sees them one round after it asked and an unlabelled list of values is
+// ambiguous when several items were asked at once.
+func RenderAnswers(q Question, answers []QuestionAnswer) string {
+	var sb strings.Builder
+	sb.WriteString("# User answers\n\n")
+	byID := make(map[string]QuestionItem, len(q.Items))
+	for _, it := range q.Items {
+		byID[it.ID] = it
+	}
+	for _, ans := range answers {
+		if item, ok := byID[ans.ID]; ok {
+			fmt.Fprintf(&sb, "## %s — %s\n", ans.ID, item.Text)
+		} else {
+			fmt.Fprintf(&sb, "## %s\n(unknown question id; answer kept verbatim)\n", ans.ID)
+		}
+		switch {
+		case ans.FreeText != "":
+			fmt.Fprintf(&sb, "Answer (free_text): %s\n\n", ans.FreeText)
+		case len(ans.Choices) > 0:
+			fmt.Fprintf(&sb, "Answer (multi_select): %s\n\n", strings.Join(ans.Choices, ", "))
+		case ans.Choice != "":
+			fmt.Fprintf(&sb, "Answer (select): %s\n\n", ans.Choice)
+		default:
+			sb.WriteString("Answer: (none provided)\n\n")
+		}
+	}
+	sb.WriteString("Use these answers to decide the next action.\n")
+	return sb.String()
+}
+
+// askAndWait delivers the question and parks the run until it is answered.
+//
+// The question is handed to the host BEFORE the suspend so the host can record
+// the await key next to whatever it posts — the answer arrives out of band, and
+// without the key there is nothing to Respond to.
+func (s *strategy[T]) askAndWait(ctx context.Context, sys agentkit.Syscalls, st state,
+	q *Question,
+) (state, agentkit.Decision[Output[T]], error) {
+	if s.cfg.Asker == nil {
+		return st, agentkit.Decision[Output[T]]{}, goerr.New(
+			"planexec: a run that waits on its question needs an asker")
+	}
+	// Per-round, because agentkit closes an await once it is answered: a follow-up
+	// question reusing the key would be responding to a closed one.
+	key := agentkit.AwaitKey(fmt.Sprintf("question:%d", st.Round))
+	if err := s.cfg.Asker.Ask(ctx, sys.ProcessID(), sys.Metadata(), key, *q); err != nil {
+		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: deliver the question")
+	}
+
+	payload, err := json.Marshal(q)
+	if err != nil {
+		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: encode the question")
+	}
+	st.AnswerKey = key
+	st.Phase = phaseAnswer
+	return st, agentkit.Suspend[Output[T]](agentkit.Question(key, payload)), nil
+}
+
+// stepAnswer folds the human's answer into the next planning round.
+//
+// The answer is opaque: the host encodes whatever the person said as the user
+// turn the planner should read next. planexec knows nothing about forms, options
+// or Slack — only that a string came back.
+func (s *strategy[T]) stepAnswer(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
+	aw, ok := sys.Await(st.AnswerKey)
+	if !ok {
+		return st, agentkit.Decision[Output[T]]{}, goerr.New("planexec: the question await is missing",
+			goerr.V("key", string(st.AnswerKey)))
+	}
+	if aw.Status != agentkit.AwaitResponded {
+		return st, agentkit.Decision[Output[T]]{}, goerr.New("planexec: the question await is not answered",
+			goerr.V("key", string(st.AnswerKey)), goerr.V("status", string(aw.Status)))
+	}
+
+	answer := strings.TrimSpace(string(aw.Response))
+	if answer == "" {
+		// An empty answer is not a reason to fail: the person may have submitted the
+		// form with nothing filled in, and the planner can ask again or proceed.
+		answer = "The user submitted the form without providing an answer."
+	}
+	st = s.note(ctx, st, "💬 Received the answer")
+	st.AnswerKey = ""
+	st.NextInput = answer
+	st.Round++
+	st.Phase = phaseReplan
+	return st, agentkit.Continue[Output[T]](), nil
 }
 
 // stepFinal produces the terminal output.

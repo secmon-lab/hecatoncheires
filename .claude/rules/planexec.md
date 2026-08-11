@@ -31,11 +31,14 @@ Differences worth knowing before changing it:
   those calls are free of the round budget — nothing else would stop a model that
   only ever looks things up. The planning call that follows sends no user turn:
   the request is already in the conversation.
-- **A question ENDS the turn** (`Output.Kind == OutputQuestion`) rather than
-  waiting on an await. Holding a run open while a person takes hours would pin its
-  subject and block every later turn on that thread. There is one place this does
-  not fit — an interactive Job, which suspends and resumes under one run id — and
-  that is why interactive Jobs are still on the in-process executor.
+- **A question ENDS the turn by default** (`Output.Kind == OutputQuestion`) rather
+  than waiting on an await. Holding a run open while a person takes hours would pin
+  its subject and block every later turn on that thread; the answer arrives as a
+  fresh run. A host whose own record spans the wait sets `Input.SuspendOnQuestion`
+  instead: the run parks on a question await, `Config.Asker` delivers the question
+  with the key the answer must reach, and `Kernel.Respond` continues the SAME
+  Process — one budget, one history, one run id. Only the interactive Job uses it,
+  because only its run record covers the whole exchange.
 - **`Config[T].Finalizers` take the run's Process metadata**, not just the output:
   a strategy is registered once at startup and then serves every run, so a
   finalizer must read its own scope (the workspace, the case) rather than close

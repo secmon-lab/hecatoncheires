@@ -8,6 +8,7 @@ import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
@@ -83,7 +84,7 @@ func (d *DurableRuntime) Register(reg *agentkit.Registry, limiter agentkit.Limit
 	// thread, not through a milestone message a person is watching.
 	handle, err := planexec.Register(reg, agentkernel.AgentJob, jobPlanexecAgentVersion,
 		taskAgent, nil, limiter,
-		planexec.Config[planexec.TextResult]{TextOnly: true},
+		planexec.Config[planexec.TextResult]{TextOnly: true, Asker: jobAsker{runtime: d}},
 		agentkit.WithHistoryStore[planexec.Output[planexec.TextResult]](d.History),
 		agentkit.WithOnFinish(d.onPlanexecFinish),
 	)
@@ -116,19 +117,17 @@ func (d *DurableRuntime) AttachRunner(r *JobRunner) {
 // handles reports whether the durable runtime drives this run. A run it does not
 // drive stays on the in-process executor.
 //
-// An INTERACTIVE run is deliberately excluded and stays in-process. Asking the
-// user mid-run means parking one Process on an agentkit question await and later
-// resuming it with Kernel.Respond, which needs the await's key recorded somewhere
-// durable — the run log has no field for it, and adding one is a persistence
-// change that has not been agreed. Every non-interactive run of either strategy
-// runs here.
+// An interactive run is driven here too: it parks on an agentkit question await
+// and continues when Resume responds to it, which is why the run log records the
+// suspended Process and its await key. The simple strategy cannot be interactive
+// (Job.Validate enforces it) — a single ReAct loop has no planner to ask from.
 func (d *DurableRuntime) handles(strategy model.JobStrategy, interactive bool) bool {
-	if d == nil || d.Kernel == nil || interactive {
+	if d == nil || d.Kernel == nil {
 		return false
 	}
 	switch strategy {
 	case model.JobStrategySimple:
-		return d.simple.Name() != ""
+		return !interactive && d.simple.Name() != ""
 	case model.JobStrategyPlanexec:
 		return d.planexec.Name() != ""
 	default:
@@ -213,8 +212,11 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 			// replies in a single tool-enabled pass.
 			AllowDirect: true,
 			// Only an interactive Job may stop and ask; an unattended one has nobody
-			// to answer.
-			AllowQuestion: p.interactive,
+			// to answer. It waits in-band rather than ending the turn, because a Job
+			// run is ONE record spanning the whole exchange — the same run id resumes
+			// once the user answers.
+			AllowQuestion:     p.interactive,
+			SuspendOnQuestion: p.interactive,
 		}, opts...)
 	} else {
 		pid, err = d.simple.Spawn(ctx, d.Kernel,
@@ -321,6 +323,119 @@ func (d *DurableRuntime) onPlanexecFinish(ctx context.Context, pid agentkit.Proc
 		d.reflect(ctx, proc, sc, j, c)
 	}
 	return nil
+}
+
+// jobAsker posts an interactive run's question to the case thread and parks the
+// run log on it, recording the Process and await key the answer must reach.
+type jobAsker struct {
+	runtime *DurableRuntime
+}
+
+// Ask posts the question form and suspends the run log.
+//
+// The Slack thread and the requester are resolved from the case now rather than
+// snapshotted at spawn: a run can reach its question long after it started, and
+// the case may have been rethreaded in between.
+func (a jobAsker) Ask(ctx context.Context, pid agentkit.ProcessID, meta map[string]string,
+	key agentkit.AwaitKey, q planexec.Question,
+) error {
+	d := a.runtime
+	r := d.runner
+	if r == nil {
+		return goerr.New("durable runtime has no job runner")
+	}
+	sc := agentkernel.ScopeFrom(meta)
+	runKey := model.JobRunKey{WorkspaceID: sc.WorkspaceID, CaseID: sc.CaseID, JobID: sc.JobID}
+
+	logRec, err := r.deps.Repo.JobRunLog().Get(ctx, runKey, sc.JobRunID)
+	if err != nil {
+		return goerr.Wrap(err, "load the run log to park it on a question",
+			goerr.V("run_id", sc.JobRunID))
+	}
+	// The pair is what the resume calls Kernel.Respond with; the Interactor writes
+	// it out with the rest of the suspended log.
+	logRec.AgentProcessID = string(pid)
+	logRec.AgentAwaitKey = string(key)
+
+	_, c := d.reloadRunContext(ctx, sc)
+	channelID, threadTS, requester := "", "", ""
+	if c != nil {
+		channelID, threadTS, requester = c.SlackChannelID, c.SlackThreadTS, c.ReporterID
+	}
+	interactor := newJobInteractor(r.deps.Repo, r.deps.InteractionPoster, runKey,
+		sc.JobRunID, channelID, threadTS, requester, logRec, nil, r.clock)
+
+	items := make([]interaction.Item, len(q.Items))
+	for i, it := range q.Items {
+		items[i] = interaction.Item{
+			ID: it.ID, Text: it.Text,
+			Type:    interaction.ItemType(it.Type),
+			Options: it.Options,
+		}
+	}
+	if _, err := interactor.Solicit(ctx,
+		interaction.Request{Reason: q.Reason, Items: items}); err != nil {
+		return goerr.Wrap(err, "solicit the run's question",
+			goerr.V("job_id", runKey.JobID), goerr.V("run_id", sc.JobRunID))
+	}
+	return nil
+}
+
+// resumeDurable delivers a human's answer to the suspended run and lets it
+// continue.
+//
+// The run is one Process for its whole life, so this responds to the await it
+// parked on rather than starting anything: its budget, its history and its run id
+// all carry across the wait. The run log was already transitioned back to RUNNING
+// by the caller, which is what makes a crash here leave a RUNNING log rather than
+// one stuck at AWAITING_INPUT.
+func (r *JobRunner) resumeDurable(ctx context.Context, processID, awaitKey string,
+	logRec *model.JobRunLog, pending model.PendingInteraction, answers []interaction.Answer,
+) error {
+	d := r.deps.Durable
+	if d == nil || d.Kernel == nil {
+		return goerr.New("the suspended run has no agent runtime to resume on",
+			goerr.V("run_id", logRec.RunID))
+	}
+	if awaitKey == "" {
+		return goerr.New("the suspended run names no await to answer",
+			goerr.V("run_id", logRec.RunID))
+	}
+	answer := planexec.RenderAnswers(pendingToQuestion(pending), toQuestionAnswers(answers))
+	if err := d.Kernel.Respond(ctx, agentkit.ProcessID(processID),
+		agentkit.AwaitKey(awaitKey), []byte(answer)); err != nil {
+		return goerr.Wrap(err, "deliver the answer to the suspended run",
+			goerr.V("run_id", logRec.RunID), goerr.V("process", processID))
+	}
+	return nil
+}
+
+// pendingToQuestion reconstructs the question that was asked, so each answer can
+// be labelled with the item it belongs to.
+func pendingToQuestion(p model.PendingInteraction) planexec.Question {
+	items := make([]planexec.QuestionItem, len(p.Items))
+	for i, it := range p.Items {
+		items[i] = planexec.QuestionItem{
+			ID: it.ID, Text: it.Text,
+			Type:    planexec.QuestionItemType(it.Type),
+			Options: it.Options,
+		}
+	}
+	return planexec.Question{Reason: p.Reason, Items: items}
+}
+
+// toQuestionAnswers converts the host-neutral answers into the runtime's shape.
+func toQuestionAnswers(answers []interaction.Answer) []planexec.QuestionAnswer {
+	out := make([]planexec.QuestionAnswer, len(answers))
+	for i, a := range answers {
+		out[i] = planexec.QuestionAnswer{
+			ID:       a.ID,
+			Choice:   a.Choice,
+			Choices:  a.Choices,
+			FreeText: a.FreeText,
+		}
+	}
+	return out
 }
 
 // processUsage reads a finished run's totals off its Process, which is the only

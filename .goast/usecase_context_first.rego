@@ -128,6 +128,9 @@ exempt_name := {
 	"DecodeState",
 	"EncodeOutput",
 	"DecodeOutput",
+	# renders a question and its answers into the user turn a suspended run
+	# continues from. A pure string transform, moved with the Strategy above.
+	"RenderAnswers",
 }
 
 is_exempt if {

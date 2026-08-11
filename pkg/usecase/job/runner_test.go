@@ -22,6 +22,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -669,45 +670,115 @@ func TestJobRunner_DurablePlanexecRunRecordsItsOutcome(t *testing.T) {
 	gt.Value(t, logs[0].LLMCallCount).Equal(int64(4))
 }
 
-// An interactive Job stays on the in-process executor: asking the user mid-run
-// needs a durable place to record the question's await key, which does not exist
-// yet. Left unguarded, such a Job would spawn and silently lose its question.
-func TestJobRunner_InteractiveJobStaysOnTheInProcessExecutor(t *testing.T) {
+// An interactive Job asks the user mid-run: the run parks on a question await
+// recorded against the run log, and the same run — one Process, one run id —
+// continues when the answer is delivered.
+func TestJobRunner_InteractiveJobSuspendsAndResumes(t *testing.T) {
 	ctx := context.Background()
 	j := &model.Job{
 		ID:          "interactive",
-		Prompt:      "ask me something",
+		Prompt:      "find out which environment broke",
 		Strategy:    model.JobStrategyPlanexec,
 		Interactive: true,
 		Events: model.JobEvents{
 			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
 		},
 	}
-	repo, c := setupCase(t, "ws")
+	// The question is posted into the case thread, so an interactive Job needs one.
+	repo, c := setupCaseWithSlack(t, "ws", "C-CASE", "1700000000.000100")
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
 
-	llm := singleReplyLLM("done", 1, 1)
+	llm := scriptedReplyLLM(
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"read","tools":["core_job"]}]}`,
+		`the case does not say which environment`,
+		// The replan round asks rather than finalising.
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+		// After the answer arrives the run replans and finalises.
+		`{"finalize":{"reason":"the environment is known"}}`,
+		`Production broke at 14:00.`,
+	)
+	poster := &recordingQuestionPoster{}
 	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
-	exec := &recordingExecutor{}
 	runner := job.NewJobRunner(job.RunnerDeps{
 		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
-		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+		InteractionPoster: poster,
+		Executors:         map[model.JobStrategy]jobagent.JobExecutor{},
 	})
 	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
 
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
 	gt.NoError(t, runner.Run(ctx, j, job.Event{
 		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
 		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
 	})).Required()
 
-	// The in-process executor ran it, synchronously, so the outcome is already
-	// recorded when Run returns.
-	gt.Array(t, exec.firedJobIDs()).Equal([]string{j.ID})
-	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
-	run, err := repo.JobRun().Get(ctx, key)
+	// The run parks on its question, recording the Process and await the answer
+	// must reach.
+	suspended := awaitJobRunLogStage(t, repo, key, model.JobRunStageAwaitingInput)
+	gt.Value(t, suspended.PendingInteraction).NotNil().Required()
+	gt.String(t, suspended.PendingInteraction.Reason).Equal("which environment?")
+	gt.String(t, suspended.AgentProcessID).NotEqual("")
+	gt.String(t, suspended.AgentAwaitKey).NotEqual("")
+	gt.Number(t, poster.posts()).Equal(1)
+
+	// Answering continues the SAME run — same run id, no second log.
+	gt.NoError(t, runner.Resume(ctx, key, suspended.RunID, []interaction.Answer{
+		{ID: "env", Choice: "production"},
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).Equal(suspended.RunID)
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
 	gt.NoError(t, err).Required()
-	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+	// The await pair is cleared, so a second submit of the same form finds nothing
+	// to answer.
+	gt.String(t, logs[0].AgentAwaitKey).Equal("")
+}
+
+// recordingQuestionPoster stands in for Slack: it records the question form and
+// hands back a message ts, which is what the pending interaction is keyed on.
+type recordingQuestionPoster struct {
+	n atomic.Int32
+}
+
+func (p *recordingQuestionPoster) PostThreadMessage(_ context.Context, _, _ string,
+	_ []goslack.Block, _ string, _ ...slacksvc.PostThreadOption,
+) (string, error) {
+	p.n.Add(1)
+	return "1700000000.000300", nil
+}
+
+func (p *recordingQuestionPoster) UpdateMessage(_ context.Context, _, _ string,
+	_ []goslack.Block, _ string,
+) error {
+	return nil
+}
+
+func (p *recordingQuestionPoster) posts() int { return int(p.n.Load()) }
+
+// awaitJobRunLogStage waits for the run's log to reach want and returns it.
+func awaitJobRunLogStage(t *testing.T, repo interfaces.Repository, key model.JobRunKey,
+	want model.JobRunStage,
+) *model.JobRunLog {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for {
+		logs, err := repo.JobRunLog().List(ctx, key, 10)
+		if err == nil && len(logs) == 1 && logs[0].Stage == want {
+			return logs[0]
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return nil
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 // scriptedReplyLLM answers with replies[i] on the i-th Generate. An extra call

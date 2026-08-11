@@ -273,6 +273,18 @@ type JobRunLog struct {
 	// sub-agent observations and the resume re-enters planexec at the
 	// replan branch with a fresh budget.
 	PendingInteraction *PendingInteraction
+
+	// AgentProcessID and AgentAwaitKey name the suspended agentkit Process and
+	// the await its answer must be delivered to. They are set alongside
+	// PendingInteraction for a run on the durable agent runtime, and are empty for
+	// a run driven by the in-process executor, which resumes by re-entering the
+	// loop rather than by responding to a Process.
+	//
+	// They live here rather than being derived because the resume arrives out of
+	// band, on an instance that never saw the run start: without the pair there is
+	// nothing to call Kernel.Respond on, and the run would wait forever.
+	AgentProcessID string
+	AgentAwaitKey  string
 }
 
 // Validate enforces invariants on a JobRunLog. The repository calls this
