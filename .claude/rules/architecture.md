@@ -322,6 +322,13 @@ performed either by the **sub-agents' tools inside the loop** or by the host
 inside the loop as a commit hook. The old `RunRequest.OnFinalize` /
 `FinalOutputSchema` commit hooks are gone.
 
+On the agentkit runtime the same contract is expressed as a Strategy
+(`planexec.Register`): the host's terminal-output type is `Config[T]`, the reply
+comes back as `Output[T]` through the completion handler, and the plain-text
+hosts set `Config[T]{TextOnly: true}` with `T = TextResult`. The host applies the
+output AFTER the turn, from `onFinish` — the same "never inside the loop" rule,
+now enforced by the fact that the loop and the handler are different processes.
+
 `Run[T]` does accept optional `finalizers ...func(*T) error` that run after
 `T.Validate()` inside the final-output regeneration loop, but they are
 **validation-only and side-effect-free**: they let a host enforce an invariant

@@ -15,6 +15,35 @@
   - **ModeCreate** wires a *validation-only* finalizer (`runCreateTurn`): it checks the proposed fields against the workspace schema (a non-RFC3339 `due_date`, a missing required field, an out-of-schema option), so such an error is fed back and the decision regenerated instead of killing the turn with no feedback. This preserves the "no in-loop commit-retry" stance: the case is committed by `Handler.Create` **after** the turn, and a persistence failure there is surfaced and falls back — it is NOT fed back to the model, which cannot repair an infrastructure error (e.g. a write conflict) by re-emitting the same JSON. The field/validation error (model's fault, model-fixable) and the persistence error (infra's fault, not model-fixable) deliberately take different paths.
   - **Mention-mode materialize** is likewise applied by the host from the returned `*T` **after** the turn (no finalizer) — it updates an already-existing case.
 
+## On agentkit (the Strategy)
+
+The same runtime exists a second time as an agentkit Strategy
+(`planexec.Register` in `strategy.go`), which is what the migrated hosts run on.
+Differences worth knowing before changing it:
+
+- **One transition is one LLM call or one tool call.** The phases are
+  `plan` → `collect` → `replan` → `final`, plus `planner_tool` for a tool call the
+  planner asked for before deciding. A retry (a rejected plan, a rejected terminal
+  output) is a fresh transition, never a loop inside one.
+- **The planner may call tools.** When a planning call returns FunctionCalls
+  instead of a decision, the run diverts to `planner_tool`, runs ONE of them, and
+  comes back. It is bounded by `plannerToolRoundsMax` per planning phase, because
+  those calls are free of the round budget — nothing else would stop a model that
+  only ever looks things up. The planning call that follows sends no user turn:
+  the request is already in the conversation.
+- **A question ENDS the turn** (`Output.Kind == OutputQuestion`) rather than
+  waiting on an await. Holding a run open while a person takes hours would pin its
+  subject and block every later turn on that thread. There is one place this does
+  not fit — an interactive Job, which suspends and resumes under one run id — and
+  that is why interactive Jobs are still on the in-process executor.
+- **`Config[T].Finalizers` take the run's Process metadata**, not just the output:
+  a strategy is registered once at startup and then serves every run, so a
+  finalizer must read its own scope (the workspace, the case) rather than close
+  over one.
+- **`Progress` is stateless.** The message id and the lines so far live in the
+  checkpointed state, so a run picked up by another instance keeps drawing into
+  the same Slack message instead of starting a second one.
+
 ## Where things live
 - `.cckiro` and `.spec` are gitignored (not tracked). Put durable design docs in `docs/develop/` (next to `architecture.md`).
 

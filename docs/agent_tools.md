@@ -203,13 +203,19 @@ interactive/investigation only.
 
 ### Planner metadata tools (`wsmeta`)
 
-Used **only** by the proposal (case-draft) planner — not by Jobs, the mention
-agent, or sub-agents. Listed here for completeness.
+Used **only** by the proposal (case-draft) flow — not by Jobs, the mention
+agent, or the other hosts' sub-agents. Every other host already knows which
+workspace it runs in and hands that workspace's schema to its tools directly;
+the draft flow is the one that must choose.
+
+The planner calls them itself, before it decides anything: a plan-execute
+planner may make tool calls, each as its own transition, and only then emits its
+plan. A planned task may also request the `wsmeta` toolset.
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
 | `list_workspaces` | R | List id / name / description of all registered workspaces. |
-| `get_workspace` | R | Fetch a workspace's identity, full field schema (with option metadata), and sources. The planner must call this before materialising a case so it uses exact field / option ids. |
+| `get_workspace` | R | Fetch a workspace's identity, full field schema (with option metadata), and sources. The planner must call this before proposing a case so it uses exact field / option ids. |
 
 ## Tools available by context
 
@@ -230,7 +236,7 @@ the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 | `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | — | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
 | `memo__*` | ✓ (if memos enabled) | — | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
-| `wsmeta` | — | — | — | — | — | planner only |
+| `wsmeta` | — | — | — | — | — | ✓ (and the planner itself) |
 
 Notes:
 

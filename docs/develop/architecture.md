@@ -383,10 +383,10 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
 
 - Both mention hosts — `casebound` (channel-mode) and `threadcase`
   `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`, the same
-  machinery the Job runner uses. `threadcase` still uses `runtrace.Recorder` +
-  `runtrace.Handler`; `casebound` runs on agentkit, where a run outlives the
-  request that started it, so it opens the log with `runtrace.Open` after Spawn
-  and closes it with `runtrace.FinishRun` from the completion handler.
+  machinery the Job runner uses. On agentkit a run outlives the request that
+  started it, so both open the log with `runtrace.Open` after Spawn and close it
+  with `runtrace.FinishRun` from the completion handler; the pre-agentkit path
+  used `runtrace.Recorder` + `runtrace.Handler` inside the turn instead.
 - Mention runs are not configured Jobs, so each mention turn gets its own
   fresh per-turn JobID and is tagged `EventType = model.EventTypeMention`;
   the page shows a localized "Mention" label (resolved from the eventType, not
