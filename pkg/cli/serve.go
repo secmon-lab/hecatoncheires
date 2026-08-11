@@ -33,6 +33,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -538,6 +539,7 @@ func cmdServe() *cli.Command {
 			// is declared out here because the Job runtime built further down needs
 			// it, while its registration has to happen inside the Kernel build.
 			var durableJobs *job.DurableRuntime
+			var durableDraft *proposal.Durable
 			if llmClient != nil {
 				agentProcessRepo, agentProcessCleanup, apErr := repoCfg.ConfigureAgentProcess(ctx)
 				if apErr != nil {
@@ -581,6 +583,25 @@ func cmdServe() *cli.Command {
 				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(), taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the job agents")
 				}
+				// The case-draft agent is registered only when its usecase exists: it
+				// needs the persistent History/Trace archive, which a deployment without
+				// Cloud Storage does not have.
+				if uc.MentionProposal != nil {
+					locator, lErr := agentkernel.NewLocator(agentProcessRepo)
+					if lErr != nil {
+						return goerr.Wrap(lErr, "failed to build the agent process locator")
+					}
+					d, dErr := proposal.NewDurable(repo, registry,
+						uc.MentionProposal.DurableDraftHost(), locator)
+					if dErr != nil {
+						return goerr.Wrap(dErr, "failed to build the case-draft agent")
+					}
+					if rErr := d.Register(agentRegistry, taskAgent, nil,
+						budgets.Root.Limiter(), processHistory); rErr != nil {
+						return goerr.Wrap(rErr, "failed to register the case-draft agent")
+					}
+					durableDraft = d
+				}
 
 				k, kErr := agentkernel.Build(agentkernel.Deps{
 					Repo:    agentProcessRepo,
@@ -616,6 +637,10 @@ func cmdServe() *cli.Command {
 				agentKernel = k
 				uc.Agent.BindAgentKernel(agentKernel)
 				durableJobs.Bind(agentKernel)
+				if durableDraft != nil {
+					durableDraft.Bind(agentKernel)
+					uc.MentionProposal.BindDurableDraft(durableDraft)
+				}
 				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
 			}
 

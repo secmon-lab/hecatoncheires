@@ -559,6 +559,160 @@ func TestBudgetNoticeWrapsTheRunUp(t *testing.T) {
 	gt.String(t, out.Text).Contains("partial answer")
 }
 
+// recordingTool answers a planner lookup and records that it was called.
+type recordingTool struct {
+	name string
+	mu   sync.Mutex
+	args []map[string]any
+}
+
+func (t *recordingTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        t.name,
+		Description: "look something up",
+		Parameters: map[string]*gollem.Parameter{
+			"id": {Type: gollem.TypeString, Description: "what to look up"},
+		},
+	}
+}
+
+func (t *recordingTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.args = append(t.args, args)
+	return map[string]any{"result": "workspace ws-1 has a severity field"}, nil
+}
+
+func (t *recordingTool) calls() []map[string]any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]map[string]any, len(t.args))
+	copy(out, t.args)
+	return out
+}
+
+// toolCallingPlanner answers the i-th Generate with replies[i]: either a JSON plan
+// or, when the entry is a tool name, a request to call it.
+type toolCallingPlanner struct {
+	mu      sync.Mutex
+	replies []any // string (JSON) or *gollem.FunctionCall
+	n       atomic.Int32
+	inputs  []string
+}
+
+func (p *toolCallingPlanner) client() gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					var b strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
+						}
+					}
+					i := int(p.n.Add(1)) - 1
+					p.mu.Lock()
+					p.inputs = append(p.inputs, b.String())
+					p.mu.Unlock()
+					if i >= len(p.replies) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					switch reply := p.replies[i].(type) {
+					case *gollem.FunctionCall:
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{reply},
+							InputToken: 5, OutputToken: 3}, nil
+					default:
+						return &gollem.Response{Texts: []string{reply.(string)},
+							InputToken: 5, OutputToken: 3}, nil
+					}
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+func (p *toolCallingPlanner) seen() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.inputs))
+	copy(out, p.inputs)
+	return out
+}
+
+// The planner may look something up before it decides. The lookup runs as its own
+// transition, and the decision that follows continues from the conversation rather
+// than re-asking the original request.
+func TestPlannerToolCallRunsBeforeThePlan(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		// round 1: look the workspace up instead of deciding
+		&gollem.FunctionCall{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
+		// with the answer in hand, plan
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`The severity field is set.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+
+	// The tool actually ran, with the planner's arguments.
+	calls := lookup.calls()
+	gt.Array(t, calls).Length(1).Required()
+	gt.Value(t, calls[0]["id"]).Equal("ws-1")
+
+	// The planning call that followed the lookup sent no user turn: the request is
+	// already in the conversation, and re-sending it would ask again as though
+	// nothing had been learnt.
+	seen := planner.seen()
+	gt.Number(t, len(seen)).GreaterOrEqual(2).Required()
+	gt.String(t, seen[0]).Contains("what happened here?")
+	gt.String(t, seen[1]).Equal("")
+}
+
+// A planner that only ever calls tools must be stopped: its lookups are free of
+// the round budget, so nothing else would bound them.
+func TestPlannerToolCallsAreBounded(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	call := func() any {
+		return &gollem.FunctionCall{ID: "c", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}}
+	}
+	planner := &toolCallingPlanner{replies: []any{
+		call(), call(), call(), call(),
+		// The fifth is past the bound: the calls are dropped and this text is parsed
+		// as a plan instead, which fails validation and comes back as a correction.
+		call(),
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Answered.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// Four lookups ran; the fifth request was refused rather than executed.
+	gt.Array(t, lookup.calls()).Length(4)
+	// And the planner was told to decide instead.
+	seen := planner.seen()
+	gt.String(t, seen[5]).Contains("rejected")
+}
+
 func TestRegisterRequiresALimiterAndATaskAgent(t *testing.T) {
 	reg := agentkit.NewRegistry()
 	cfg := generousBudget()

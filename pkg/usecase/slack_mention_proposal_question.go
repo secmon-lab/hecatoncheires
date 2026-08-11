@@ -359,7 +359,7 @@ func missingDraftQuestionItems(pq *model.PendingQuestion, answers map[string]dra
 // input. Validation failures re-render the form with an inline error so
 // the user can fix and resubmit.
 func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
-	if uc.draftUC == nil {
+	if !uc.draftReady() {
 		return goerr.New("draft usecase is not configured")
 	}
 	if callback == nil || action == nil {
@@ -437,7 +437,7 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)
-	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
+	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
 		Trigger:          proposal.TriggerThreadReply,

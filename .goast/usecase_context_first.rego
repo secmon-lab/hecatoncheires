@@ -107,7 +107,10 @@ exempt_name := {
 	"RegisterAgents",
 	"Bind",
 	"BindAgentKernel",
+	"BindDurableDraft",
 	"AttachRunner",
+	# returns the usecase's own completion-handler adapter; a struct literal.
+	"DurableDraftHost",
 	# agentkit Strategy methods. Their signatures are fixed by the library, and
 	# every one of them is pure: Version reports a constant, Init builds the
 	# initial state (agentkit gives it no ctx and no Syscalls precisely so a

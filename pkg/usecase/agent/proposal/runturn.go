@@ -51,6 +51,16 @@ type TurnRequest struct {
 	// Handler implements the host-side terminal action dispatchers and
 	// trace updates.
 	Handler Handler
+
+	// ProcessingTS and PreviewTS name the Slack message this turn's result
+	// replaces, and are mutually exclusive: the "working on it" placeholder a fresh
+	// mention posted, or the existing preview a workspace switch updates in place.
+	//
+	// The in-process path takes them from the Handler it was given; a durable run
+	// carries them on its own record instead, because the call that posted them
+	// returns before the result exists.
+	ProcessingTS string
+	PreviewTS    string
 }
 
 // Status discriminates the terminal shapes RunTurn can return to the host.
@@ -73,6 +83,10 @@ const (
 	// please mention me again with more context"). The runtime does NOT
 	// post anything itself in this case.
 	StatusFallback
+	// StatusStarted means the turn was spawned on the durable agent runtime; its
+	// draft or question is delivered by the run's own completion handler. The
+	// caller has nothing to post.
+	StatusStarted
 )
 
 // Result is the outcome of RunTurn.
@@ -106,6 +120,9 @@ type Result struct {
 func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error) {
 	if err := validateTurnRequest(&req); err != nil {
 		return nil, err
+	}
+	if req.Handler == nil {
+		return nil, goerr.New("Handler is required")
 	}
 	handler := req.Handler
 
@@ -393,9 +410,10 @@ func validateTurnRequest(req *TurnRequest) error {
 	}
 	// TriggerTS may be empty for synthetic triggers (ws-switch). The
 	// turn-lock layer treats empty TriggerKey as "no Slack-side dedup".
-	if req.Handler == nil {
-		return goerr.New("Handler is required")
-	}
+	//
+	// Handler is NOT required here: it is the in-process path's way of reaching
+	// Slack from inside the turn, and RunTurn checks it. A durable run reaches
+	// Slack from its completion handler instead, so it carries none.
 	return nil
 }
 

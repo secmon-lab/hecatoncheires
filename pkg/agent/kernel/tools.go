@@ -18,6 +18,7 @@ import (
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -108,7 +109,9 @@ func defaultToolSets(name agentkit.AgentName) ([]string, error) {
 		return agent.KnownToolSetIDsAssist, nil
 	case AgentJob, AgentJobSimple:
 		return agent.KnownToolSetIDsJob, nil
-	case AgentProposal, AgentTask:
+	case AgentProposal:
+		return agent.KnownToolSetIDsProposal, nil
+	case AgentTask:
 		return agent.KnownToolSetIDs, nil
 	default:
 		return nil, goerr.New("no default tool palette for this agent", goerr.V("agent", name))
@@ -207,6 +210,10 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 			WorkspaceID: sc.WorkspaceID,
 			Accessor:    d.KnowledgeAccessor,
 		},
+		// The workspace-metadata tools read the registry, not one workspace, which
+		// is exactly why the case-draft flow needs them: it has not chosen a
+		// workspace yet.
+		WSMeta: wsmeta.Deps{Registry: d.Registry, SourceRepo: d.Repo.Source()},
 	}
 
 	if entry != nil {

@@ -14,6 +14,7 @@ import (
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 )
 
@@ -74,6 +75,11 @@ const (
 	// A Job's output reaches people only through it, which is why an unattended
 	// run has it while an interactive turn — whose reply its host posts — does not.
 	ToolSetSlackPost = "slack_post"
+	// ToolSetWSMeta is the workspace-metadata read set (list_workspaces /
+	// get_workspace). It is what the case-draft planner picks a workspace with:
+	// that flow is not pinned to one workspace, so it must read the candidates'
+	// field schemas and configured sources before it can propose anything.
+	ToolSetWSMeta = "wsmeta"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -169,6 +175,12 @@ var KnownToolSetIDsJob = []string{
 	ToolSetKnowledge,
 }
 
+// KnownToolSetIDsProposal is the palette of the case-draft agent. It is
+// KnownToolSetIDs plus wsmeta: the draft flow is not pinned to a workspace, so
+// reading the candidates' field schemas and configured sources is the first thing
+// it must do.
+var KnownToolSetIDsProposal = append(append([]string{}, KnownToolSetIDs...), ToolSetWSMeta)
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -224,6 +236,10 @@ type ToolSetResolver struct {
 	// gated on the planner requesting ToolSetCaseMulti. Used by the
 	// workspace-channel agent, never the per-case mention / proposal planners.
 	caseMulti []gollem.Tool
+	// wsmeta is the workspace-metadata read set (ToolSetWSMeta): the registered
+	// workspaces and their field schemas / sources. Empty unless a registry is
+	// wired.
+	wsmeta []gollem.Tool
 }
 
 // ToolSetDeps carries the per-turn deps that flavor each toolset's binding.
@@ -271,6 +287,11 @@ type ToolSetDeps struct {
 	// schema are present; a zero value leaves the toolset empty so requesting
 	// the ID resolves to nothing.
 	Memo memotool.Deps
+
+	// WSMeta backs the wsmeta toolset (list_workspaces / get_workspace). Only the
+	// case-draft flow needs it: every other host already knows which workspace it
+	// runs in, and hands that workspace's schema to its tools directly.
+	WSMeta wsmeta.Deps
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -332,6 +353,12 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	if d.SlackPost.Poster != nil && d.SlackPost.ChannelID != "" {
 		slackPost = slackpost.New(d.SlackPost)
 	}
+	// The workspace-metadata tools read the registry, so they need nothing
+	// per-case; a host that wires no registry leaves the set empty.
+	var wsmetaTools []gollem.Tool
+	if d.WSMeta.Registry != nil {
+		wsmetaTools = wsmeta.New(d.WSMeta)
+	}
 	return &ToolSetResolver{
 		core:           coreTools,
 		coreFull:       coreFullTools,
@@ -348,6 +375,7 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 		caseWrite:      caseWrite,
 		knowledge:      knowledge,
 		caseMulti:      caseMulti,
+		wsmeta:         wsmetaTools,
 	}
 }
 
@@ -443,6 +471,8 @@ func (r *ToolSetResolver) setFor(id string) []gollem.Tool {
 		return r.caseMulti
 	case ToolSetMemo:
 		return r.memo
+	case ToolSetWSMeta:
+		return r.wsmeta
 	default:
 		return nil
 	}

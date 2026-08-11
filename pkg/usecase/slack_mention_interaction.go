@@ -44,7 +44,7 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
-	if uc.draftUC == nil {
+	if !uc.draftReady() {
 		return goerr.New("draft usecase is not configured")
 	}
 	proposalID, ok := parseProposalIDFromSelectorBlockID(action.BlockID)
@@ -132,7 +132,7 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 	// resumes against the new workspace without re-running its own selection
 	// — matches the "Trigger context" branch in the planner prompt.
 	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
-	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
+	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
 		Trigger:          proposal.TriggerWSSwitch,
@@ -140,6 +140,7 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
 		Handler:          handler,
+		PreviewTS:        d.EphemeralMessageTS,
 	})
 	if runErr != nil {
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)

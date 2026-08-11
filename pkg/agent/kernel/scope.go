@@ -30,8 +30,10 @@ const (
 	metaJobRunID    = "job_run_id"
 	metaEventType   = "event_type"
 	metaSlotGated   = "slot_gated"
-	metaUIChannelID = "ui_channel_id"
-	metaUIThreadTS  = "ui_thread_ts"
+	metaUIChannelID  = "ui_channel_id"
+	metaUIThreadTS   = "ui_thread_ts"
+	metaProcessingTS = "processing_ts"
+	metaPreviewTS    = "preview_ts"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -72,6 +74,14 @@ type Scope struct {
 	// run. UITarget resolves that.
 	UIChannelID string
 	UIThreadTS  string
+	// ProcessingTS and PreviewTS name the Slack message a case-draft turn's result
+	// replaces, and are mutually exclusive: ProcessingTS is the "working on it"
+	// placeholder a fresh mention posted, PreviewTS is the existing draft preview a
+	// workspace switch updates in place. They live on the scope because the turn
+	// that posted them returns long before the result exists, and the completion
+	// handler runs on whichever instance committed the last transition.
+	ProcessingTS string
+	PreviewTS    string
 	// SessionID is the model.Session this thread belongs to. It doubles as the
 	// turn-lock subject id.
 	SessionID string
@@ -113,6 +123,13 @@ func (s Scope) Validate() error {
 	if (s.UIChannelID == "") != (s.UIThreadTS == "") {
 		return goerr.New("ui channel id and ui thread ts must be set together",
 			goerr.V("ui_channel_id", s.UIChannelID), goerr.V("ui_thread_ts", s.UIThreadTS))
+	}
+	// The two name different lifecycles of the same slot — a placeholder to
+	// replace, or a preview to update in place — so a run carrying both would have
+	// two answers to "where does the result go".
+	if s.ProcessingTS != "" && s.PreviewTS != "" {
+		return goerr.New("a run may name a processing placeholder or a preview to update, not both",
+			goerr.V("processing_ts", s.ProcessingTS), goerr.V("preview_ts", s.PreviewTS))
 	}
 	if s.CaseID != 0 && s.WorkspaceID == "" {
 		return goerr.New("workspace id is required when a case id is set",
@@ -162,6 +179,8 @@ func (s Scope) Metadata() map[string]string {
 	put(metaThreadTS, s.ThreadTS)
 	put(metaUIChannelID, s.UIChannelID)
 	put(metaUIThreadTS, s.UIThreadTS)
+	put(metaProcessingTS, s.ProcessingTS)
+	put(metaPreviewTS, s.PreviewTS)
 	put(metaSessionID, s.SessionID)
 	put(metaActorUserID, s.ActorUserID)
 	put(metaLang, s.Lang)
@@ -191,8 +210,10 @@ func ScopeFrom(m map[string]string) Scope {
 		CaseID:      caseID,
 		ChannelID:   m[metaChannelID],
 		ThreadTS:    m[metaThreadTS],
-		UIChannelID: m[metaUIChannelID],
-		UIThreadTS:  m[metaUIThreadTS],
+		UIChannelID:  m[metaUIChannelID],
+		UIThreadTS:   m[metaUIThreadTS],
+		ProcessingTS: m[metaProcessingTS],
+		PreviewTS:    m[metaPreviewTS],
 		SessionID:   m[metaSessionID],
 		ActorUserID: m[metaActorUserID],
 		Lang:        m[metaLang],

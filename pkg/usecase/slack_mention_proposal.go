@@ -42,6 +42,10 @@ type MentionProposalUseCase struct {
 	slackService slacksvc.Service
 	collector    *slacksvc.MessageCollector
 	draftUC      *proposal.UseCase
+	// durableDraft runs the same agent on the agentkit runtime. It is filled by
+	// BindDurableDraft, so a deployment that has not built a Kernel keeps taking
+	// draftUC's in-process path.
+	durableDraft *proposal.Durable
 }
 
 // NewMentionProposalUseCase constructs a MentionProposalUseCase. All dependencies
@@ -74,7 +78,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	if ev == nil {
 		return goerr.New("AppMentionEvent is nil")
 	}
-	if uc.draftUC == nil {
+	if !uc.draftReady() {
 		return goerr.New("draft usecase is not configured")
 	}
 	logger := logging.From(ctx)
@@ -172,7 +176,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 
 	userInput := buildProposalUserInput(d, mentionText, channelInfo)
 
-	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
+	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
 		Trigger:          proposal.TriggerAppMention,
@@ -180,6 +184,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
 		Handler:          handler,
+		ProcessingTS:     processingTS,
 	})
 	if runErr != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
@@ -347,7 +352,7 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 	if ev == nil {
 		return goerr.New("MessageEvent is nil")
 	}
-	if uc.draftUC == nil {
+	if !uc.draftReady() {
 		return goerr.New("draft usecase is not configured")
 	}
 	logger := logging.From(ctx)
@@ -394,7 +399,7 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		candidates, proposalID, "", "",
 	)
 
-	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
+	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session: session,
 		// ev.Text is used raw here, unlike HandleAppMention: shouldResumeOnReply
 		// only lets through events with no SubType and no BotID, so this path

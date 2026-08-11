@@ -3,6 +3,7 @@ package planexec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,11 @@ const (
 	phaseReplan = "replan"
 	// phaseFinal produces the terminal output.
 	phaseFinal = "final"
+	// phasePlannerTool runs ONE tool call the planner asked for before it decides.
+	// It is a phase of its own, rather than a loop inside the planning transition,
+	// for the same reason every other step is: one transition is one LLM call or
+	// one tool call, so a crash costs at most one of them.
+	phasePlannerTool = "planner_tool"
 )
 
 // Model roles. A host binds them to a specific model through the Kernel; an
@@ -196,6 +202,16 @@ type state struct {
 	// Wrap records that the budget notice was seen, so the run stops planning and
 	// goes to produce an answer with what it has.
 	Wrap bool `json:"wrap,omitempty"`
+	// PendingCalls are the tool calls the planner asked for before deciding, and
+	// this run has not made yet. They are consumed one per transition.
+	PendingCalls []*gollem.FunctionCall `json:"pending_calls,omitempty"`
+	// AfterTool is the phase to return to once PendingCalls is drained — the
+	// planning phase that asked for them.
+	AfterTool string `json:"after_tool,omitempty"`
+	// PlannerToolRounds counts how many times the planner has asked for tools
+	// within one planning phase, so a model that only ever calls tools cannot spin
+	// forever inside a single round.
+	PlannerToolRounds int `json:"planner_tool_rounds,omitempty"`
 }
 
 // taskRef ties a planned task to the child Process running it. The plan fields
@@ -286,6 +302,8 @@ func (s *strategy[T]) Step(ctx context.Context, sys agentkit.Syscalls, st state)
 		return s.stepReplan(ctx, sys, st)
 	case phaseFinal:
 		return s.stepFinal(ctx, sys, st)
+	case phasePlannerTool:
+		return s.stepPlannerTool(ctx, sys, st)
 	default:
 		return st, agentkit.Decision[Output[T]]{}, goerr.New("planexec: unknown phase",
 			goerr.V("phase", st.Phase))
@@ -314,13 +332,17 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 		allowDirect:  st.Input.AllowDirect,
 	})
 
-	res, err := sys.Session().Generate(ctx, []gollem.Input{gollem.Text(st.NextInput)},
+	res, err := sys.Session().Generate(ctx, plannerInput(st),
 		agentkit.WithSystemPrompt(prompt),
 		agentkit.WithSchema(schema),
 		agentkit.WithRole(RolePlanner),
 	)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: planner generate")
+	}
+
+	if next, diverted := s.divertToTools(st, res, phasePlan); diverted {
+		return next, agentkit.Continue[Output[T]](), nil
 	}
 
 	plan, perr := parsePlanResult([]byte(strings.Join(res.Texts, "\n")),
@@ -330,10 +352,86 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 		return st, agentkit.Continue[Output[T]](), nil
 	}
 
+	st.PlannerToolRounds = 0
 	if plan.Direct != nil {
 		return s.launchDirect(ctx, sys, st, plan.Direct)
 	}
 	return s.launchRound(ctx, sys, st, plan.Tasks)
+}
+
+// plannerInput is the user turn a planning call sends.
+//
+// An empty NextInput sends nothing and continues from the conversation as it
+// stands, which is what follows the tool results a previous transition appended:
+// re-sending the original request there would ask the same question again as
+// though nothing had been learnt.
+func plannerInput(st state) []gollem.Input {
+	if st.NextInput == "" {
+		return nil
+	}
+	return []gollem.Input{gollem.Text(st.NextInput)}
+}
+
+// plannerToolRoundsMax bounds how many times the planner may ask for tools before
+// committing to a decision, within one planning phase.
+//
+// It exists because the planner's tool calls are free of the round budget — they
+// are not sub-agent work — so a model that answers every prompt with another
+// lookup would otherwise only be stopped by the token ceiling, having produced
+// nothing. Past the bound the tools are withheld and the planner must decide from
+// what it has.
+const plannerToolRoundsMax = 4
+
+// divertToTools sends the run to the tool phase when the planner asked for tools
+// instead of deciding, and reports whether it did.
+//
+// Beyond plannerToolRoundsMax it does not divert: the calls are dropped and the
+// planner's own text is parsed as usual, which fails validation and comes back as
+// a correction telling it to decide.
+func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from string) (state, bool) {
+	if len(res.FunctionCalls) == 0 || st.PlannerToolRounds >= plannerToolRoundsMax {
+		return st, false
+	}
+	st.PendingCalls = res.FunctionCalls
+	st.AfterTool = from
+	st.PlannerToolRounds++
+	st.Phase = phasePlannerTool
+	// The next planning call continues from the conversation, which by then carries
+	// the tool results; re-sending the original input would ask the same question
+	// again as though nothing had been learnt.
+	st.NextInput = ""
+	return st, true
+}
+
+// stepPlannerTool runs exactly one tool call the planner asked for.
+//
+// A tool that fails is not a transition failure: CallTool appends a tool_response
+// carrying the error either way, so the planner gets to react to the failure on
+// its next call. A refusal from the budget is the one error that must not be
+// swallowed — continuing past it would spend beyond a ceiling its owner declared
+// closed.
+func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
+	if len(st.PendingCalls) == 0 {
+		st.Phase = st.AfterTool
+		return st, agentkit.Continue[Output[T]](), nil
+	}
+
+	call := st.PendingCalls[0]
+	st.PendingCalls = st.PendingCalls[1:]
+	if call != nil {
+		if _, err := sys.Session().CallTool(ctx, *call); err != nil {
+			if errors.Is(err, agentkit.ErrLimitExceeded) {
+				return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err,
+					"planexec: planner tool call refused by the budget",
+					goerr.V("tool", call.Name))
+			}
+		}
+	}
+
+	if len(st.PendingCalls) == 0 {
+		st.Phase = st.AfterTool
+	}
+	return st, agentkit.Continue[Output[T]](), nil
 }
 
 // stepCollect folds the finished children into observations. It makes no LLM
@@ -409,13 +507,17 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 		allowQuestion: st.Input.AllowQuestion,
 	})
 
-	res, err := sys.Session().Generate(ctx, []gollem.Input{gollem.Text(st.NextInput)},
+	res, err := sys.Session().Generate(ctx, plannerInput(st),
 		agentkit.WithSystemPrompt(prompt),
 		agentkit.WithSchema(schema),
 		agentkit.WithRole(RolePlanner),
 	)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: replanner generate")
+	}
+
+	if next, diverted := s.divertToTools(st, res, phaseReplan); diverted {
+		return next, agentkit.Continue[Output[T]](), nil
 	}
 
 	rr, perr := parseReplanResult([]byte(strings.Join(res.Texts, "\n")),
@@ -425,6 +527,7 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 		return st, agentkit.Continue[Output[T]](), nil
 	}
 
+	st.PlannerToolRounds = 0
 	switch {
 	case rr.Question != nil:
 		// The turn ENDS on a question rather than waiting on an await. Holding the
