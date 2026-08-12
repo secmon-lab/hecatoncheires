@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 
@@ -34,7 +35,20 @@ func (h proposalHost) Ask(ctx context.Context, target proposal.Target, q proposa
 	if err != nil {
 		return err
 	}
-	return handler.Question(ctx, session, q)
+	if err := handler.Question(ctx, session, q); err != nil {
+		return err
+	}
+	// The form records itself on the Session in memory; persisting it is this
+	// host's job. The in-process path got that for free — the runtime held the
+	// same Session instance and wrote it when the turn ended — but here the run
+	// has no instance to write, so a form left unsaved would be read back as
+	// stale and the user's answer refused.
+	session.UpdatedAt = time.Now().UTC()
+	if err := h.uc.repo.Session().Put(ctx, session); err != nil {
+		return goerr.Wrap(err, "persist the pending question",
+			goerr.V("session_id", session.ID))
+	}
+	return nil
 }
 
 // ReportFallback removes the placeholder and tells the user the turn reached no

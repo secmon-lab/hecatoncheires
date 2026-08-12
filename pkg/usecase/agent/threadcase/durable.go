@@ -193,6 +193,20 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		agentkit.WithMetadata(scope.Metadata()),
 	}
 
+	// The mention this turn processes is what the next turn's delta scan starts
+	// after. It is stamped BEFORE the spawn, not after: the moment the Process
+	// exists a worker may claim it, and a run that finishes first writes the
+	// Session too — a full write from here afterwards would clobber the outcome it
+	// recorded, including a pending question the user is looking at.
+	//
+	// Stamping a turn that then gets refused as busy is the harmless direction: the
+	// mention it names was genuinely seen, and the turn holding the thread is
+	// processing it.
+	if req.MentionTS != "" {
+		req.Session.LastMentionTS = req.MentionTS
+		d.persistSession(ctx, req.Session)
+	}
+
 	var err error
 	if isCreate {
 		_, err = d.create.Spawn(ctx, d.kernel, in, opts...)
@@ -211,16 +225,14 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 	// The run record is opened only once the run exists, so a refused turn leaves
 	// no orphan RUNNING row. A create turn keeps none: it runs before the case
 	// exists, and the case agent page lists runs BY case.
+	//
+	// A very short run can finish before this line, leaving a RUNNING log its
+	// completion handler already passed. That row is never LISTED — the case agent
+	// page reads the JobRun summary, which is materialised at Finish — so the
+	// outcome is the same as a run interrupted before it finished, which the page
+	// already accounts for.
 	if !isCreate {
 		d.openRunLog(ctx, scope, in.SystemPrompt)
-	}
-
-	// The mention this turn processes is what the next turn's delta scan starts
-	// after. It is stamped now rather than at the end because a second mention
-	// arriving mid-run must not re-read messages this run already holds.
-	if req.MentionTS != "" {
-		req.Session.LastMentionTS = req.MentionTS
-		d.persistSession(ctx, req.Session)
 	}
 
 	return &Result{Status: StatusStarted}, nil

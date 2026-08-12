@@ -1015,6 +1015,19 @@ func (s *strategy[T]) note(ctx context.Context, st state, line string) state {
 	if s.progress == nil || st.Input.Progress.isZero() {
 		return st
 	}
+	// KNOWN LIMITATION, deliberately accepted. The draw happens inside the same
+	// transition as the LLM call that follows it, so a call that errors leaves a
+	// message Slack has already accepted while the id it returned is discarded with
+	// the uncommitted state. The retry then posts a second message, and the user
+	// sees the run's progress twice.
+	//
+	// Making the draw its own committed transition would fix it, at the cost of a
+	// checkpoint write per progress line — roughly doubling the state writes of
+	// every run. Skipping the draw on a retry does NOT fix it: the first attempt's
+	// message is already posted, and the retry would simply post the next line as a
+	// second message instead. Since the damage is one duplicated progress message —
+	// no duplicated reply, case write or tool call — the write cost is not worth
+	// paying. Revisit if Slack ever offers an idempotency key on postMessage.
 	ts, err := s.progress.Render(ctx, st.Input.Progress, st.Progress.MessageTS, st.Progress.Lines)
 	if err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "planexec: draw the progress message"),

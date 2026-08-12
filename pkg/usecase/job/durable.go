@@ -136,12 +136,17 @@ func (d *DurableRuntime) handles(strategy model.JobStrategy, interactive bool) b
 }
 
 // spawnParams is what starting a durable Job run needs beyond the prompts.
-//
-// It carries no Slack coordinates. The completion handler reloads the case and
-// posts from that, because a run can finish hours later on another instance and
-// the channel or thread it should report into may have changed in between —
-// snapshotting them here would post into wherever they pointed at spawn.
 type spawnParams struct {
+	// channelID and sessionThreadTS locate the operational-log thread this run
+	// already opened with its "starting" marker. They are carried rather than
+	// re-derived because that thread belongs to THIS run — for a channel-mode Case
+	// the marker rooted a fresh thread, which nothing on the Case records — so a
+	// completion handler that reloaded the Case could not find it and would post
+	// nowhere. Empty when the marker could not be posted, which is not a reason to
+	// refuse the run.
+	channelID       string
+	sessionThreadTS string
+
 	job          *model.Job
 	event        Event
 	key          model.JobRunKey
@@ -180,6 +185,13 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 		// nothing, whereas a lifecycle event, a manual Run or an interactive
 		// resume is a single user-visible action with no such retry.
 		SlotGated: p.event.Domain == model.JobEventDomainScheduled,
+	}
+	// Both or neither: the scope rejects a half-set pair, and a marker that could
+	// not be posted leaves the run with no thread to report into rather than
+	// stopping it.
+	if p.channelID != "" && p.sessionThreadTS != "" {
+		scope.ChannelID = p.channelID
+		scope.ThreadTS = p.sessionThreadTS
 	}
 	if err := agentkernel.ValidateSpawn(name, scope); err != nil {
 		return "", goerr.Wrap(err, "validate the job run scope", goerr.V("job_id", p.key.JobID))

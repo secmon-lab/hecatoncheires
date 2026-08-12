@@ -623,6 +623,10 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			systemPrompt: systemPrompt,
 			userPrompt:   userPrompt,
 			interactive:  j.Interactive,
+			// The thread the "starting" marker just opened, so the completion marker
+			// lands under it rather than nowhere.
+			channelID:       channelID,
+			sessionThreadTS: sessionThreadTS,
 		})
 		if spawnErr != nil {
 			// Nothing is running, so this is the run's outcome: record it rather

@@ -11,6 +11,7 @@ import (
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 )
 
 // NewSlackDraftHandlerForTest builds a slackDraftHandler with the
@@ -27,6 +28,21 @@ func NewSlackDraftHandlerForTest(
 		channelID, threadTS, "1700000000.000001", "U-test",
 		nil, model.CaseProposalID("draft-test"), "", "",
 	)
+}
+
+// ThreadcaseAskQuestionForTest drives the thread-mode host's question delivery —
+// the completion-handler path a durable run takes when its planner asks the user.
+func ThreadcaseAskQuestionForTest(uc *AgentUseCase, ctx context.Context,
+	target threadcase.Target, q threadcase.QuestionPayload,
+) error {
+	return threadcaseHost{uc: uc}.AskQuestion(ctx, target, q)
+}
+
+// ProposalAskForTest drives the case-draft host's question delivery.
+func ProposalAskForTest(uc *MentionProposalUseCase, ctx context.Context,
+	target proposal.Target, q proposal.QuestionPayload,
+) error {
+	return proposalHost{uc: uc}.Ask(ctx, target, q)
 }
 
 // CreateThreadBoundCaseForTest exposes the unexported createThreadBoundCase to

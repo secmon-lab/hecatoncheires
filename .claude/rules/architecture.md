@@ -500,6 +500,35 @@ contract, not a Serve-option tweak.
 The same reasoning is why a new side-effecting tool must not be written assuming
 "it runs at most once".
 
+## Agent runtime: the completion handler is best-effort (KNOWN GAP)
+
+agentkit calls `WithOnFinish` once, after the terminal transition has committed,
+and does not retry it (ADR-0014). A process that dies between the commit and the
+call loses whatever the handler was going to do. Every durable host's outward
+work is in that handler: the Slack reply, the case creation, the run-log close.
+
+For a REPLY this is parity, not a regression — the pre-agentkit runtime posted
+in-process, so the same crash lost the same reply.
+
+For a JOB it is a real, if narrow, widening. `runtrace.FinishRun` is what calls
+`JobRun.RecordRun`, which advances `LastRunAt` and materialises the summary the
+case agent page lists. Lose the handler and the run log stays RUNNING, the
+summary keeps its previous timestamp, and the scheduler treats the Job as still
+due — so a run whose work actually completed can be run again. The pre-agentkit
+path had the same outcome for a crash DURING the run; what is new is the sliver
+between "the agent finished" and "the record says so".
+
+Closing it needs the terminal transition and the record of what to do next to
+commit together — an outbox row written in the same commit, drained by a worker,
+keyed on `(ProcessID, operation)` so a redelivery is a no-op. That is the
+"outbox-backed delivery" item, and it is NOT done. Until it is:
+
+- **Do not add a new side effect to a completion handler and call it durable.**
+  It is best-effort, exactly like the reply beside it.
+- **Do not treat `NoDuplicateSideEffects()` as covering this.** That option bounds
+  unclean reclaims of a transition; it says nothing about the handler that runs
+  after the transition committed.
+
 ## Budget
 
 The budget model is the combination of **two** controls — there is NO

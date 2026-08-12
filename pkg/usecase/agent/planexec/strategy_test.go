@@ -713,6 +713,58 @@ func TestPlannerToolCallsAreBounded(t *testing.T) {
 	gt.String(t, seen[5]).Contains("rejected")
 }
 
+// countingProgress counts how many NEW messages were posted, which is the thing
+// a duplicate would show up as.
+type countingProgress struct {
+	mu     sync.Mutex
+	posts  int
+	update int
+}
+
+func (p *countingProgress) Render(_ context.Context, _ planexec.ProgressTarget,
+	messageTS string, _ []string,
+) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if messageTS == "" {
+		p.posts++
+	} else {
+		p.update++
+	}
+	return "1700000000.000001", nil
+}
+
+func (p *countingProgress) counts() (posts, updates int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.posts, p.update
+}
+
+// A run's milestones go into ONE message that is updated in place, across every
+// transition of the run — which is what makes the message id checkpointed state
+// rather than an in-process variable. Without that, a run picked up by another
+// instance would start a second message.
+func TestProgressDrawsOneMessageAndUpdatesIt(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Done.`,
+	}}
+	progress := &countingProgress{}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), progress, nil)
+
+	in := textInput()
+	in.Progress = planexec.ProgressTarget{ChannelID: "C1", ThreadTS: "1700000000.000001"}
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// One post, then updates for every later milestone.
+	posts, updates := progress.counts()
+	gt.Number(t, posts).Equal(1)
+	gt.Number(t, updates).GreaterOrEqual(3)
+}
+
 // recordingAsker captures the question and the await key it must be answered on.
 type recordingAsker struct {
 	mu       sync.Mutex

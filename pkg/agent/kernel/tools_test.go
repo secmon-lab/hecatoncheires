@@ -343,6 +343,53 @@ func TestToolFactoryBuildsTheJobPalette(t *testing.T) {
 	}
 }
 
+// The case-draft agent is the one that has NOT chosen a workspace yet, so it is
+// the one that gets the workspace-metadata tools. Every other host already knows
+// which workspace it runs in.
+func TestToolFactoryBuildsTheProposalPalette(t *testing.T) {
+	ctx := context.Background()
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:     memory.New(),
+		Registry: testRegistry(channelWorkspace()),
+		SlackBot: stubSlackBot{},
+	})
+	gt.NoError(t, err).Required()
+
+	// No workspace and no case: choosing one is what the run is for. The actor is
+	// required — a draft turn acts on a person's behalf.
+	sc := kernel.Scope{ActorUserID: "U-HUMAN", ToolSets: []string{kernel.ToolSetsAll}}
+	tools, err := factory(ctx, newProcess(kernel.AgentProposal, sc))
+	gt.NoError(t, err).Required()
+	names := toolNames(tools)
+
+	gt.Bool(t, slices.Contains(names, "list_workspaces")).True()
+	gt.Bool(t, slices.Contains(names, "get_workspace")).True()
+	// And the read-only investigation tools it plans tasks with.
+	gt.Bool(t, slices.Contains(names, "slack__get_messages")).True()
+	// No writer tools: nothing is committed until a human submits the preview.
+	gt.Bool(t, slices.Contains(names, "core__create_action")).False()
+	gt.Bool(t, slices.Contains(names, "case__update_case")).False()
+}
+
+// A sub-agent asking for the workspace-metadata toolset by name gets it, which is
+// what lets a planned task read a candidate workspace's schema.
+func TestToolFactoryResolvesTheWSMetaToolSet(t *testing.T) {
+	ctx := context.Background()
+	factory, err := kernel.NewToolFactory(kernel.ToolDeps{
+		Repo:     memory.New(),
+		Registry: testRegistry(channelWorkspace()),
+	})
+	gt.NoError(t, err).Required()
+
+	tools, err := factory(ctx, newProcess(kernel.AgentTask, kernel.Scope{
+		ToolSets: []string{agent.ToolSetWSMeta},
+	}))
+	gt.NoError(t, err).Required()
+	names := toolNames(tools)
+	gt.Bool(t, slices.Contains(names, "list_workspaces")).True()
+	gt.Bool(t, slices.Contains(names, "get_workspace")).True()
+}
+
 // TestToolFactoryRefusesAnAgentWithNoPalette pins that an agent kind with no
 // declared palette fails loudly rather than falling back to a permissive one. The
 // palettes differ in ways that matter — an unattended run is deliberately denied
