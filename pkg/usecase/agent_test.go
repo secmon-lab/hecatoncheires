@@ -234,6 +234,24 @@ var testAgentBudget = budget.Config{
 func startAgentRuntime(t *testing.T, d agentRuntimeDeps) {
 	t.Helper()
 
+	k := bindAgentRuntimeWithoutWorker(t, d)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
+// bindAgentRuntimeWithoutWorker wires the runtime but never claims anything, so a
+// spawned run stays exactly where the host left it. Use it to assert what the
+// HOST did — the Session it claimed, the record it opened — without racing the
+// agent that would otherwise be finishing the run at the same time.
+func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.Kernel {
+	t.Helper()
+
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
@@ -256,14 +274,7 @@ func startAgentRuntime(t *testing.T, d agentRuntimeDeps) {
 	})
 	gt.NoError(t, err).Required()
 	d.UC.BindAgentKernel(k)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+	return k
 }
 
 // waitForPosts blocks until the mock has recorded at least want messages. The

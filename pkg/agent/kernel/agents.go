@@ -80,9 +80,15 @@ func RegisterTaskAgent(reg *agentkit.Registry, limiter agentkit.Limiter,
 // schedule with nobody behind them, so there is no actor to name and their
 // system-context access is the intended one. A sub-agent inherits its parent's
 // metadata, so it carries whatever actor the parent was given.
+// AgentCaseThreadCreate is the scoped exception. A thread-mode case may be
+// raised by an integration bot's intake post that names no human, so demanding an
+// actor there would refuse a legitimate creation — the same relaxation
+// Case.ValidateNew already makes for the reporter. It is safe because a create
+// turn's palette (KnownToolSetIDsNoCore) carries no case-reading tool at all:
+// there is no private case for a missing actor to widen access to.
 func RequiresActor(name agentkit.AgentName) bool {
 	switch name {
-	case AgentCaseChannel, AgentCaseThread, AgentCaseThreadCreate, AgentWorkspace, AgentProposal:
+	case AgentCaseChannel, AgentCaseThread, AgentWorkspace, AgentProposal:
 		return true
 	default:
 		return false

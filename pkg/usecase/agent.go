@@ -50,13 +50,9 @@ type AgentUseCase struct {
 	// the LLM client is configured.
 	threadcase *threadcase.UseCase
 
-	// workspaceAgent runs the workspace-channel cross-case agent (channel mode).
-	// Non-nil whenever the LLM client is configured.
-	workspaceAgent *wsagent.UseCase
-
-	// durableWorkspaceAgent and durableThreadcase run the same agents on the
-	// agentkit runtime. They are filled by RegisterAgents, so a deployment that has
-	// not built a Kernel keeps taking the in-process paths above.
+	// durableWorkspaceAgent runs the workspace-channel cross-case agent and
+	// durableThreadcase the thread-mode create / mention agents. Both are filled by
+	// RegisterAgents, which runs only when a Kernel is being built.
 	durableWorkspaceAgent *wsagent.Durable
 	durableThreadcase     *threadcase.Durable
 }
@@ -180,15 +176,6 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			uc.threadcase = tc
 		}
 
-		// The workspace-channel agent reuses the same backend deps + runner as
-		// threadcase; it only differs in tool set (cross-case) and access actor.
-		if runnerErr == nil {
-			if wa, waErr := wsagent.New(commonDeps, runner); waErr != nil {
-				errutil.Handle(context.Background(), goerr.Wrap(waErr, "failed to build workspace agent usecase"), "failed to build workspace agent usecase")
-			} else {
-				uc.workspaceAgent = wa
-			}
-		}
 	}
 	return uc
 }

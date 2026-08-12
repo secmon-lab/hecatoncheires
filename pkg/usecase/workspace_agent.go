@@ -30,7 +30,7 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 		return goerr.New("msg and entry are required")
 	}
 	logger := logging.From(ctx)
-	if uc.workspaceAgent == nil && uc.durableWorkspaceAgent == nil {
+	if uc.durableWorkspaceAgent == nil {
 		logger.Debug("workspace agent not configured; skipping workspace channel mention")
 		return nil
 	}
@@ -77,33 +77,25 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 	// Locale lookup is an uncached Slack call, so it happens after the claim.
 	ctx = contextWithSlackUserLang(ctx, uc.deps.SlackService, msg.UserID())
 
-	// Slack-side progress trace (per-mention; not persisted). finalize posts the
-	// agent's final reply in place of the last transient line.
-	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
-
-	req := wsagent.TurnRequest{
+	// The run outlives this call: it draws its own progress into the thread and
+	// its answer is posted by the completion handler, from whichever instance
+	// commits the last transition.
+	res, runErr := uc.durableWorkspaceAgent.StartTurn(ctx, wsagent.TurnRequest{
 		Session:     session,
 		Workspace:   entry,
 		ActorID:     msg.UserID(),
 		MentionText: msg.Text(),
 		TriggerTS:   msg.ID(),
-		Handler: wsagent.HandlerFuncs{
-			TraceAppendFn:  traceMsg.appendLine,
-			TraceReplaceFn: traceMsg.replaceLine,
-		},
-	}
-
-	// The durable runtime is preferred once it is wired: the run survives an
-	// instance restart and its reply is posted by the completion handler. The
-	// in-process path stays for a deployment built without a Kernel.
-	res, runErr := uc.runWorkspaceAgentTurn(ctx, req)
+	})
 	if runErr != nil {
-		uc.replyUserError(ctx, runErr, "workspace agent run turn", msg.ChannelID(), threadTS)
+		uc.replyUserError(ctx, runErr, "workspace agent start turn", msg.ChannelID(), threadTS)
 		return nil
 	}
 
 	switch res.Status {
-	case wsagent.StatusStarted:
+	case wsagent.StatusStarted, wsagent.StatusIdempotent:
+		// Started: the answer arrives from the run's completion handler.
+		// Idempotent: a re-delivery of an event already being handled.
 		return nil
 	case wsagent.StatusBusy:
 		busyMsg := i18n.T(ctx, i18n.MsgKeyAgentBusy)
@@ -111,28 +103,7 @@ func (uc *AgentUseCase) HandleWorkspaceAgentMention(ctx context.Context, msg *sl
 			errutil.Handle(ctx, postErr, "post workspace-agent busy notice")
 		}
 		return nil
-	case wsagent.StatusIdempotent:
-		return nil
-	case wsagent.StatusCompleted:
-		if err := traceMsg.finalize(ctx, res.ReplyText); err != nil {
-			return goerr.Wrap(err, "failed to post workspace-agent reply")
-		}
-		return nil
-	case wsagent.StatusFallback:
-		fallback := i18n.T(ctx, i18n.MsgWorkspaceAgentFallback)
-		if err := traceMsg.finalize(ctx, fallback); err != nil {
-			return goerr.Wrap(err, "failed to post workspace-agent fallback")
-		}
-		return nil
 	default:
 		return goerr.New("unexpected workspace-agent status", goerr.V("status", int(res.Status)))
 	}
-}
-
-// runWorkspaceAgentTurn dispatches one turn to whichever runtime is wired.
-func (uc *AgentUseCase) runWorkspaceAgentTurn(ctx context.Context, req wsagent.TurnRequest) (*wsagent.Result, error) {
-	if uc.durableWorkspaceAgent != nil {
-		return uc.durableWorkspaceAgent.StartTurn(ctx, req)
-	}
-	return uc.workspaceAgent.RunTurn(ctx, req)
 }

@@ -21,12 +21,20 @@ func TestRequiresActor(t *testing.T) {
 		for _, name := range []agentkit.AgentName{
 			kernel.AgentCaseChannel,
 			kernel.AgentCaseThread,
-			kernel.AgentCaseThreadCreate,
 			kernel.AgentWorkspace,
 			kernel.AgentProposal,
 		} {
 			gt.Bool(t, kernel.RequiresActor(name)).True()
 		}
+	})
+
+	// The thread-mode CREATE turn is the scoped exception: a thread-mode case may
+	// be raised by an integration bot's intake post that names no human, so
+	// demanding an actor would refuse a legitimate creation. It is safe because a
+	// create turn's palette carries no case-reading tool — there is no private case
+	// for the missing actor to widen access to.
+	t.Run("the thread-mode create turn does not", func(t *testing.T) {
+		gt.Bool(t, kernel.RequiresActor(kernel.AgentCaseThreadCreate)).False()
 	})
 
 	// A Job and the assist batch run on a schedule with nobody behind them, so
