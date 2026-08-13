@@ -94,6 +94,15 @@ type Target struct {
 	// or the existing preview a workspace switch updates in place.
 	ProcessingTS string
 	PreviewTS    string
+	// ProposalID is the draft THIS run writes into, carried on the run rather than
+	// read back from the Session. The Session's ProposalID is mutable — a later
+	// mention repoints it while this run is still going — so reading it here would
+	// let one turn's result land in another turn's draft.
+	ProposalID model.CaseProposalID
+	// ProcessID is the run that produced this outcome. A host that records a
+	// question needs it so the turn started by the answer can inherit this run's
+	// conversation.
+	ProcessID string
 }
 
 // Durable runs the case-draft agent on the agentkit runtime.
@@ -185,6 +194,14 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return nil, err
 	}
 
+	// The draft this run writes into is pinned to the run here. It is empty only
+	// when the thread has no draft left (submitted or cancelled before the reply
+	// arrived), which the completion handler reports as a fallback.
+	var proposalID model.CaseProposalID
+	if req.ExistingProposal != nil {
+		proposalID = req.ExistingProposal.ID
+	}
+
 	scope := agentkernel.Scope{
 		ChannelID: req.Session.ChannelID,
 		ThreadTS:  req.Session.ThreadTS,
@@ -198,6 +215,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		// No WorkspaceID: choosing one is what this run is for.
 		ProcessingTS: req.ProcessingTS,
 		PreviewTS:    req.PreviewTS,
+		ProposalID:   string(proposalID),
 	}
 	if err := agentkernel.ValidateSpawn(agentkernel.AgentProposal, scope); err != nil {
 		return nil, goerr.Wrap(err, "validate the case-draft turn scope")
@@ -220,6 +238,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		opts = append(opts, agentkit.WithIdempotencyKey(agentkernel.TriggerKey(
 			req.Session.ChannelID, req.Session.ThreadTS, req.TriggerTS)))
 	}
+	opts = append(opts, d.inheritOpts(ctx, req.InheritFrom)...)
 
 	_, err = d.agent.Spawn(ctx, d.kernel, planexec.Input{
 		SystemPrompt:  systemPrompt,
@@ -241,6 +260,29 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 			goerr.V("session_id", req.Session.ID))
 	}
 	return &Result{Status: StatusStarted}, nil
+}
+
+// inheritOpts returns the option that continues prevID's conversation in the turn
+// about to be spawned, or nothing when there is nothing to continue.
+//
+// It checks the issuing run first because the Kernel REFUSES a Spawn whose issuer
+// committed no conversation. Passing the option blindly would turn "the run that
+// asked never got far enough to record anything" into "the answer fails outright",
+// which is strictly worse than answering from a fresh conversation.
+func (d *Durable) inheritOpts(ctx context.Context, prevID string) []agentkit.SpawnOption {
+	if prevID == "" {
+		return nil
+	}
+	proc, err := d.kernel.GetProcess(ctx, agentkit.ProcessID(prevID))
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "read the run whose conversation this turn continues",
+			goerr.V("from", prevID)), "read the run whose conversation this turn continues")
+		return nil
+	}
+	if proc == nil || proc.HistoryRef == "" {
+		return nil
+	}
+	return []agentkit.SpawnOption{agentkit.WithInheritedHistory(agentkit.ProcessID(prevID))}
 }
 
 // validateAgainstRegistry is the draft's finalizer: it checks that the proposed
@@ -299,6 +341,8 @@ func (d *Durable) onFinish(ctx context.Context, pid agentkit.ProcessID,
 		ActorUserID:  sc.ActorUserID,
 		ProcessingTS: sc.ProcessingTS,
 		PreviewTS:    sc.PreviewTS,
+		ProposalID:   model.CaseProposalID(sc.ProposalID),
+		ProcessID:    string(pid),
 	}
 
 	switch {

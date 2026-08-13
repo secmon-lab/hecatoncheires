@@ -73,6 +73,9 @@ func (h threadcaseHost) AskQuestion(ctx context.Context, target threadcase.Targe
 		session.CreatorUserID, q); err != nil {
 		return err
 	}
+	// The run that asked, so the turn the answer starts inherits its conversation
+	// rather than beginning from nothing.
+	session.PendingQuestion.AskedByProcessID = target.ProcessID
 	// The form records itself on the Session in memory; persisting it is this
 	// host's job. The in-process path got that for free — the runtime held the
 	// same Session instance and wrote it when the turn ended — but here the run

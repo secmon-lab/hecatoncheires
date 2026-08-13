@@ -34,6 +34,7 @@ const (
 	metaUIThreadTS   = "ui_thread_ts"
 	metaProcessingTS = "processing_ts"
 	metaPreviewTS    = "preview_ts"
+	metaProposalID   = "proposal_id"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -111,6 +112,15 @@ type Scope struct {
 	// for an answer, and a lifecycle or manual run is a single deliberate
 	// action, so making either queue behind a batch would be the wrong trade.
 	SlotGated bool
+	// ProposalID names the case draft this run writes its result into. Empty for
+	// every run that is not a case-draft turn.
+	//
+	// It travels on the run because the Session's ProposalID is MUTABLE: a later
+	// mention on the same thread points the Session at a new draft, and it can do
+	// so while this run is still going. A completion handler that read the Session
+	// instead would write this run's draft into whatever draft the thread points at
+	// by then.
+	ProposalID string
 }
 
 // Validate enforces the invariants the claim path depends on, so a wiring
@@ -181,6 +191,7 @@ func (s Scope) Metadata() map[string]string {
 	put(metaUIThreadTS, s.UIThreadTS)
 	put(metaProcessingTS, s.ProcessingTS)
 	put(metaPreviewTS, s.PreviewTS)
+	put(metaProposalID, s.ProposalID)
 	put(metaSessionID, s.SessionID)
 	put(metaActorUserID, s.ActorUserID)
 	put(metaLang, s.Lang)
@@ -214,6 +225,7 @@ func ScopeFrom(m map[string]string) Scope {
 		UIThreadTS:   m[metaUIThreadTS],
 		ProcessingTS: m[metaProcessingTS],
 		PreviewTS:    m[metaPreviewTS],
+		ProposalID:   m[metaProposalID],
 		SessionID:    m[metaSessionID],
 		ActorUserID:  m[metaActorUserID],
 		Lang:         m[metaLang],

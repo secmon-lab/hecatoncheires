@@ -50,6 +50,8 @@ func TestProposalHostPersistsThePendingQuestion(t *testing.T) {
 		ChannelID:   ssn.ChannelID,
 		ThreadTS:    ssn.ThreadTS,
 		ActorUserID: "U-REQUESTER",
+		// The draft comes off the run, not off the session.
+		ProposalID: d.ID,
 	}, proposal.QuestionPayload{
 		Reason: "which workspace?",
 		Items: []proposal.QuestionItem{

@@ -366,6 +366,71 @@ func TestDurableQuestionEndsTheTurn(t *testing.T) {
 	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithQuestion)
 }
 
+// The turn an answer starts must continue the conversation of the run that asked.
+//
+// A resume is a NEW Process — its own budget, its own record — and agentkit does
+// not carry a conversation across Processes on its own: the subject only serialises
+// them. Without the inherited history the answering turn begins from nothing and
+// sees only the answer text, with no record of the original request, the
+// investigation behind the question, or the question itself.
+func TestDurableResumeInheritsTheAskingRunsConversation(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(
+		draftPlan,
+		"the thread does not say which environment",
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+		draftPlan,
+		"the user says production",
+		draftFinalize,
+		`{"workspace_id":"risk","title":"Deploy failure","description":"Production deploy failed."}`,
+	))
+	ssn := h.session(t, ctx)
+
+	asked := h.run(t, h.request(ssn, "1700000001.000051"))
+	gt.Value(t, asked.Status).Equal(agentkit.ProcessSucceeded)
+	gt.Value(t, asked.HistoryRef).NotEqual(agentkit.HistoryRef(""))
+
+	// The answer turn names the asking run.
+	resume := h.request(ssn, "1700000001.000052")
+	resume.UserInput = "production"
+	resume.Trigger = proposal.TriggerThreadReply
+	resume.InheritFrom = string(asked.ID)
+	answered := h.run(t, resume)
+	gt.Value(t, answered.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The new Process records where its conversation came from, pinned to the
+	// version the asking run committed.
+	gt.Value(t, answered.InheritedHistory).NotNil().Required()
+	gt.Value(t, answered.InheritedHistory.Process).Equal(asked.ID)
+	gt.Value(t, answered.InheritedHistory.Ref).Equal(asked.HistoryRef)
+}
+
+// A resume whose asking run committed no conversation must still start.
+//
+// agentkit REFUSES a Spawn that names an issuer with no history, so passing the
+// option blindly would turn a question the asking run never got to record into an
+// answer that fails outright. Starting fresh is the correct degradation.
+func TestDurableResumeStartsFreshWhenThereIsNothingToInherit(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(
+		draftPlan,
+		"read the thread",
+		draftFinalize,
+		`{"workspace_id":"risk","title":"Deploy failure","description":"It failed."}`,
+	))
+	ssn := h.session(t, ctx)
+
+	resume := h.request(ssn, "1700000001.000061")
+	// A process id that never existed stands in for one that recorded nothing:
+	// both are "no conversation to continue".
+	resume.InheritFrom = "01900000-0000-7000-8000-000000000000"
+
+	proc := h.run(t, resume)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	gt.Value(t, proc.InheritedHistory).Nil()
+	gt.Array(t, h.host.kinds()).Equal([]string{"propose"})
+}
+
 // A question the host could not deliver must NOT leave the thread recorded as
 // waiting on one.
 //

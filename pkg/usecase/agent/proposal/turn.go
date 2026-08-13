@@ -43,6 +43,12 @@ type TurnRequest struct {
 	// the result exists.
 	ProcessingTS string
 	PreviewTS    string
+
+	// InheritFrom continues a finished run's conversation in this one. It is how an
+	// answered question resumes: the answering turn is a NEW run — its own budget,
+	// its own record — but it must see the request, the investigation and the
+	// question that produced it. Empty starts a fresh conversation.
+	InheritFrom string
 }
 
 // Status discriminates what StartTurn did.

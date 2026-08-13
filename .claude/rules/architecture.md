@@ -303,6 +303,20 @@ scaling — the thread's subject would stay held, refusing every other trigger.
 The pending question is persisted (`Session.PendingQuestion`, shared backend)
 and the answer arrives on a fresh dispatched event that starts a **new turn**.
 
+**A resumed turn must inherit the asking run's conversation.** Because the answer
+runs as a NEW Process, it starts from an empty history unless the Spawn says
+otherwise — `WithSubject` serialises Processes, it does not link them. So the run
+that asked is recorded on `PendingQuestion.AskedByProcessID`, and the answering
+Spawn passes `WithInheritedHistory`. Without it the agent sees only the answer
+text, with no record of the request it came from, the investigation behind the
+question, or the question itself — which is exactly what the pre-agentkit runtime
+gave it for free, by keying gollem history on the Session.
+
+Pass the option through the host's `inheritOpts` helper, not directly: agentkit
+**refuses** a Spawn naming an issuer that committed no conversation, so passing it
+blindly turns "the asking run recorded nothing" into "the answer fails outright".
+Starting fresh is the correct degradation.
+
 **Entry points & final output.** planexec is a generic plan-execute
 framework — it knows nothing about `case` and performs no side effects
 itself. It exposes three package-level entry functions (NOT `Runner`
@@ -549,9 +563,18 @@ This is NOT the best-effort-handler gap above: no crash is involved.
 Two things follow for anyone changing this area:
 
 - **A write from the spawning side of a turn must be narrow, not a `Session.Put`.**
-  `AdvanceLastMention` is the shape to copy: one field, monotonic, so it cannot
-  clobber a concurrent handler's outcome. A full write there is a bug even though
-  it looks like it is "before" the run.
+  `AdvanceLastMention` and `AssociateProposal` are the shapes to copy: one field,
+  and monotonic where two triggers can race, so neither can clobber a concurrent
+  handler's outcome. A full write there is a bug even though it looks like it is
+  "before" the run.
+- **Nothing a completion handler needs may be read back from mutable shared
+  state.** The handler runs after the turn, and by then the thread may point
+  somewhere else. Anything that identifies what THIS run was working on travels on
+  the run, in `Scope` — `Scope.ProposalID` is the worked example: reading the
+  Session's `ProposalID` instead let one turn's draft receive another turn's
+  result. Corollary: a value that identifies the run's target must be written to
+  shared state only AFTER the Spawn is accepted, or a refused turn leaves the
+  thread pointing at work nobody is doing.
 - **Closing the gap properly means the outward work runs under the subject** — as a
   final durable transition, or as a child Process the subject still covers — not by
   adding locks around the handler. Until that is done, do not describe the thread

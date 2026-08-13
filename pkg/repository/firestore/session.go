@@ -177,3 +177,31 @@ func (r *sessionRepository) AdvanceLastMention(ctx context.Context, channelID, t
 	}
 	return nil
 }
+
+func (r *sessionRepository) AssociateProposal(ctx context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error {
+	if channelID == "" || threadTS == "" || proposalID == "" {
+		return goerr.New("channelID, threadTS and proposalID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
+	}
+	doc := r.docRef(channelID, threadTS)
+	// Update, not Set: the turn this draft belongs to is already running and its
+	// completion handler writes the same row.
+	_, err := doc.Update(ctx, []firestore.Update{
+		{Path: "ProposalID", Value: proposalID},
+		{Path: "UpdatedAt", Value: r.now()},
+	})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil
+		}
+		return goerr.Wrap(err, "associate the draft with its thread",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
+	}
+	return nil
+}

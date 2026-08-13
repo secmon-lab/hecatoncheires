@@ -540,6 +540,10 @@ func cmdServe() *cli.Command {
 			// it, while its registration has to happen inside the Kernel build.
 			var durableJobs *job.DurableRuntime
 			var durableDraft *proposal.Durable
+			// jobSlots is the deployment-wide concurrency gate. It is built inside the
+			// Kernel block because the Kernel is what enforces it, and declared out
+			// here because the Job runtime below must be given the SAME instance.
+			var jobSlots *job.ConcurrencyLimiter
 			if llmClient != nil {
 				agentProcessRepo, agentProcessCleanup, apErr := repoCfg.ConfigureAgentProcess(ctx)
 				if apErr != nil {
@@ -606,6 +610,19 @@ func cmdServe() *cli.Command {
 					durableDraft = d
 				}
 
+				// The slot gate has to exist before the Kernel, because the Kernel is
+				// what enforces it: a durable Job run occupies a slot for as long as
+				// its claims run, not for the length of the call that spawned it. The
+				// same instance is handed to the Job runner below, so both sides count
+				// the same holds.
+				if jobCfg.Limit() > 0 {
+					l, sErr := buildJobSlotLimiter(repo, jobCfg.Limit())
+					if sErr != nil {
+						return sErr
+					}
+					jobSlots = l
+				}
+
 				k, kErr := agentkernel.Build(agentkernel.Deps{
 					Repo:    agentProcessRepo,
 					History: processHistory,
@@ -613,6 +630,7 @@ func cmdServe() *cli.Command {
 					Trace:   kernelTrace,
 					Budgets: budgets,
 					Agents:  agentRegistry,
+					Slots:   jobSlots,
 					Tools: agentkernel.ToolDeps{
 						Repo:              repo,
 						Registry:          registry,
@@ -661,7 +679,10 @@ func cmdServe() *cli.Command {
 				HistoryRepo:    agentHistoryRepo,
 				TraceRepo:      agentTraceRepo,
 				SlotLimit:      jobCfg.Limit(),
-				Durable:        durableJobs,
+				// The Kernel's slot gate, so the runner's pre-spawn refusal and the
+				// claim-time hold that bounds execution count the same slots.
+				SlotLimiter: jobSlots,
+				Durable:     durableJobs,
 			})
 			if jobErr != nil {
 				return goerr.Wrap(jobErr, "failed to build job runtime")

@@ -48,6 +48,10 @@ type Target struct {
 	// channel; otherwise they hold the same values.
 	UIChannelID string
 	UIThreadTS  string
+	// ProcessID is the run that produced this outcome. A host that records a
+	// question needs it so the turn started by the answer can inherit this run's
+	// conversation.
+	ProcessID string
 }
 
 // Host is the Slack-facing surface a finished thread-mode turn needs. Each method
@@ -192,6 +196,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		agentkit.WithIdempotencyKey(agentkernel.TriggerKey(req.ChannelID, req.ThreadTS, req.TriggerTS)),
 		agentkit.WithMetadata(scope.Metadata()),
 	}
+	opts = append(opts, d.inheritOpts(ctx, req.InheritFrom)...)
 
 	var err error
 	if isCreate {
@@ -529,6 +534,29 @@ func (d *Durable) askQuestion(ctx context.Context, target Target, q *planexec.Qu
 	d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithQuestion)
 }
 
+// inheritOpts returns the option that continues prevID's conversation in the turn
+// about to be spawned, or nothing when there is nothing to continue.
+//
+// It checks the issuing run first because the Kernel REFUSES a Spawn whose issuer
+// committed no conversation. Passing the option blindly would turn "the run that
+// asked never got far enough to record anything" into "the answer fails outright",
+// which is strictly worse than answering from a fresh conversation.
+func (d *Durable) inheritOpts(ctx context.Context, prevID string) []agentkit.SpawnOption {
+	if prevID == "" {
+		return nil
+	}
+	proc, err := d.kernel.GetProcess(ctx, agentkit.ProcessID(prevID))
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "read the run whose conversation this turn continues",
+			goerr.V("from", prevID)), "read the run whose conversation this turn continues")
+		return nil
+	}
+	if proc == nil || proc.HistoryRef == "" {
+		return nil
+	}
+	return []agentkit.SpawnOption{agentkit.WithInheritedHistory(agentkit.ProcessID(prevID))}
+}
+
 func (d *Durable) reportFallback(ctx context.Context, target Target, reason string) {
 	if err := d.host.ReportFallback(ctx, target, reason); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "report the thread-mode fallback"),
@@ -553,6 +581,7 @@ func (d *Durable) finished(ctx context.Context, pid agentkit.ProcessID) (agentke
 		ThreadTS:    sc.ThreadTS,
 		UIChannelID: uiChannel,
 		UIThreadTS:  uiThread,
+		ProcessID:   string(pid),
 	}, nil
 }
 

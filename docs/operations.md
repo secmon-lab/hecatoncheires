@@ -170,18 +170,32 @@ How it works:
   document whose `ExpiresAt` is in the future; a free slot has no
   document at all, so the number of stored documents *is* the number of
   in-flight runs. No counter, nothing to drift.
-- `JobRunner.Run` takes a slot after the lease and suspension checks and
-  before it builds any prompt, then releases it in a defer. While the run
-  executes, a heartbeat pushes `ExpiresAt` forward every 10 seconds
-  (TTL 30 seconds), so a crashed instance's slot frees itself within
-  ~30 seconds without any cleanup sweep. A hold stops renewing after
-  2 hours as a backstop against a leaked slot; the run itself continues.
-- **When no slot is free the run is skipped, not queued.** It records
-  nothing, so `LastRunAt` is untouched and the next tick finds the Job
+- A slot is taken twice over, at two different scopes, and both matter:
+  - `JobRunner.Run` takes one after the lease and suspension checks and before it
+    builds any prompt, releasing it when `Run` returns. This is the early refusal
+    that keeps a tick from preparing hundreds of runs it cannot execute.
+  - **The agent worker takes one per claim, and that is what bounds execution.**
+    A durable run outlives the call that started it — `Run` returns as soon as the
+    run is recorded — so the runner's hold alone would bound concurrent *spawns*
+    and nothing else. The gate is therefore also wired into the Kernel, which asks
+    it before every claim of a slot-gated run.
+  While a slot is held, a heartbeat pushes `ExpiresAt` forward every 10 seconds
+  (TTL 30 seconds), so a crashed instance's slot frees itself within ~30 seconds
+  without any cleanup sweep. A hold stops renewing after 2 hours as a backstop
+  against a leaked slot; the run itself continues.
+- A run that suspends to wait for its children releases its slot and asks again on
+  its next claim. Waiting occupies no execution capacity, so holding the slot
+  across the wait would under-admit.
+- **When no slot is free at the runner's gate the run is skipped, not queued.** It
+  records nothing, so `LastRunAt` is untouched and the next tick finds the Job
   due again — the effect is a postponement to a later tick, not a lost
   run. The skip is logged at `INFO`
   (`job run skipped: concurrency slots full`) and is not reported to
   Sentry.
+- **When no slot is free at the worker's gate the claim is refused and the run
+  waits.** It has already been recorded, so it is not lost and not retried from
+  scratch: the worker picks it up again once capacity frees, and its step budget is
+  not charged for the refusal.
 - If the slot state cannot be read (Firestore error) the run is
   **refused**, not started: with the state unknown, starting anyway
   invites the very rate-limit blowout the gate prevents. The error is

@@ -409,7 +409,9 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 
 	// Clear the pending snapshot before resuming so a duplicate Submit
 	// (network retry, double-click) lands on the stale-form path instead
-	// of re-running the planner.
+	// of re-running the planner. The run that asked is read out first: the resume
+	// inherits its conversation, and clearing drops the record.
+	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
 	if err := uc.repo.Session().Put(ctx, session); err != nil {
 		errutil.Handle(ctx, err, "clear PendingQuestion before resuming planner")
@@ -431,6 +433,7 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 		TriggerTS:        messageTS,
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
+		InheritFrom:      askedBy,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "draft question submit turn failed")

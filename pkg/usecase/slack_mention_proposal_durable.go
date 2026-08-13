@@ -38,6 +38,9 @@ func (h proposalHost) Ask(ctx context.Context, target proposal.Target, q proposa
 	if err := handler.Question(ctx, session, q); err != nil {
 		return err
 	}
+	// The run that asked, so the turn the answer starts inherits its conversation
+	// rather than beginning from nothing.
+	session.PendingQuestion.AskedByProcessID = target.ProcessID
 	// The form records itself on the Session in memory; persisting it is this
 	// host's job. The in-process path got that for free — the runtime held the
 	// same Session instance and wrote it when the turn ended — but here the run
@@ -69,18 +72,14 @@ func (h proposalHost) ReportFallback(ctx context.Context, target proposal.Target
 // ends in fallback would otherwise leave every later interaction on that draft
 // refusing with "inference in progress" and no way back.
 func (h proposalHost) unlockDraft(ctx context.Context, target proposal.Target) error {
-	session, err := h.uc.repo.Session().GetByThread(ctx, target.ChannelID, target.ThreadTS)
-	if err != nil {
-		return goerr.Wrap(err, "load the session of a fallen-back draft turn",
-			goerr.V("channel_id", target.ChannelID), goerr.V("thread_ts", target.ThreadTS))
-	}
-	if session == nil || session.ProposalID == "" {
+	// This run's own draft, not whatever the thread points at now.
+	if target.ProposalID == "" {
 		return nil
 	}
-	d, err := h.uc.repo.CaseProposal().Get(ctx, session.ProposalID)
+	d, err := h.uc.repo.CaseProposal().Get(ctx, target.ProposalID)
 	if err != nil {
 		return goerr.Wrap(err, "load the draft of a fallen-back turn",
-			goerr.V("proposal_id", session.ProposalID))
+			goerr.V("proposal_id", string(target.ProposalID)))
 	}
 	if d == nil || !d.InferenceInProgress {
 		return nil
@@ -103,8 +102,11 @@ func (h proposalHost) handler(ctx context.Context, target proposal.Target) (*sla
 		return nil, nil, goerr.New("the session of a finished draft turn is gone",
 			goerr.V("channel_id", target.ChannelID), goerr.V("thread_ts", target.ThreadTS))
 	}
-	if session.ProposalID == "" {
-		return nil, nil, goerr.New("the session of a finished draft turn names no proposal",
+	// The draft comes off the RUN, not off the session: a later mention repoints
+	// the session at a new draft, and it can do so while this run is still going.
+	// Reading the session here would write this run's result into that other draft.
+	if target.ProposalID == "" {
+		return nil, nil, goerr.New("the finished draft turn names no proposal",
 			goerr.V("session_id", session.ID))
 	}
 	creator := session.CreatorUserID
@@ -116,7 +118,7 @@ func (h proposalHost) handler(ctx context.Context, target proposal.Target) (*sla
 	return newSlackDraftHandler(
 		h.uc.repo, h.uc.registry, h.uc.slackService,
 		target.ChannelID, target.ThreadTS, "", creator,
-		h.uc.registry.List(), session.ProposalID,
+		h.uc.registry.List(), target.ProposalID,
 		target.ProcessingTS, target.PreviewTS,
 	), session, nil
 }

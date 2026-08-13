@@ -95,6 +95,15 @@ type PendingQuestion struct {
 	// read-only "answered" view.
 	PostedChannelID string
 	PostedMessageTS string
+	// AskedByProcessID is the agent run that asked. The turn the answer starts
+	// inherits that run's conversation, so it sees the original request, the
+	// investigation behind the question, and the question itself — not just the
+	// answer text. Without it the answering turn begins from an empty history and
+	// has to rediscover everything the asking turn already established.
+	//
+	// Empty for a question recorded before this was tracked; such an answer simply
+	// starts a fresh conversation, which is the pre-existing behaviour.
+	AskedByProcessID string
 	// Reason is the planner's single-rationale text shared across all items.
 	Reason string
 	// Items mirrors proposal.QuestionPayload.Items at the time the question was

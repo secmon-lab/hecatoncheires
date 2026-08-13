@@ -509,6 +509,7 @@ func wireDurableJobRuntime(
 func bindDurableJobRuntime(
 	t *testing.T, runner *job.JobRunner, durable *job.DurableRuntime,
 	repo interfaces.Repository, registry *model.WorkspaceRegistry, llm gollem.LLMClient,
+	slots ...agentkernel.SlotGate,
 ) *agentkit.Kernel {
 	t.Helper()
 
@@ -523,6 +524,10 @@ func bindDurableJobRuntime(
 	gt.NoError(t, lErr).Required()
 	durable.Locator = locator
 
+	var gate agentkernel.SlotGate
+	if len(slots) > 0 {
+		gate = slots[0]
+	}
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    procRepo,
 		History: durable.History,
@@ -530,6 +535,7 @@ func bindDurableJobRuntime(
 		Trace:   agentarchive.NewMemoryTraceRepository(),
 		Budgets: agentkernel.Budgets{Root: cfg, Task: cfg},
 		Agents:  reg,
+		Slots:   gate,
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry},
 	})
 	gt.NoError(t, err).Required()
@@ -592,6 +598,95 @@ func TestJobRunner_DurableSimpleRunRecordsItsOutcome(t *testing.T) {
 	gt.Array(t, events).Length(2).Required()
 	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
 	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+}
+
+// The deployment-wide concurrency limit must bound how many scheduled Job runs
+// EXECUTE, not how many are spawned.
+//
+// This is a composition test on purpose. Each half was already covered alone —
+// `pkg/agent/kernel` proves `slotGuard` bounds concurrent claims, and the runner
+// proves its pre-spawn gate refuses when slots are full — and the bug was that
+// nothing joined them: the Kernel was built without a slot gate, so the only hold
+// left was the runner's, which is released as soon as `Run` returns after the
+// Spawn. The limit then bounded concurrent spawns and nothing else. So this drives
+// the real chain: ConcurrencyLimiter → Deps.Slots → slotGuard → Scope.SlotGated.
+func TestJobRunner_DurableRunsAreBoundedByTheConcurrencyLimit(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+
+	// Two DIFFERENT Jobs on the same case, so nothing but the slot gate can
+	// serialise them (the subject is per (workspace, case, job)).
+	jobs := make([]*model.Job, 0, 2)
+	for i := range 2 {
+		j := &model.Job{
+			ID:     fmt.Sprintf("durable-slotted-%d", i),
+			Prompt: "summarise the case",
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+			},
+		}
+		jobs = append(jobs, j)
+	}
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: jobs})
+
+	// A gate of exactly one, over the same JobSlot repository production uses.
+	limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
+		Repo:          repo.JobSlot(),
+		Limit:         1,
+		TTL:           30 * time.Second,
+		RenewInterval: 10 * time.Second,
+		MaxHold:       time.Hour,
+	})
+	gt.NoError(t, err).Required()
+
+	// The LLM blocks until released, so a run that is admitted stays in flight and
+	// a second admission would be observable as two concurrent calls.
+	var inFlight, maxInFlight atomic.Int32
+	release := make(chan struct{})
+	llm := blockingReplyLLM(&inFlight, &maxInFlight, release)
+
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		SlotLimiter: limiter,
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm, limiter)
+
+	// Spawn both before the worker starts, so the gate — not arrival order — is
+	// what decides how many execute at once.
+	for _, j := range jobs {
+		gt.NoError(t, runner.Run(ctx, j, job.Event{
+			Domain: model.JobEventDomainScheduled, WorkspaceID: "ws", CaseID: c.ID,
+			Timestamp: time.Now().UTC(),
+		})).Required()
+	}
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		served <- agentkernel.Serve(serveCtx, k,
+			agentkit.WithPollInterval(5*time.Millisecond),
+			// Enough capacity that only the gate can hold the second run back.
+			agentkit.WithMaxConcurrent(4), agentkit.WithPollConcurrency(2))
+	}()
+
+	// Let the first admitted run reach the model, then confirm the second is still
+	// held out before releasing either.
+	waitForInFlight(t, &inFlight, 1)
+	gt.Number(t, int(maxInFlight.Load())).Equal(1)
+
+	close(release)
+	for _, j := range jobs {
+		key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+		awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	}
+	cancel()
+	<-served
+
+	// Both ran, but never at the same time.
+	gt.Number(t, int(maxInFlight.Load())).Equal(1)
 }
 
 // A trigger arriving while a durable run of the same Job is still live must leave
@@ -928,6 +1023,50 @@ func singleReplyLLM(text string, input, output int) gollem.LLMClient {
 				},
 			}, nil
 		},
+	}
+}
+
+// blockingReplyLLM parks every Generate until release is closed, recording how
+// many calls are in flight at once. It is how a concurrency bound is observed
+// rather than inferred: a gate that admitted two runs shows up as maxInFlight 2.
+func blockingReplyLLM(inFlight, maxInFlight *atomic.Int32, release <-chan struct{}) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(ctx context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					n := inFlight.Add(1)
+					for {
+						cur := maxInFlight.Load()
+						if n <= cur || maxInFlight.CompareAndSwap(cur, n) {
+							break
+						}
+					}
+					defer inFlight.Add(-1)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return &gollem.Response{Texts: []string{"done"}, InputToken: 10, OutputToken: 5}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// waitForInFlight blocks until want calls are concurrently inside the model.
+func waitForInFlight(t *testing.T, inFlight *atomic.Int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for inFlight.Load() < want {
+		if time.Now().After(deadline) {
+			gt.Number(t, int(inFlight.Load())).Equal(int(want)).Required()
+			return
+		}
+		time.Sleep(3 * time.Millisecond)
 	}
 }
 

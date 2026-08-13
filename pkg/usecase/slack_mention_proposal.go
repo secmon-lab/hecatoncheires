@@ -159,7 +159,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		return goerr.Wrap(err, "failed to save initial draft")
 	}
 
-	session, err := uc.loadOrCreateDraftSession(ctx, ev.Channel, threadTS, ev.User, d.ID)
+	session, err := uc.claimDraftSession(ctx, ev.Channel, threadTS, ev.User)
 	if err != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
 		return goerr.Wrap(err, "load or create draft session")
@@ -178,16 +178,25 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	})
 	if runErr != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		uc.discardDraft(ctx, d)
 		// notifyMaterializationFailed reports via prepareUserError; return nil so
 		// the async dispatcher does not re-Handle (double report) the same error.
 		uc.notifyMaterializationFailed(ctx, ev, runErr)
 		return nil
 	}
-	// A refused turn leaves the placeholder showing something that will never
-	// arrive, so it is taken down here. A started turn keeps it: the run replaces
-	// it with the draft.
 	if result.Status != proposal.StatusStarted {
+		// A refused turn leaves the placeholder showing something that will never
+		// arrive, and a draft nothing will ever write into. Both are taken down here.
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		uc.discardDraft(ctx, d)
+	} else {
+		// Only an accepted turn owns the thread's draft. The association is made
+		// AFTER the spawn, and one field at a time: the run may already be executing,
+		// and its completion handler writes this same Session row.
+		if assocErr := uc.repo.Session().AssociateProposal(ctx, ev.Channel, threadTS, d.ID); assocErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(assocErr, "associate the draft with its thread",
+				goerr.V("proposal_id", string(d.ID))), "associate the draft with its thread")
+		}
 	}
 
 	logger.Info("case draft turn started",
@@ -212,44 +221,47 @@ func (uc *MentionProposalUseCase) notifyDraftFallback(ctx context.Context, chann
 	}
 }
 
-// loadOrCreateDraftSession returns the persisted Session for the given thread,
-// stamping the draft-specific fields (CreatorUserID, ProposalID) when a fresh
-// session is created. An existing session simply has its ProposalID updated
-// when the caller has just freshly created a draft.
+// claimDraftSession returns the persisted Session for the given thread, creating
+// it when the thread has none.
 //
-// It writes the session before returning because the turn it is about to feed
-// runs elsewhere: the run's completion handler reloads the session by thread to
-// deliver the draft, and an unsaved one leaves that handler with nothing to
-// deliver into.
-func (uc *MentionProposalUseCase) loadOrCreateDraftSession(ctx context.Context, channelID, threadTS, creatorUserID string, proposalID model.CaseProposalID) (*model.Session, error) {
-	existing, err := uc.repo.Session().GetByThread(ctx, channelID, threadTS)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get session")
-	}
+// It deliberately does NOT set ProposalID. Which draft the thread is working on is
+// settled only once a turn has been accepted — see AssociateProposal — because a
+// draft the runtime refused must not become the thread's draft: the accepted
+// turn's completion handler would then write its result into the refused one.
+//
+// The session is written before returning because the turn it feeds runs
+// elsewhere: the run's completion handler reloads it by thread, and an unsaved one
+// leaves that handler with nothing to deliver into.
+func (uc *MentionProposalUseCase) claimDraftSession(ctx context.Context, channelID, threadTS, creatorUserID string) (*model.Session, error) {
 	now := time.Now().UTC()
-	session := existing
-	if session != nil {
-		session.ProposalID = proposalID
-		if creatorUserID != "" && session.CreatorUserID == "" {
-			session.CreatorUserID = creatorUserID
-		}
-		session.UpdatedAt = now
-	} else {
-		session = &model.Session{
+	session, err := uc.repo.Session().Claim(ctx, channelID, threadTS, func() *model.Session {
+		return &model.Session{
 			ID:            uuid.Must(uuid.NewV7()).String(),
 			ChannelID:     channelID,
 			ThreadTS:      threadTS,
 			CreatorUserID: creatorUserID,
-			ProposalID:    proposalID,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-	}
-	if err := uc.repo.Session().Put(ctx, session); err != nil {
-		return nil, goerr.Wrap(err, "persist the draft session",
-			goerr.V("session_id", session.ID))
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "claim the draft session",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
 	}
 	return session, nil
+}
+
+// discardDraft removes a draft no turn will ever write into — one whose turn was
+// refused or failed to start. Leaving it behind would strand a row with
+// InferenceInProgress set, which every later interaction on it refuses.
+func (uc *MentionProposalUseCase) discardDraft(ctx context.Context, d *model.CaseProposal) {
+	if d == nil {
+		return
+	}
+	if err := uc.repo.CaseProposal().Delete(ctx, d.ID); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "discard the draft of a turn that never started",
+			goerr.V("proposal_id", string(d.ID))), "discard the draft of a turn that never started")
+	}
 }
 
 // buildProposalUserInput assembles the planner's first user message. The
@@ -378,6 +390,14 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		}
 	}
 
+	// This reply answers a question (the dispatcher only resumes on one), so the
+	// turn continues the conversation of the run that asked. Without it the reply
+	// text would arrive with no record of what it is answering.
+	var inheritFrom string
+	if session.PendingQuestion != nil {
+		inheritFrom = session.PendingQuestion.AskedByProcessID
+	}
+
 	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session: session,
 		// ev.Text is used raw here, unlike HandleAppMention: shouldResumeOnReply
@@ -389,6 +409,7 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		TriggerTS:        ev.TimeStamp,
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
+		InheritFrom:      inheritFrom,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "thread reply turn failed")

@@ -48,4 +48,16 @@ type SessionRepository interface {
 	// A missing Session is not an error: the thread it named is gone, and there is
 	// no cursor to keep.
 	AdvanceLastMention(ctx context.Context, channelID, threadTS, mentionTS string) error
+
+	// AssociateProposal points the Session at the case draft the thread is now
+	// working on.
+	//
+	// It is narrow for the same reason as AdvanceLastMention: the caller has just
+	// started a turn, and that turn's completion handler writes the same Session
+	// row. It is also only safe to call once the turn was ACCEPTED — a draft the
+	// runtime refused must never become the thread's draft, or the accepted turn's
+	// result would be written into it.
+	//
+	// A missing Session is not an error.
+	AssociateProposal(ctx context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error
 }

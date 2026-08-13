@@ -121,3 +121,25 @@ func (r *sessionRepository) AdvanceLastMention(_ context.Context, channelID, thr
 	r.sessions[key] = cur
 	return nil
 }
+
+func (r *sessionRepository) AssociateProposal(_ context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error {
+	if channelID == "" || threadTS == "" || proposalID == "" {
+		return goerr.New("channelID, threadTS and proposalID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	cur.ProposalID = proposalID
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}

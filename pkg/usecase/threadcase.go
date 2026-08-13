@@ -288,6 +288,11 @@ type caseCreateReq struct {
 	// Session (for the origin reply's exact link). Empty for every other path,
 	// including a resume turn — there the Session already holds the reference.
 	sourceChannel, sourceTS string
+	// inheritFrom is the run whose conversation this turn continues. Set only on a
+	// resume, where it is the run that asked the question being answered: the new
+	// turn must see the original request and the investigation behind the question,
+	// not just the answer text.
+	inheritFrom string
 }
 
 // sameThread reports whether the UI and case threads coincide (the normal /
@@ -392,6 +397,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		SystemMessages:    req.systemMessages,
 		DeltaMessages:     req.deltaMessages,
 		CreateInstruction: req.createInstruction,
+		InheritFrom:       req.inheritFrom,
 	}); runErr != nil {
 		// replyUserError reports to log / Sentry; return nil so the async dispatcher
 		// does not re-Handle (and double-report) the same failure.

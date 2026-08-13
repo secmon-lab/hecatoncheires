@@ -74,6 +74,28 @@ func bindDraftRuntime(
 ) agentkernel.Locator {
 	t.Helper()
 
+	locator, k := bindDraftRuntimeWithoutWorker(t, uc, repo, registry, llm, slackSvc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return locator
+}
+
+// bindDraftRuntimeWithoutWorker wires the runtime but never claims anything, so a
+// spawned run stays exactly where the host left it. Use it to assert what the HOST
+// did — the Session it wrote, the draft it claimed — with a turn still live and no
+// worker racing to finish it.
+func bindDraftRuntimeWithoutWorker(
+	t *testing.T, uc *usecase.MentionProposalUseCase, repo interfaces.Repository,
+	registry *model.WorkspaceRegistry, llm gollem.LLMClient, slackSvc slacksvc.Service,
+) (agentkernel.Locator, *agentkit.Kernel) {
+	t.Helper()
+
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
@@ -98,15 +120,7 @@ func bindDraftRuntime(
 	gt.NoError(t, err).Required()
 	d.Bind(k)
 	uc.BindDurableDraft(d)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-	return locator
+	return locator, k
 }
 
 // waitForDraftMaterialization blocks until the stored draft carries a finished
@@ -270,6 +284,62 @@ func TestMentionDraftUseCase_HandleAppMention_HappyPath(t *testing.T) {
 	completedCtx, ok := last.rawBlocks[0].(*goslack.ContextBlock)
 	gt.Bool(t, ok).True().Required()
 	gt.String(t, completedCtx.BlockID).Equal("mention_draft_processing_completed")
+}
+
+// A second mention arriving while a draft turn is live must not take the thread's
+// draft away from the run that is working on it.
+//
+// The mention path creates a draft before it knows whether the turn will be
+// accepted. If it pointed the Session at that draft immediately, a refused second
+// mention would leave the thread naming a draft nothing runs for — and the FIRST
+// run's completion handler, which reloads the Session, would write its result into
+// that refused draft instead of its own. So the association is made only after the
+// spawn is accepted, and the run carries its own draft id.
+func TestMentionDraftUseCase_BusySecondMentionKeepsTheLiveRunsDraft(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-only", "OnlyWS", schemaWithSeverity())
+
+	slackMock := newCollectorOnlyMockSlack()
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
+	// One scripted call: the first turn parks mid-plan so the thread stays held.
+	bindDraftRuntimeWithoutWorker(t, uc, repo, registry,
+		newScriptedClient([]string{draftPlan}), slackMock) //nolint:dogsled
+
+	first := &slackevents.AppMentionEvent{
+		Channel: "C-BUSY", User: "U-USER",
+		Text: "<@BOT> please open a case", TimeStamp: "1700000010.000000",
+	}
+	gt.NoError(t, uc.HandleAppMention(ctx, first)).Required()
+
+	ssn, err := repo.Session().GetByThread(ctx, "C-BUSY", "1700000010.000000")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	liveDraft := ssn.ProposalID
+	gt.Value(t, liveDraft).NotEqual(model.CaseProposalID(""))
+
+	// Second mention INSIDE the first one's thread — the same Session, and so the
+	// same subject the live run holds. A top-level mention would open its own
+	// thread and legitimately start its own turn.
+	second := &slackevents.AppMentionEvent{
+		Channel: "C-BUSY", User: "U-USER",
+		Text: "<@BOT> and also this", TimeStamp: "1700000020.000000",
+		ThreadTimeStamp: "1700000010.000000",
+	}
+	gt.NoError(t, uc.HandleAppMention(ctx, second)).Required()
+
+	// The thread still names the draft the live run is writing into.
+	ssn2, err := repo.Session().GetByThread(ctx, "C-BUSY", "1700000010.000000")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.ProposalID).Equal(liveDraft)
+
+	// And that draft is intact and still in flight, so the live run's completion
+	// handler has somewhere correct to write.
+	live, err := repo.CaseProposal().Get(ctx, liveDraft)
+	gt.NoError(t, err).Required()
+	gt.Value(t, live).NotNil().Required()
+	gt.Bool(t, live.InferenceInProgress).True()
+	gt.String(t, live.MentionText).Contains("please open a case")
 }
 
 // containsActionBlock reports whether the block slice contains an

@@ -162,6 +162,13 @@ type jobRuntimeDeps struct {
 	// builds no limiter at all.
 	SlotLimit int
 
+	// SlotLimiter, when non-nil, is the limiter to use instead of building one.
+	// `serve` must pass the same instance it gave the Kernel as its slot gate:
+	// with a durable Job the claim is what occupies a slot for the length of the
+	// run, so a second limiter here would count a different set of holds and the
+	// deployment-wide limit would bound neither side correctly.
+	SlotLimiter *job.ConcurrencyLimiter
+
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
 	// reasoning). Nil falls back to in-memory implementations so the
@@ -310,37 +317,52 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 	if deps.SlackService != nil {
 		deps2.InteractionPoster = deps.SlackService
 	}
-	// Deployment-wide concurrency gate on scheduled runs. Built only when an
-	// operator asked for a limit; 0 leaves SlotLimiter nil (ungated).
-	if deps.SlotLimit > 0 {
-		limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
-			Repo:          deps.Repo.JobSlot(),
-			Limit:         deps.SlotLimit,
-			TTL:           jobSlotTTL,
-			RenewInterval: jobSlotRenewInterval,
-			MaxHold:       jobSlotMaxHold,
-		})
+	// Deployment-wide concurrency gate on scheduled runs. `serve` builds it before
+	// the Kernel (it is also the Kernel's slot gate) and hands the same instance
+	// here; `tick` has no Kernel, so it builds one now.
+	if deps.SlotLimiter != nil {
+		deps2.SlotLimiter = deps.SlotLimiter
+	} else if deps.SlotLimit > 0 {
+		limiter, err := buildJobSlotLimiter(deps.Repo, deps.SlotLimit)
 		if err != nil {
-			return nil, nil, goerr.Wrap(err, "build job concurrency limiter",
-				goerr.V("job_max_concurrency", deps.SlotLimit))
+			return nil, nil, err
 		}
 		deps2.SlotLimiter = limiter
-		// The slot timings are compiled-in, so this is the only place they are
-		// visible; without them a slot_hold_ms cannot be read against the TTL
-		// that would have expired it. Emitted by both serve and tick, which
-		// share this constructor.
-		logging.Default().Info("job concurrency limiter enabled",
-			"job_max_concurrency", deps.SlotLimit,
-			"slot_ttl", jobSlotTTL.String(),
-			"slot_renew_interval", jobSlotRenewInterval.String(),
-			"slot_max_hold", jobSlotMaxHold.String())
-	} else {
-		logging.Default().Info("job concurrency limiter disabled",
-			"job_max_concurrency", deps.SlotLimit)
 	}
 	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner, nil
+}
+
+// buildJobSlotLimiter builds the deployment-wide concurrency gate for scheduled
+// Job runs. limit must be positive; 0 means ungated and the caller skips this.
+//
+// It is a standalone constructor because `serve` needs the limiter BEFORE the
+// Kernel exists — the Kernel takes it as its claim-time slot gate, which is what
+// bounds concurrent execution now that a durable run outlives the call that
+// started it. Building a second one for the Runner would leave each counting only
+// its own holds.
+func buildJobSlotLimiter(repo interfaces.Repository, limit int) (*job.ConcurrencyLimiter, error) {
+	limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
+		Repo:          repo.JobSlot(),
+		Limit:         limit,
+		TTL:           jobSlotTTL,
+		RenewInterval: jobSlotRenewInterval,
+		MaxHold:       jobSlotMaxHold,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "build job concurrency limiter",
+			goerr.V("job_max_concurrency", limit))
+	}
+	// The slot timings are compiled-in, so this is the only place they are
+	// visible; without them a slot_hold_ms cannot be read against the TTL that
+	// would have expired it.
+	logging.Default().Info("job concurrency limiter enabled",
+		"job_max_concurrency", limit,
+		"slot_ttl", jobSlotTTL.String(),
+		"slot_renew_interval", jobSlotRenewInterval.String(),
+		"slot_max_hold", jobSlotMaxHold.String())
+	return limiter, nil
 }
 
 // jobToolAdapters groups the usecase-to-tool adapters once so buildJobTools

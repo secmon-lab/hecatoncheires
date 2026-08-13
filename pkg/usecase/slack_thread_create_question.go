@@ -237,8 +237,10 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 
 	// Clear the pending question before resuming so a duplicate submit lands on
-	// the stale path instead of re-running the agent.
+	// the stale path instead of re-running the agent. The run that asked is read out
+	// first: the resume inherits its conversation, and clearing drops the record.
 	answerText := formatDraftQuestionAnswers(pq, answers)
+	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
 	if err := uc.deps.Repo.Session().Put(ctx, session); err != nil {
 		errutil.Handle(ctx, err, "clear thread PendingQuestion before resuming")
@@ -247,8 +249,8 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	// Resume the create agent with the structured answers as the latest input.
 	// The dialog (trace / any follow-up question / completion link) surfaces in
 	// the UI thread; the Case stays bound to the case thread. createInstruction
-	// is empty on resume — the seed context already lives in the gollem history
-	// keyed on the session.
+	// is empty on resume: the seed context comes from the asking run's conversation,
+	// which inheritFrom carries into this turn.
 	return uc.runThreadCaseCreation(ctx, caseCreateReq{
 		entry:       entry,
 		caseChannel: caseChannel,
@@ -259,6 +261,7 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 		mentionText: answerText,
 		mentionTS:   messageTS,
 		triggerTS:   messageTS,
+		inheritFrom: askedBy,
 	})
 }
 
