@@ -67,12 +67,13 @@ func materializeLLM() *mock.LLMClientMock {
 			return materializeJSON
 		case strings.Contains(text, "Observations from prior"):
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }
@@ -219,12 +220,13 @@ func questionLLM() *mock.LLMClientMock {
 				return `{"question":{"reason":"What is the severity?","items":[{"id":"q-1","text":"severity?","type":"select","options":["high","low"]}]}}`
 			}
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }
@@ -272,12 +274,13 @@ func badJudgeLLM() *mock.LLMClientMock {
 			return materializeJSON
 		case strings.Contains(text, "Observations from prior"):
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }

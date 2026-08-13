@@ -249,7 +249,7 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	// the UI thread; the Case stays bound to the case thread. createInstruction
 	// is empty on resume — the seed context already lives in the gollem history
 	// keyed on the session.
-	_, err = uc.runThreadCaseCreation(ctx, caseCreateReq{
+	return uc.runThreadCaseCreation(ctx, caseCreateReq{
 		entry:       entry,
 		caseChannel: caseChannel,
 		caseTS:      caseTS,
@@ -260,7 +260,6 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 		mentionTS:   messageTS,
 		triggerTS:   messageTS,
 	})
-	return err
 }
 
 // repostThreadQuestionWithError re-renders the form with a banner listing the

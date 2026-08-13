@@ -23,7 +23,6 @@ import (
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
-	agentcommon "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
@@ -41,14 +40,8 @@ import (
 type AgentUseCase struct {
 	deps AgentDeps
 
-	// casebound runs the case-bound gollem ReAct loop. It is non-nil
-	// whenever the LLM client is configured.
+	// casebound runs the case-channel mention agent.
 	casebound *casebound.UseCase
-
-	// threadcase runs the thread-mode plan-and-execute agent (materialize on
-	// creation, investigate / respond / close on mention). Non-nil whenever
-	// the LLM client is configured.
-	threadcase *threadcase.UseCase
 
 	// durableWorkspaceAgent runs the workspace-channel cross-case agent and
 	// durableThreadcase the thread-mode create / mention agents. Both are filled by
@@ -123,61 +116,13 @@ type AgentDeps struct {
 }
 
 // NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.
+//
+// No agent is built here. Every one of them runs on the agentkit runtime, and
+// wiring that needs the process store and the Kernel — both assembled after the
+// usecases. RegisterAgents and BindAgentKernel do it in the order agentkit
+// requires; until they run, the mention handlers stand down.
 func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
-	uc := &AgentUseCase{deps: deps}
-	if deps.LLM != nil {
-		commonDeps := &agentcommon.CommonDeps{
-			Repo:                deps.Repo,
-			Registry:            deps.Registry,
-			LLMClient:           deps.LLM,
-			HistoryRepo:         deps.HistoryRepo,
-			TraceRepo:           deps.TraceRepo,
-			SlackBot:            deps.SlackService,
-			SlackSearch:         deps.SlackSearch,
-			SlackRetriever:      deps.SlackRetriever,
-			NotionClient:        deps.NotionTool,
-			GitHubClient:        deps.GitHubClient,
-			WebFetchClient:      deps.WebFetchClient,
-			JiraTools:           deps.JiraTools,
-			ActionUC:            NewActionToolAdapter(deps.ActionUC),
-			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
-			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
-			CaseRefUC:           deps.CaseUC,
-			CaseMultiUC:         NewCaseMultiCaseAdapter(deps.CaseUC),
-			CaseMultiActionUC:   NewCaseMultiActionAdapter(deps.ActionUC, deps.ActionStepUC),
-			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
-			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC, deps.TagUC),
-			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC, deps.TagUC),
-			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
-			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
-		}
-		// The case-channel agent is NOT built here. It runs on the agentkit
-		// runtime, and wiring it needs the process store and the kernel — both
-		// of which are assembled after the usecases. RegisterAgents /
-		// BindAgentKernel below do it in the order agentkit requires.
-
-		// Build the thread-mode agent. It reuses the same backend deps and a
-		// dedicated planexec runner.
-		budget := deps.ThreadcaseBudget
-		if budget.PlannerLoopMax <= 0 || budget.SubAgentLoopMax <= 0 {
-			budget = DefaultThreadcaseBudget
-		}
-		runner, runnerErr := planexec.NewRunner(planexec.RunnerDeps{
-			LLMClient:   deps.LLM,
-			HistoryRepo: deps.HistoryRepo,
-			TraceRepo:   deps.TraceRepo,
-			Budget:      budget,
-		})
-		if runnerErr != nil {
-			errutil.Handle(context.Background(), goerr.Wrap(runnerErr, "failed to build threadcase planexec runner"), "failed to build threadcase planexec runner")
-		} else if tc, tcErr := threadcase.New(commonDeps, runner); tcErr != nil {
-			errutil.Handle(context.Background(), goerr.Wrap(tcErr, "failed to build threadcase usecase"), "failed to build threadcase usecase")
-		} else {
-			uc.threadcase = tc
-		}
-
-	}
-	return uc
+	return &AgentUseCase{deps: deps}
 }
 
 // DefaultThreadcaseBudget is the planexec budget used for thread-mode agent

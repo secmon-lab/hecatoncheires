@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/gt"
@@ -68,8 +69,55 @@ func newReactionSetup(t *testing.T, llm gollem.LLMClient) (*usecase.SlackUseCase
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	// The create agent runs on the durable runtime, so the worker is what turns a
+	// reaction into a case: the handler returns as soon as the run is recorded.
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 	slackUC := usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock)
 	return slackUC, agentUC, repo, slackMock
+}
+
+// waitForPendingQuestion blocks until the session records the question the run
+// asked. The form is posted and stored by the completion handler; a session with
+// no pending question is what the Submit handler reads as a stale form.
+func waitForPendingQuestion(t *testing.T, repo *memory.Memory, channelID, threadTS string) *model.Session {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		ssn, err := repo.Session().GetByThread(ctx, channelID, threadTS)
+		gt.NoError(t, err).Required()
+		if ssn != nil && ssn.PendingQuestion != nil {
+			return ssn
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, ssn).NotNil().Required()
+			gt.Value(t, ssn.PendingQuestion).NotNil().Required()
+			return nil
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// waitForThreadCase blocks until the case bound to the thread exists, which the
+// completion handler creates after the run finishes.
+func waitForThreadCase(t *testing.T, repo *memory.Memory, wsID, channelID, threadTS string) *model.Case {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		c, err := repo.Case().GetBySlackThread(ctx, wsID, channelID, threadTS)
+		gt.NoError(t, err).Required()
+		if c != nil {
+			return c
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, c).NotNil().Required()
+			return nil
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
 }
 
 func reactionEvent(reaction, user, itemUser, channel, ts string) *slackevents.EventsAPIEvent {
@@ -178,9 +226,7 @@ func TestReaction_SameChannel_CreatesCase(t *testing.T) {
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, ev)).Required()
 	async.Wait()
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.SlackChannelID).Equal("C-MONITOR")
 	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
@@ -219,13 +265,11 @@ func TestReaction_SameChannel_ReplyNormalizesToThreadRoot(t *testing.T) {
 	async.Wait()
 
 	// The case binds to the thread root, not the reply.
+	atRoot := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
+	gt.Value(t, atRoot.SlackThreadTS).Equal("1700000000.000100")
 	atReply, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000200")
 	gt.NoError(t, err).Required()
 	gt.Value(t, atReply).Nil()
-	atRoot, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, atRoot).NotNil().Required()
-	gt.Value(t, atRoot.SlackThreadTS).Equal("1700000000.000100")
 }
 
 // B16: a second reaction on a different message in the same monitored-channel
@@ -237,9 +281,7 @@ func TestReaction_SameChannel_SecondReactionSameThreadNoOp(t *testing.T) {
 	// First reaction creates the case (thread root .000100).
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-REACTOR", "U-AUTHOR", "C-MONITOR", "1700000000.000100"))).Required()
 	async.Wait()
-	c1, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c1).NotNil().Required()
+	c1 := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 
 	// Second reaction on another message in the same thread resolves to the same
 	// root; the case already exists so nothing new happens. The scripted LLM has
@@ -280,13 +322,8 @@ func TestReaction_CrossChannel_CreatesCaseAndBacklink(t *testing.T) {
 	// The placeholder root (default PostMessage ts) was replaced in place with the
 	// shared summary: it carries the case URL but NOT the reporter mention or the
 	// source permalink (those belong to the origin reply, not the common summary).
-	var summary *agentUpdatedMessage
-	for i := range slackMock.updatedMessages {
-		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == "1234567890.123456" {
-			summary = &slackMock.updatedMessages[i]
-		}
-	}
-	gt.Value(t, summary).NotNil().Required()
+	// The summary is written by the run's completion handler, so it is waited for.
+	summary := waitForUpdate(t, slackMock, "C-MONITOR", "1234567890.123456")
 	gt.Bool(t, strings.Contains(summary.Text, "https://app.test/ws/support/cases/")).True()
 	gt.Bool(t, strings.Contains(summary.Text, "<@U-REACTOR>")).False()
 	gt.Bool(t, strings.Contains(summary.Text, srcPermalink)).False()
@@ -420,12 +457,11 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 	// placeholder ts), and the question form was posted in the reactor's source
 	// thread. The source message reference is already persisted so the resume turn
 	// can still link the exact message.
+	// The question is posted and recorded by the run's completion handler.
+	ssn := waitForPendingQuestion(t, repo, "C-MONITOR", placeholderTS)
 	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", placeholderTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, noCase).Nil()
-	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", placeholderTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, ssn).NotNil().Required()
 	gt.Value(t, ssn.ReactionSourceChannelID).Equal(srcChannel)
 	gt.Value(t, ssn.ReactionSourceMessageTS).Equal(srcTS)
 	gt.Value(t, ssn.PendingQuestion).NotNil().Required()
@@ -455,20 +491,12 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 
 	// Resume reconstructed both threads and committed the case in the monitored
 	// channel with the reactor as reporter.
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", placeholderTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", placeholderTS)
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.ReporterID).Equal("U-REACTOR")
 
 	// The placeholder root was replaced in place with the shared summary.
-	var summary *agentUpdatedMessage
-	for i := range slackMock.updatedMessages {
-		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == placeholderTS {
-			summary = &slackMock.updatedMessages[i]
-		}
-	}
-	gt.Value(t, summary).NotNil().Required()
+	summary := waitForUpdate(t, slackMock, "C-MONITOR", placeholderTS)
 	gt.Bool(t, strings.Contains(summary.Text, "https://app.test/ws/support/cases/")).True()
 
 	// Even after a question/resume, the origin reply under the summary root links
@@ -512,14 +540,9 @@ func TestReaction_CrossChannel_FallbackReplacesPlaceholder(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, c).Nil()
 
-	// The placeholder root was replaced with a failure note (not left as "Creating…").
-	var replaced *agentUpdatedMessage
-	for i := range slackMock.updatedMessages {
-		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == placeholderTS {
-			replaced = &slackMock.updatedMessages[i]
-		}
-	}
-	gt.Value(t, replaced).NotNil().Required()
+	// The placeholder root was replaced with a failure note (not left as
+	// "Creating…"), by the run's completion handler.
+	replaced := waitForUpdate(t, slackMock, "C-MONITOR", placeholderTS)
 	gt.Bool(t, strings.Contains(replaced.Text, "⚠️")).True()
 
 	// The claim was released so the source message can be reacted again.
@@ -542,14 +565,9 @@ func TestReaction_CrossChannel_OriginReplyDegradesWithoutPermalink(t *testing.T)
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-REACTOR", "U-AUTHOR", "C-GENERAL", "1700000000.000100"))).Required()
 	async.Wait()
 
-	// The origin reply still names the reporter but carries no link markup.
-	var origin *agentPostedMessage
-	for i := range slackMock.postedMessages {
-		if slackMock.postedMessages[i].ChannelID == "C-MONITOR" && slackMock.postedMessages[i].ThreadTS == "1234567890.123456" {
-			origin = &slackMock.postedMessages[i]
-		}
-	}
-	gt.Value(t, origin).NotNil().Required()
+	// The origin reply still names the reporter but carries no link markup. It is
+	// posted by the run's completion handler.
+	origin := waitForPostIn(t, slackMock, "C-MONITOR", "1234567890.123456")
 	gt.Bool(t, strings.Contains(origin.Text, "<@U-REACTOR>")).True()
 	gt.Bool(t, strings.Contains(origin.Text, "|source message>")).False()
 	gt.Bool(t, strings.Contains(origin.Text, "|元メッセージ>")).False()

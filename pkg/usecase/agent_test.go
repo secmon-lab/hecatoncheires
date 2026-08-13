@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,6 +54,14 @@ func (m *agentTestSlackService) posts() []agentPostedMessage {
 	defer m.postMu.Unlock()
 	out := make([]agentPostedMessage, len(m.postedMessages))
 	copy(out, m.postedMessages)
+	return out
+}
+
+func (m *agentTestSlackService) updates() []agentUpdatedMessage {
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
+	out := make([]agentUpdatedMessage, len(m.updatedMessages))
+	copy(out, m.updatedMessages)
 	return out
 }
 
@@ -220,6 +229,9 @@ type agentRuntimeDeps struct {
 	Registry *model.WorkspaceRegistry
 	LLM      gollem.LLMClient
 	Trace    trace.Repository
+	// CaseUC wires the single-case writer tools (case__*). A test whose agent
+	// mutates the case through a tool call needs it; one that only reads does not.
+	CaseUC *usecase.CaseUseCase
 }
 
 // testAgentBudget is generous enough that no test turn ends on the ceiling; the
@@ -270,11 +282,87 @@ func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.K
 		Trace:   traceRepo,
 		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
 		Agents:  reg,
-		Tools:   agentkernel.ToolDeps{Repo: d.Repo, Registry: d.Registry},
+		Tools: agentkernel.ToolDeps{
+			Repo: d.Repo, Registry: d.Registry,
+			CaseUC: usecase.NewCaseToolAdapter(d.CaseUC),
+		},
 	})
 	gt.NoError(t, err).Required()
 	d.UC.BindAgentKernel(k)
 	return k
+}
+
+// waitForLLMFlag blocks until a probe LLM has been asked for a session, which is
+// the signal that the worker picked the run up. The dispatch decision under test
+// happens synchronously; the agent it dispatched to does not.
+func waitForLLMFlag(t *testing.T, invoked *atomic.Bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !invoked.Load() {
+		if time.Now().After(deadline) {
+			gt.Bool(t, invoked.Load()).True().Required()
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitForPostContaining blocks until the mock has recorded a message carrying
+// the given text, and returns it.
+func waitForPostContaining(t *testing.T, m *agentTestSlackService, want string) agentPostedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, p := range m.posts() {
+			if strings.Contains(p.Text, want) {
+				return p
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no post containing "+want).Equal("a matching post").Required()
+			return agentPostedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// waitForPostIn blocks until the mock has recorded a message posted into the
+// given thread, whichever position it lands in.
+func waitForPostIn(t *testing.T, m *agentTestSlackService, channelID, threadTS string) agentPostedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, p := range m.posts() {
+			if p.ChannelID == channelID && p.ThreadTS == threadTS {
+				return p
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no post in "+channelID+"/"+threadTS).Equal("a post").Required()
+			return agentPostedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// waitForUpdate blocks until the mock has recorded an in-place update of the
+// given message, which is how a durable run replaces a placeholder it posted
+// before the run started.
+func waitForUpdate(t *testing.T, m *agentTestSlackService, channelID, ts string) agentUpdatedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, u := range m.updates() {
+			if u.ChannelID == channelID && u.Timestamp == ts {
+				return u
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no update for "+channelID+"/"+ts).Equal("an update").Required()
+			return agentUpdatedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
 }
 
 // waitForPosts blocks until the mock has recorded at least want messages. The

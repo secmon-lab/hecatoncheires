@@ -11,10 +11,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
@@ -75,6 +79,132 @@ type Env struct {
 	SeededCases    []*model.Case
 	MonitorChannel string
 	Language       string
+
+	// stopAgents shuts the agent worker down. Every agent is a durable Process
+	// driven by that worker, so a scenario that never starts it produces a run
+	// that is recorded and then never executed.
+	stopAgents func()
+}
+
+// Stop shuts the agent worker down. Callers must call it when the scenario ends;
+// leaving it running leaks a goroutine per scenario.
+//
+// It is deliberately not named Close: the project reserves that name for
+// io.Closer, which must go through safe.Close, and this ends a worker rather than
+// releasing a handle.
+func (e *Env) Stop() {
+	if e != nil && e.stopAgents != nil {
+		e.stopAgents()
+		e.stopAgents = nil
+	}
+}
+
+// awaitTurnTimeout bounds how long a driver waits for one agent turn. A live LLM
+// turn with several investigation rounds is slow; a hung one must still end the
+// scenario rather than the whole eval run.
+const awaitTurnTimeout = 10 * time.Minute
+
+// AwaitTurn blocks until the turn started on this thread has finished — the
+// agent either recorded how it ended on the Session, or committed the case.
+//
+// A driver needs it because a turn is a durable Process: the entry point returns
+// once the run is recorded, and everything the driver then inspects (the pending
+// question, the created case, the thread replies) is written afterwards by the
+// run's completion handler.
+func (e *Env) AwaitTurn(ctx context.Context, channelID, threadTS string, before model.SessionEndReason) error {
+	deadline := time.Now().Add(awaitTurnTimeout)
+	for {
+		ssn, err := e.Repo.Session().GetByThread(ctx, channelID, threadTS)
+		if err != nil {
+			return goerr.Wrap(err, "await turn: load session",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		if ssn != nil && ssn.LastAction != "" && ssn.LastAction != before {
+			return nil
+		}
+		// A create turn that committed its case is finished even if the outcome
+		// stamp lost a race with this read.
+		if c, err := e.Repo.Case().GetBySlackThread(ctx, e.Entry.Workspace.ID, channelID, threadTS); err == nil && c != nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return goerr.New("await turn: the agent turn did not finish",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		select {
+		case <-ctx.Done():
+			return goerr.Wrap(ctx.Err(), "await turn")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// evalBudget is deliberately generous: a scenario is meant to fail on the
+// agent's judgement, not on a ceiling the harness imposed.
+var evalBudget = budget.Config{
+	MaxSteps: 64, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000, NoticeRatio: 0.9,
+}
+
+// startAgentRuntime builds the agentkit runtime a scenario's agents run on and
+// starts its worker, returning the stop function.
+//
+// Everything is in-process and per-scenario: the Process store, the history and
+// the trace all live and die with the Env, which is what keeps two scenarios from
+// seeing each other's runs.
+func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegistry,
+	uc *usecase.UseCases, llm gollem.LLMClient,
+) (func(), error) {
+	procRepo := agentprocmemory.New()
+	history := agentarchive.NewMemoryHistoryStore()
+
+	reg := agentkit.NewRegistry()
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalBudget.Limiter(), history)
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: register the task sub-agent")
+	}
+	if err := uc.Agent.RegisterAgents(reg, evalBudget.Limiter(), history, procRepo, taskAgent); err != nil {
+		return nil, goerr.Wrap(err, "env: register the agents")
+	}
+
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    procRepo,
+		History: history,
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: agentkernel.Budgets{Root: evalBudget, Task: evalBudget},
+		Agents:  reg,
+		Tools: agentkernel.ToolDeps{
+			Repo:              repo,
+			Registry:          registry,
+			SlackBot:          uc.SlackService(),
+			SlackSearch:       uc.SlackSearchService(),
+			SlackRetriever:    uc.SlackMessageRetriever(),
+			NotionClient:      uc.NotionToolClient(),
+			GitHubClient:      uc.GitHubToolClient(),
+			WebFetchClient:    uc.WebFetchClient(),
+			ActionUC:          usecase.NewActionToolAdapter(uc.Action),
+			ActionStepUC:      usecase.NewActionStepToolAdapter(uc.ActionStep),
+			CaseUC:            usecase.NewCaseToolAdapter(uc.Case),
+			CaseRefUC:         uc.Case,
+			CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(uc.Case),
+			CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(uc.Action, uc.ActionStep),
+			MemoUC:            usecase.NewMemoToolAdapter(uc.Memo),
+			KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
+			KnowledgeMutator:  usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
+		},
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: build the agent runtime")
+	}
+	uc.Agent.BindAgentKernel(k)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- agentkernel.Serve(ctx, k, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	return func() {
+		cancel()
+		<-done
+	}, nil
 }
 
 // Build assembles the environment for one scenario.
@@ -137,7 +267,13 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 
 	jobRunner := buildJobRunner(repo, registry, uc, opts.LLM, historyRepo, traceRepo)
 
+	stopAgents, err := startAgentRuntime(repo, registry, uc, opts.LLM)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Env{
+		stopAgents:     stopAgents,
 		AgentUC:        uc.Agent,
 		JobRunner:      jobRunner,
 		Repo:           repo,

@@ -158,17 +158,7 @@ func (h threadcaseHost) session(ctx context.Context, target threadcase.Target) (
 	return ssn, nil
 }
 
-// runThreadCaseTurn dispatches one thread-mode turn to whichever runtime is
-// wired. The durable runtime is preferred once it is bound: the run survives an
-// instance restart and its decision is applied by the completion handler.
-func (uc *AgentUseCase) runThreadCaseTurn(ctx context.Context, req threadcase.TurnRequest) (*threadcase.Result, error) {
-	if uc.durableThreadcase != nil {
-		return uc.durableThreadcase.StartTurn(ctx, req)
-	}
-	return uc.threadcase.RunTurn(ctx, req)
-}
-
-// threadCaseReady reports whether either thread-mode runtime can take a turn.
+// threadCaseReady reports whether the thread-mode runtime can take a turn.
 func (uc *AgentUseCase) threadCaseReady() bool {
-	return uc.threadcase != nil || uc.durableThreadcase != nil
+	return uc.durableThreadcase != nil
 }
