@@ -942,7 +942,7 @@ difference is the channel root: in `instant` the channel-root **message** drives
 root creation, so a channel-root @mention there is not a separate trigger. A
 follow-up @mention on a still-Case-less thread resumes the in-flight
 initialization (superseding a pending question) rather than starting a second
-turn; the per-thread turn lock serialises concurrent triggers.
+turn; the agent runtime serialises concurrent triggers on the thread's subject.
 
 ### Case agent prompts (`[case.prompts]`)
 

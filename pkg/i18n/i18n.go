@@ -114,22 +114,6 @@ const (
 	MsgReactionCaseOriginNoLink // "Reported by <@%s>" (reporter user id) — origin reply variant when the source permalink is unavailable
 	MsgReactionCaseBacklink     // ":white_check_mark: Case created: <%s|Open in web UI> · <%s|View thread>" (case url, thread permalink)
 
-	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
-	// into the per-turn Slack progress message so the user can follow what
-	// the agent is doing.
-	MsgProposalTracePlanning           // "🤔 Planning…"
-	MsgProposalTracePlannerRetry       // "⚠️ planner output rejected; retrying"
-	MsgProposalTracePlannerAction      // "→ %s — %s" (action, reasoning)
-	MsgProposalTracePlannerTool        // "🛠 Planning — calling %s" (tool name)
-	MsgProposalTracePlannerMessage     // "🤔 Planning — %s" (one-line excerpt)
-	MsgProposalTracePhase              // "🧭 %s" (planner.investigate.message)
-	MsgProposalTraceTaskPending        // "⏳ Task: %s" (title) — block reserved before sub-agent starts
-	MsgProposalTraceTaskRunning        // "🔍 Task: %s — running…" (title) — initial state when sub-agent begins
-	MsgProposalTraceTaskRunningTool    // "🔍 Task: %s — 🛠 calling %s" (title, tool name) — fires per ToolRequestHook
-	MsgProposalTraceTaskRunningMessage // "🔍 Task: %s — %s" (title, one-line excerpt) — fires per MessageHook
-	MsgProposalTraceTaskDone           // "✅ Task: %s — done (%s, %d/%d inner loops)" (title, elapsed, used, max)
-	MsgProposalTraceTaskFailedPrompt   // "❌ Task: %s — failed (%s, build prompt): %v" (title, elapsed, err)
-	MsgProposalTraceTaskFailed         // "❌ Task: %s — failed (%s, %d/%d inner loops): %v" (title, elapsed, used, max, err)
 	// MsgProposalProcessingCompleted replaces the initial "⏳ Drafting…"
 	// placeholder once Materialize has posted the preview at the thread
 	// end. It tells the user the placeholder is no longer the live status

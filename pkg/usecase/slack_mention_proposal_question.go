@@ -415,26 +415,13 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 		errutil.Handle(ctx, err, "clear PendingQuestion before resuming planner")
 	}
 
-	var (
-		d          *model.CaseProposal
-		proposalID model.CaseProposalID
-	)
+	var d *model.CaseProposal
 	if session.ProposalID != "" {
 		d, err = uc.repo.CaseProposal().Get(ctx, session.ProposalID)
 		if err != nil {
 			errutil.Handle(ctx, err, "thread-reply: failed to load draft; continuing without it")
 		}
 	}
-	if d != nil {
-		proposalID = d.ID
-	}
-	candidates := uc.accessibleWorkspaces(callback.User.ID)
-
-	handler := newSlackDraftHandler(
-		uc.repo, uc.registry, uc.slackService,
-		channelID, threadTS, messageTS, callback.User.ID,
-		candidates, proposalID, "", "",
-	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)
 	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
@@ -444,21 +431,16 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 		TriggerTS:        messageTS,
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
-		Handler:          handler,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "draft question submit turn failed")
 	}
-	if result.Status == proposal.StatusFallback {
-		uc.notifyDraftFallback(ctx, channelID, threadTS, result.FallbackReason)
-	}
 
-	logger.Info("draft question submit turn finished",
+	logger.Info("draft question submit turn started",
 		"channel_id", channelID,
 		"thread_ts", threadTS,
 		"user_id", callback.User.ID,
 		"status", int(result.Status),
-		"ended_with", string(result.EndedWith),
 	)
 	return nil
 }

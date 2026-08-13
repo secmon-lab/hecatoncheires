@@ -1306,7 +1306,7 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
-			usecase.WithLLMClient(stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))),
+			usecase.WithLLMClient(newScriptedClient(nil)),
 			usecase.WithEmbedClient(&mockLLMClient{}),
 			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
 			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),
@@ -1367,7 +1367,7 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
-			usecase.WithLLMClient(stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))),
+			usecase.WithLLMClient(newScriptedClient(nil)),
 			usecase.WithEmbedClient(&mockLLMClient{}),
 			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
 			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),
@@ -1413,7 +1413,7 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
-			usecase.WithLLMClient(stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))),
+			usecase.WithLLMClient(newScriptedClient(nil)),
 			usecase.WithEmbedClient(&mockLLMClient{}),
 			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
 			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),

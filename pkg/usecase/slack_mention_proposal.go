@@ -41,10 +41,9 @@ type MentionProposalUseCase struct {
 	registry     *model.WorkspaceRegistry
 	slackService slacksvc.Service
 	collector    *slacksvc.MessageCollector
-	draftUC      *proposal.UseCase
-	// durableDraft runs the same agent on the agentkit runtime. It is filled by
-	// BindDurableDraft, so a deployment that has not built a Kernel keeps taking
-	// draftUC's in-process path.
+	// durableDraft runs the case-draft agent on the agentkit runtime. It is filled
+	// by BindDurableDraft rather than by the constructor, because registering the
+	// agent needs this usecase as its completion handler.
 	durableDraft *proposal.Durable
 }
 
@@ -56,14 +55,12 @@ func NewMentionProposalUseCase(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
 	slackService slacksvc.Service,
-	draftUC *proposal.UseCase,
 ) *MentionProposalUseCase {
 	return &MentionProposalUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
 		collector:    slacksvc.NewMessageCollector(slackService),
-		draftUC:      draftUC,
 	}
 }
 
@@ -168,12 +165,6 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		return goerr.Wrap(err, "load or create draft session")
 	}
 
-	handler := newSlackDraftHandler(
-		uc.repo, uc.registry, uc.slackService,
-		ev.Channel, threadTS, ev.TimeStamp, ev.User,
-		candidates, d.ID, processingTS, "",
-	)
-
 	userInput := buildProposalUserInput(d, mentionText, channelInfo)
 
 	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
@@ -183,7 +174,6 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		TriggerTS:        ev.TimeStamp,
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
-		Handler:          handler,
 		ProcessingTS:     processingTS,
 	})
 	if runErr != nil {
@@ -193,26 +183,18 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		uc.notifyMaterializationFailed(ctx, ev, runErr)
 		return nil
 	}
-	switch result.Status {
-	case proposal.StatusBusy, proposal.StatusIdempotent:
-		// Handler.PostBusy already posted the busy notice (StatusBusy);
-		// StatusIdempotent is silent. The processing placeholder may
-		// still be showing — replace it with the "ended" footer.
+	// A refused turn leaves the placeholder showing something that will never
+	// arrive, so it is taken down here. A started turn keeps it: the run replaces
+	// it with the draft.
+	if result.Status != proposal.StatusStarted {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-	case proposal.StatusFallback:
-		// Planner exhausted budget / hit an internal error before reaching
-		// a terminal action. Surface a system fallback message so the user
-		// is not left waiting on the processing placeholder.
-		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
 	}
 
-	logger.Info("case draft turn finished",
+	logger.Info("case draft turn started",
 		"proposal_id", d.ID,
 		"channel_id", ev.Channel,
 		"user_id", ev.User,
 		"status", int(result.Status),
-		"ended_with", string(result.EndedWith),
 	)
 	return nil
 }
@@ -230,33 +212,44 @@ func (uc *MentionProposalUseCase) notifyDraftFallback(ctx context.Context, chann
 	}
 }
 
-// loadOrCreateDraftSession returns the Session for the given thread,
+// loadOrCreateDraftSession returns the persisted Session for the given thread,
 // stamping the draft-specific fields (CreatorUserID, ProposalID) when a fresh
 // session is created. An existing session simply has its ProposalID updated
 // when the caller has just freshly created a draft.
+//
+// It writes the session before returning because the turn it is about to feed
+// runs elsewhere: the run's completion handler reloads the session by thread to
+// deliver the draft, and an unsaved one leaves that handler with nothing to
+// deliver into.
 func (uc *MentionProposalUseCase) loadOrCreateDraftSession(ctx context.Context, channelID, threadTS, creatorUserID string, proposalID model.CaseProposalID) (*model.Session, error) {
 	existing, err := uc.repo.Session().GetByThread(ctx, channelID, threadTS)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get session")
 	}
-	if existing != nil {
-		existing.ProposalID = proposalID
-		if creatorUserID != "" && existing.CreatorUserID == "" {
-			existing.CreatorUserID = creatorUserID
-		}
-		return existing, nil
-	}
-
 	now := time.Now().UTC()
-	return &model.Session{
-		ID:            uuid.Must(uuid.NewV7()).String(),
-		ChannelID:     channelID,
-		ThreadTS:      threadTS,
-		CreatorUserID: creatorUserID,
-		ProposalID:    proposalID,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}, nil
+	session := existing
+	if session != nil {
+		session.ProposalID = proposalID
+		if creatorUserID != "" && session.CreatorUserID == "" {
+			session.CreatorUserID = creatorUserID
+		}
+		session.UpdatedAt = now
+	} else {
+		session = &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     channelID,
+			ThreadTS:      threadTS,
+			CreatorUserID: creatorUserID,
+			ProposalID:    proposalID,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+	}
+	if err := uc.repo.Session().Put(ctx, session); err != nil {
+		return nil, goerr.Wrap(err, "persist the draft session",
+			goerr.V("session_id", session.ID))
+	}
+	return session, nil
 }
 
 // buildProposalUserInput assembles the planner's first user message. The
@@ -385,20 +378,6 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		}
 	}
 
-	candidates := uc.accessibleWorkspaces(ev.User)
-
-	// processingTS is empty — we don't post a placeholder for thread reply
-	// resume; the planner trace block will appear when needed.
-	var proposalID model.CaseProposalID
-	if d != nil {
-		proposalID = d.ID
-	}
-	handler := newSlackDraftHandler(
-		uc.repo, uc.registry, uc.slackService,
-		ev.Channel, threadTS, ev.TimeStamp, ev.User,
-		candidates, proposalID, "", "",
-	)
-
 	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session: session,
 		// ev.Text is used raw here, unlike HandleAppMention: shouldResumeOnReply
@@ -410,21 +389,16 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		TriggerTS:        ev.TimeStamp,
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
-		Handler:          handler,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "thread reply turn failed")
 	}
-	if result.Status == proposal.StatusFallback {
-		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
-	}
 
-	logger.Info("thread reply turn finished",
+	logger.Info("thread reply turn started",
 		"channel_id", ev.Channel,
 		"thread_ts", threadTS,
 		"user_id", ev.User,
 		"status", int(result.Status),
-		"ended_with", string(result.EndedWith),
 	)
 	return nil
 }

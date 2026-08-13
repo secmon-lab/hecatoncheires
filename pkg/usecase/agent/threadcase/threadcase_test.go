@@ -269,4 +269,3 @@ func createTestWorkspace() *model.WorkspaceEntry {
 		},
 	}
 }
-

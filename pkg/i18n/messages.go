@@ -91,20 +91,7 @@ var messagesEN = [msgKeyCount]string{
 	MsgReactionCaseBacklink:     ":white_check_mark: Case created: <%s|Open in the web UI> · <%s|View thread>",
 
 	// Draft (open-mode) trace lines
-	MsgProposalTracePlanning:           "🤔 Planning…",
-	MsgProposalTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
-	MsgProposalTracePlannerAction:      "→ %s — %s",
-	MsgProposalTracePlannerTool:        "🛠 Planning — calling %s",
-	MsgProposalTracePlannerMessage:     "🤔 Planning — %s",
-	MsgProposalTracePhase:              "🧭 %s",
-	MsgProposalTraceTaskPending:        "⏳ Task: %s",
-	MsgProposalTraceTaskRunning:        "🔍 Task: %s — running…",
-	MsgProposalTraceTaskRunningTool:    "🔍 Task: %s — 🛠 calling %s",
-	MsgProposalTraceTaskRunningMessage: "🔍 Task: %s — %s",
-	MsgProposalTraceTaskDone:           "✅ Task: %s — done (%s, %d/%d inner loops)",
-	MsgProposalTraceTaskFailedPrompt:   "❌ Task: %s — failed (%s, build prompt): %v",
-	MsgProposalTraceTaskFailed:         "❌ Task: %s — failed (%s, %d/%d inner loops): %v",
-	MsgProposalProcessingCompleted:     "✅ Drafted — see the preview below.",
+	MsgProposalProcessingCompleted: "✅ Drafted — see the preview below.",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
@@ -312,20 +299,7 @@ var messagesJA = [msgKeyCount]string{
 	MsgReactionCaseBacklink:     ":white_check_mark: ケースを作成しました: <%s|Web UI で開く> · <%s|スレッドを開く>",
 
 	// Draft (open-mode) trace lines
-	MsgProposalTracePlanning:           "🤔 計画中…",
-	MsgProposalTracePlannerRetry:       "⚠️ 出力が拒否されました。再試行します",
-	MsgProposalTracePlannerAction:      "→ %s — %s",
-	MsgProposalTracePlannerTool:        "🛠 計画中 — %s 呼び出し中",
-	MsgProposalTracePlannerMessage:     "🤔 計画中 — %s",
-	MsgProposalTracePhase:              "🧭 %s",
-	MsgProposalTraceTaskPending:        "⏳ タスク: %s",
-	MsgProposalTraceTaskRunning:        "🔍 タスク: %s — 実行中…",
-	MsgProposalTraceTaskRunningTool:    "🔍 タスク: %s — 🛠 %s 呼び出し中",
-	MsgProposalTraceTaskRunningMessage: "🔍 タスク: %s — %s",
-	MsgProposalTraceTaskDone:           "✅ タスク: %s — 完了 (%s, %d/%d 内部ループ)",
-	MsgProposalTraceTaskFailedPrompt:   "❌ タスク: %s — 失敗 (%s, プロンプト構築): %v",
-	MsgProposalTraceTaskFailed:         "❌ タスク: %s — 失敗 (%s, %d/%d 内部ループ): %v",
-	MsgProposalProcessingCompleted:     "✅ ドラフトを作成しました。下のプレビューをご確認ください。",
+	MsgProposalProcessingCompleted: "✅ ドラフトを作成しました。下のプレビューをご確認ください。",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",

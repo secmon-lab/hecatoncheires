@@ -14,8 +14,8 @@ import (
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 )
 
 // ToolSet IDs known to the planner. Sub-agents request a subset of these

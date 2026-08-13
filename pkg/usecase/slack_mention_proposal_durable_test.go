@@ -29,7 +29,7 @@ func TestProposalHostPersistsThePendingQuestion(t *testing.T) {
 	})
 
 	slackMock := &agentTestSlackService{}
-	draftUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, nil)
+	draftUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 
 	d := model.NewCaseProposal(time.Now().UTC(), "U-REQUESTER")
 	gt.NoError(t, repo.CaseProposal().Save(ctx, d)).Required()

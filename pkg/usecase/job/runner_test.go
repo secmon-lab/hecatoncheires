@@ -22,7 +22,6 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
-	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -31,6 +30,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"

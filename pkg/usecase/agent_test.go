@@ -1141,6 +1141,51 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	gt.Value(t, session.ActionID).Equal(createdAction.ID)
 }
 
+// traceCapture wraps the existing mockSlackService (defined in source_test.go)
+// and records every PostThreadMessage / UpdateMessage call so the trace tests
+// can assert on the rendered text and call sequence. All other Service methods
+// fall through to mockSlackService.
+type traceCapture struct {
+	mockSlackService
+	mu     sync.Mutex
+	posts  []traceCall
+	postID atomic.Int32
+}
+
+type traceCall struct {
+	method  string
+	ts      string
+	blocks  []goslack.Block
+	text    string
+	channel string
+}
+
+func (s *traceCapture) calls() []traceCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]traceCall, len(s.posts))
+	copy(out, s.posts)
+	return out
+}
+
+func (s *traceCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string, _ ...slack.PostThreadOption) (string, error) {
+	// Use a deterministic, monotonically-increasing TS per post so successive
+	// messages can be distinguished without relying on wall-clock timing.
+	id := s.postID.Add(1)
+	ts := "ts-" + string(rune('0'+id))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.posts = append(s.posts, traceCall{method: "post", ts: ts, blocks: blocks, text: text, channel: channelID})
+	return ts, nil
+}
+
+func (s *traceCapture) UpdateMessage(_ context.Context, channelID, ts string, blocks []goslack.Block, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.posts = append(s.posts, traceCall{method: "update", ts: ts, blocks: blocks, text: text, channel: channelID})
+	return nil
+}
+
 // traceBlockTexts extracts the rendered markdown text of every context block
 // in order, so trace tests can assert on the visible lines.
 func traceBlockTexts(blocks []goslack.Block) []string {

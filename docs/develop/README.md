@@ -24,8 +24,7 @@ rule (`.claude/rules/`). If it is background an agent should always carry, it is
 
 - [Architecture (internals)](architecture.md) — the "why/how" of internal
   design: GraphQL DataLoader (request-scoped batching) and the Agent thread
-  session implementation (Cloud Storage layout, IAM, turn-lock / state
-  persistence).
+  session implementation (Cloud Storage layout, IAM, state persistence).
 
 ## See Also
 

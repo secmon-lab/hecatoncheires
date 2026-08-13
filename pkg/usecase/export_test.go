@@ -14,22 +14,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 )
 
-// NewSlackDraftHandlerForTest builds a slackDraftHandler with the
-// minimum dependencies required by the per-task trace tests. The Slack
-// service is the only side-effect surface; the rest is plumbing.
-func NewSlackDraftHandlerForTest(
-	repo interfaces.Repository,
-	registry *model.WorkspaceRegistry,
-	slackService slack.Service,
-	channelID, threadTS string,
-) proposal.Handler {
-	return newSlackDraftHandler(
-		repo, registry, slackService,
-		channelID, threadTS, "1700000000.000001", "U-test",
-		nil, model.CaseProposalID("draft-test"), "", "",
-	)
-}
-
 // ThreadcaseAskQuestionForTest drives the thread-mode host's question delivery —
 // the completion-handler path a durable run takes when its planner asks the user.
 func ThreadcaseAskQuestionForTest(uc *AgentUseCase, ctx context.Context,

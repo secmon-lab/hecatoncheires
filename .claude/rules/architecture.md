@@ -277,31 +277,31 @@ format, so additions there must remain serialisable.
 
 These terms are easy to conflate; they have precise meanings across the
 plan-and-execute agent runtime (`pkg/usecase/agent/...`). Use them
-consistently in code, comments, specs, and reviews. There are three
+consistently in code, comments, specs, and reviews. There are four
 nested levels:
 
-- **Round** — ONE iteration of the planner loop: a single planner /
-  replan LLM call plus the work that round dispatches (the `investigate`
-  phase's sub-agents, a validation/commit re-emit, etc.). This is one
-  iteration of the `for {}` in `planexec.Runner.Run`.
-- **Turn** — ONE `runner.Run` / `RunTurn` invocation: from agent start
-  until it stops to wait for user input or otherwise completes. A turn
-  runs *many rounds*. A turn ends on a terminal outcome:
-  - the planner asks the user (`question` / `OnQuestion` →
-    `QuestionResult{Terminate:true}`) — the turn closes and waits; the
-    user's reply / form-submit starts the **next** turn;
-  - a terminal action commits (e.g. case create / materialize);
-  - fallback (loop budget exhausted, internal error).
-  A turn is NOT a single loop iteration; it spans many rounds.
+- **Transition** — ONE `Strategy.Step` call: exactly one LLM call or one tool
+  call, committed to storage before the next begins. It is the unit the
+  runtime's step budget counts and the unit a claim can die between.
+- **Round** — ONE planner / replan LLM call plus the work it dispatches (the
+  plan's sub-agent tasks, a re-emit after a validation failure). A round spans
+  several transitions.
+- **Turn** — ONE `Spawn` and the Process it creates, from start until the
+  Process reaches a terminal state. A turn runs *many rounds*. It ends on:
+  - the planner asking the user (`question` → `Done(OutputQuestion)`) — the
+    Process closes and the user's reply / form-submit starts the **next** turn;
+  - a terminal output the host applies (e.g. case create / materialize);
+  - failure (budget exhausted, internal error), which the host reports as a
+    fallback.
 - **Task** — the whole effort (e.g. creating one case), possibly spanning
   **multiple turns** separated by `question`s. (No stricter name yet;
   "task" is fine.)
 
-**Why `question` ends the turn (not `Terminate:false`):** holding the
-per-thread turn-lock open while waiting minutes/hours for a Slack submit
-is not viable under horizontal scaling; the pending question is persisted
-(`Session.PendingQuestion`, shared backend) and the answer arrives on a
-fresh dispatched event that starts a **new turn**.
+**Why `question` ends the turn (not `Terminate:false`):** keeping a run live
+while waiting minutes/hours for a Slack submit is not viable under horizontal
+scaling — the thread's subject would stay held, refusing every other trigger.
+The pending question is persisted (`Session.PendingQuestion`, shared backend)
+and the answer arrives on a fresh dispatched event that starts a **new turn**.
 
 **Entry points & final output.** planexec is a generic plan-execute
 framework — it knows nothing about `case` and performs no side effects
@@ -401,21 +401,32 @@ The same "wire it into every agent" discipline applies to the host's
 per-event trace handler, not just tools. The shared handler lives in
 `pkg/agent/runtrace` (`runtrace.Handler`), which turns gollem LLM / tool
 call boundaries into the `JobRunEvent` records the run-detail UI reads.
-A host that wants a per-call timeline supplies it via
-`planexec.RunRequest.TraceHandler`. planexec combines it (`combineTrace`
-→ `trace.Multi`) with each agent's own trace sink and wires the result
-into **every** agent the run drives — the planner, each parallel
-sub-agent, the direct reply, and the final synthesis. Wiring it into only
-some agents silently drops the rest from the timeline.
 
-This is exactly how the `planexec`-Job empty-timeline bug happened: the
-handler was built by `JobRunner.Run` and handed to the executor, but the
-planexec executor never forwarded it, and planexec drove its agents with
-only the separate archive recorder. The run succeeded, the system prompt
-showed (it is stored on `JobRunLog` before execution), and the timeline
-stayed empty. `simple` Jobs were unaffected because the single-loop
-executor wires the handler directly via `gollem.WithTrace`. When you add
-a new agent execution to planexec, wire the host handler into it too.
+On the durable runtime no host wires it per agent: the **claim middleware**
+(`runTimeline` in `pkg/agent/kernel/middleware.go`) installs one for every claim
+of every Process, parent and child alike, alongside the Cloud Storage archive
+sink (combined via `trace.Multi`). That is what makes coverage automatic — a new
+agent, or a new kind of transition, lands on the timeline without anyone
+remembering to pass a handler down.
+
+Two properties this relies on, which a change here must preserve:
+
+- **The timeline is keyed on the Scope, not the handler.** A run gets one only
+  when its Scope names workspace, case, job and job-run id. A run that keeps no
+  run record leaves the archive as its only trace — the intended outcome, not a
+  gap.
+- **`Sequence` is allocated by the repository inside each write**
+  (`JobRunEventRepository.AppendNext`), so the several Handlers a run accumulates
+  — this claim's, a later claim's on another instance, the run owner's
+  `RUN_ERROR` — append into one ordered timeline with nothing shared between
+  them. Never reintroduce an in-process counter; it would hand the same number
+  out twice.
+
+The in-process Job path (still used by `tick`) is the exception: it wires the
+handler directly via `gollem.WithTrace`. The bug that produced this rule was a
+`planexec` Job whose executor never forwarded the handler it was given, so the
+run succeeded with an empty timeline. Under the middleware that failure mode no
+longer has a place to hide.
 
 ### Mention-triggered runs on the case agent page
 
@@ -456,23 +467,11 @@ Rules for this path:
   row), and the usage totals come from the Process, because the run's
   transitions span claims and possibly instances and no single in-process
   handler sees them all.
-- Keep the existing durable trace sink. `casebound` no longer wires one itself:
-  the agentkit claim middleware opens a Cloud Storage trace per **claim**
-  (`pkg/agent/kernel/middleware.go`), keyed on the Process id rather than the
-  Slack session id. `threadcase` still passes its handler via
-  `planexec.RunRequest.TraceHandler`. Do not replace the archive trace.
-- **The per-call `JobRunEvent` timeline is wired in the claim bracket**, as a
-  second sink alongside the archive (`runTimeline` in
-  `pkg/agent/kernel/middleware.go`, combined via `trace.Multi`). A fresh
-  `runtrace.Handler` per claim is correct because **`Sequence` is allocated by the
-  repository inside each write** (`JobRunEventRepository.AppendNext`): several
-  Handlers on one run — this claim's, a later claim's on another instance, and the
-  run owner's `RUN_ERROR` — append into one ordered timeline with nothing shared
-  between them. There is no `runtrace.Sequencer` any more; do not reintroduce an
-  in-process counter, which would hand the same number out twice.
-- A run gets a timeline only when its Scope names one: workspace, case, job and
-  job-run id must all be set. A run that keeps no run record leaves the archive as
-  its only trace, which is the intended outcome rather than a gap.
+- Keep the existing durable trace sink. No durable host wires one itself: the
+  claim middleware (`pkg/agent/kernel/middleware.go`) opens a Cloud Storage trace
+  per **claim**, keyed on the Process id rather than the Slack session id, and
+  installs the `JobRunEvent` timeline beside it. See § "Trace handler wiring"
+  above for what that guarantees. Do not replace the archive trace.
 - `ModeCreate` (creation-time materialize) is excluded — the requirement is
   post-creation mentions.
 - Trace recording is observability: `Open`/`Finish`/event failures are
@@ -531,29 +530,31 @@ keyed on `(ProcessID, operation)` so a redelivery is a no-op. That is the
 
 ## Budget
 
-The budget model is the combination of **two** controls — there is NO
-running "total sub-agent task count" across a turn:
+The budget is **per Process**, enforced by the runtime rather than counted by
+each host. `budget.Config` (`pkg/agent/budget`) declares four numbers and turns
+them into an `agentkit.Limiter` the Kernel consults before every transition:
 
-1. **Round-count limit** — `PlannerLoopMax` bounds the **number of rounds
-   in a turn** (`budget.canPlannerCall()`). Planner / replan output that fails
-   validation is retried within this same pool. (Final-output regeneration in
-   `Run[T]` — decode/`Validate()` retries — is bounded separately by
-   `finalOutputMaxRetry` and does NOT consume planner rounds.) This is the main
-   loop guard.
-2. **Per-sub-agent budget** — `SubAgentLoopMax` is the inner gollem loop
-   limit granted **fresh to every sub-agent** (so the sub-agent budget
-   naturally recovers per round).
+- `MaxSteps` — committed transitions. It is the successor of the old
+  `PlannerLoopMax`, but it counts transitions, not planner rounds: one LLM call
+  or one tool call is one step.
+- `MaxInputTokens` / `MaxOutputTokens` — the two token counts read off
+  `Process.Metrics`, so they accumulate across claims and instances.
+- `NoticeRatio` — the fraction of any ceiling at which the Strategy is *told* it
+  is close, so it can wrap up instead of being cut off.
 
-Per-round fan-out is already bounded by plan validation (≤ 5 tasks per
-phase), so total sub-agent work is naturally bounded by
-`PlannerLoopMax × (≤5) × SubAgentLoopMax` without a separate total cap.
+Three consequences to keep in mind:
 
-- **Do NOT reintroduce a per-turn total sub-agent count.** The legacy
-  `SubAgentMaxPerTurn` / `subAgentUsed` accumulator is being retired —
-  the round-count limit plus the per-sub-agent budget are the only knobs.
-- `PlannerLoopMax` is a loop bound, NOT "the budget". When someone says
-  "the budget" in this runtime they mean the sub-agent (investigation)
-  budget, which recovers per round.
+- **A ceiling produces `LimitKindStop`, the notice threshold produces
+  `LimitKindNotice`, and Stop wins when both apply.** A Strategy that observes a
+  notice is expected to skip further fan-out and head for its terminal output;
+  planexec does exactly that.
+- **Sub-agents get their own Process and therefore their own budget** (the Task
+  tier of `agentkernel.Budgets`). There is no per-turn total sub-agent count and
+  none should be reintroduced — a parent's `MaxSteps` bounds how many times it
+  can fan out, and each child's own budget bounds that child.
+- **The budget spans the whole task, not one turn.** Because the counters live on
+  the Process, a run resumed after a question continues against the same
+  ceilings; a fresh trigger spawns a fresh Process with fresh ones.
 
-`newBudget(BudgetConfig)` is constructed once per `runner.Run` (per
-turn); crossing a `question` boundary starts a fresh turn.
+Per-round fan-out is separately bounded by plan validation (≤ 5 tasks per
+phase).

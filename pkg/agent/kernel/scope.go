@@ -17,19 +17,19 @@ import (
 // typo away from a silently empty scope, and the failure would surface as an
 // agent with no tools rather than as a compile error.
 const (
-	metaWorkspaceID = "workspace_id"
-	metaCaseID      = "case_id"
-	metaChannelID   = "channel_id"
-	metaThreadTS    = "thread_ts"
-	metaSessionID   = "session_id"
-	metaActorUserID = "actor_user_id"
-	metaLang        = "lang"
-	metaToolSets    = "toolsets"
-	metaPrivateCase = "private_case"
-	metaJobID       = "job_id"
-	metaJobRunID    = "job_run_id"
-	metaEventType   = "event_type"
-	metaSlotGated   = "slot_gated"
+	metaWorkspaceID  = "workspace_id"
+	metaCaseID       = "case_id"
+	metaChannelID    = "channel_id"
+	metaThreadTS     = "thread_ts"
+	metaSessionID    = "session_id"
+	metaActorUserID  = "actor_user_id"
+	metaLang         = "lang"
+	metaToolSets     = "toolsets"
+	metaPrivateCase  = "private_case"
+	metaJobID        = "job_id"
+	metaJobRunID     = "job_run_id"
+	metaEventType    = "event_type"
+	metaSlotGated    = "slot_gated"
 	metaUIChannelID  = "ui_channel_id"
 	metaUIThreadTS   = "ui_thread_ts"
 	metaProcessingTS = "processing_ts"
@@ -206,23 +206,23 @@ func (s Scope) Metadata() map[string]string {
 func ScopeFrom(m map[string]string) Scope {
 	caseID, _ := strconv.ParseInt(m[metaCaseID], 10, 64)
 	return Scope{
-		WorkspaceID: m[metaWorkspaceID],
-		CaseID:      caseID,
-		ChannelID:   m[metaChannelID],
-		ThreadTS:    m[metaThreadTS],
+		WorkspaceID:  m[metaWorkspaceID],
+		CaseID:       caseID,
+		ChannelID:    m[metaChannelID],
+		ThreadTS:     m[metaThreadTS],
 		UIChannelID:  m[metaUIChannelID],
 		UIThreadTS:   m[metaUIThreadTS],
 		ProcessingTS: m[metaProcessingTS],
 		PreviewTS:    m[metaPreviewTS],
-		SessionID:   m[metaSessionID],
-		ActorUserID: m[metaActorUserID],
-		Lang:        m[metaLang],
-		ToolSets:    splitToolSets(m[metaToolSets]),
-		PrivateCase: m[metaPrivateCase] == "1",
-		JobID:       m[metaJobID],
-		JobRunID:    m[metaJobRunID],
-		EventType:   m[metaEventType],
-		SlotGated:   m[metaSlotGated] == "1",
+		SessionID:    m[metaSessionID],
+		ActorUserID:  m[metaActorUserID],
+		Lang:         m[metaLang],
+		ToolSets:     splitToolSets(m[metaToolSets]),
+		PrivateCase:  m[metaPrivateCase] == "1",
+		JobID:        m[metaJobID],
+		JobRunID:     m[metaJobRunID],
+		EventType:    m[metaEventType],
+		SlotGated:    m[metaSlotGated] == "1",
 	}
 }
 

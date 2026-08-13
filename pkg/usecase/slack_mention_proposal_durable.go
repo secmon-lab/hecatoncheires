@@ -57,7 +57,38 @@ func (h proposalHost) ReportFallback(ctx context.Context, target proposal.Target
 	if target.ProcessingTS != "" {
 		h.uc.removeProcessingMessage(ctx, target.ChannelID, target.ProcessingTS)
 	}
+	if err := h.unlockDraft(ctx, target); err != nil {
+		return err
+	}
 	h.uc.notifyDraftFallback(ctx, target.ChannelID, target.ThreadTS, reason)
+	return nil
+}
+
+// unlockDraft clears the in-progress flag a workspace switch sets before it
+// spawns the turn. Only Materialize clears it on the success path, so a turn that
+// ends in fallback would otherwise leave every later interaction on that draft
+// refusing with "inference in progress" and no way back.
+func (h proposalHost) unlockDraft(ctx context.Context, target proposal.Target) error {
+	session, err := h.uc.repo.Session().GetByThread(ctx, target.ChannelID, target.ThreadTS)
+	if err != nil {
+		return goerr.Wrap(err, "load the session of a fallen-back draft turn",
+			goerr.V("channel_id", target.ChannelID), goerr.V("thread_ts", target.ThreadTS))
+	}
+	if session == nil || session.ProposalID == "" {
+		return nil
+	}
+	d, err := h.uc.repo.CaseProposal().Get(ctx, session.ProposalID)
+	if err != nil {
+		return goerr.Wrap(err, "load the draft of a fallen-back turn",
+			goerr.V("proposal_id", session.ProposalID))
+	}
+	if d == nil || !d.InferenceInProgress {
+		return nil
+	}
+	if err := h.uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); err != nil {
+		return goerr.Wrap(err, "clear the in-progress flag of a fallen-back draft turn",
+			goerr.V("proposal_id", string(d.ID)))
+	}
 	return nil
 }
 
@@ -90,19 +121,19 @@ func (h proposalHost) handler(ctx context.Context, target proposal.Target) (*sla
 	), session, nil
 }
 
-// runDraftTurn dispatches one case-draft turn to whichever runtime is wired. The
-// durable runtime is preferred once it is bound: the run survives an instance
-// restart and its draft is delivered by the completion handler.
+// runDraftTurn spawns one case-draft turn on the durable runtime. The turn's
+// draft, question or fallback is delivered by the completion handler, so the
+// caller gets back only whether the turn was accepted.
 func (uc *MentionProposalUseCase) runDraftTurn(ctx context.Context, req proposal.TurnRequest) (*proposal.Result, error) {
-	if uc.durableDraft != nil {
-		return uc.durableDraft.StartTurn(ctx, req)
+	if uc.durableDraft == nil {
+		return nil, goerr.New("the case-draft agent is not bound")
 	}
-	return uc.draftUC.RunTurn(ctx, req)
+	return uc.durableDraft.StartTurn(ctx, req)
 }
 
-// draftReady reports whether either case-draft runtime can take a turn.
+// draftReady reports whether the case-draft runtime can take a turn.
 func (uc *MentionProposalUseCase) draftReady() bool {
-	return uc.draftUC != nil || uc.durableDraft != nil
+	return uc.durableDraft != nil
 }
 
 // BindDurableDraft wires the durable case-draft agent. It is a separate step from

@@ -109,24 +109,15 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 			goerr.V("proposal_id", string(d.ID)))
 	}
 
-	candidates := uc.accessibleWorkspaces(callback.User.ID)
-	threadTS := session.ThreadTS
-
-	// (4) Build host handler. previewTS carries the TS of the existing
-	// preview the user clicked on; Materialize will UpdateMessage that
-	// row in place so the workspace switch reads as a same-position
-	// morph rather than a fresh post at the thread end. processingTS
-	// is empty — there is no "⏳ Drafting…" placeholder on this path.
-	handler := newSlackDraftHandler(
-		uc.repo, uc.registry, uc.slackService,
-		d.Source.ChannelID, threadTS, "", callback.User.ID,
-		candidates, d.ID, "", d.EphemeralMessageTS,
-	)
-
-	// (5) Run the planner turn. TriggerTS is empty for this synthetic event
+	// (4) Spawn the planner turn. TriggerTS is empty for this synthetic event
 	// — there is no Slack-side TS to dedup on. The lock layer treats an
 	// empty TriggerKey as "always proceed (or busy)", which is what we want
 	// for explicit user clicks.
+	//
+	// PreviewTS carries the TS of the existing preview the user clicked on, so
+	// the run's completion handler updates that row in place and the workspace
+	// switch reads as a same-position morph rather than a fresh post at the
+	// thread end.
 	//
 	// The synthetic user input names the workspace explicitly so the planner
 	// resumes against the new workspace without re-running its own selection
@@ -139,7 +130,6 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 		TriggerTS:        "",
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
-		Handler:          handler,
 		PreviewTS:        d.EphemeralMessageTS,
 	})
 	if runErr != nil {
@@ -154,23 +144,17 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 		}
 		return goerr.Wrap(runErr, "ws-switch turn failed")
 	}
-	switch result.Status {
-	case proposal.StatusBusy, proposal.StatusIdempotent:
-		// Locked / duplicate — the lock UI we already posted is the user
-		// signal; nothing more to do.
-		return nil
-	case proposal.StatusFallback:
-		// Planner exhausted budget — render an error block so the user
-		// isn't stuck on the locked preview.
+	if result.Status != proposal.StatusStarted {
+		// Locked / duplicate — the turn was refused, so the run will never clear
+		// the flag this handler set. Clear it here or the draft stays frozen.
+		if clearErr := uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after a refused ws-switch")
+		}
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)
 		if respErr := uc.respondReplaceOriginal(ctx, callback.ResponseURL, errBlocks, errFallback); respErr != nil {
-			errutil.Handle(ctx, goerr.Wrap(respErr, "render fallback block on ws-switch"),
-				"could not surface ws-switch fallback to user")
+			errutil.Handle(ctx, goerr.Wrap(respErr, "render the refusal block on ws-switch"),
+				"could not surface the refused workspace switch to user")
 		}
-		if clearErr := uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
-			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch fallback")
-		}
-		return nil
 	}
 	return nil
 }

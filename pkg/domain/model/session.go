@@ -22,17 +22,6 @@ const (
 	SessionEndedWithCaseBoundReply SessionEndReason = "case_bound"
 )
 
-// SessionTurnState captures whether a turn is currently running on a Session.
-// It is the CAS key used by the Firestore-backed turn lock and is updated
-// by AcquireTurnLock / Heartbeat / ReleaseTurnLock atomically.
-type SessionTurnState string
-
-const (
-	SessionTurnIdle        SessionTurnState = ""
-	SessionTurnRunning     SessionTurnState = "running"
-	SessionTurnInterrupted SessionTurnState = "interrupted"
-)
-
 // SessionKind discriminates what kind of agent conversation owns a thread.
 // The zero value is SessionKindCase so every Session persisted before this
 // field existed keeps its original meaning without a migration.
@@ -84,20 +73,6 @@ type Session struct {
 	// creation path.
 	ReactionSourceChannelID string
 	ReactionSourceMessageTS string
-
-	// Turn lock fields. Maintained by SessionRepository.AcquireTurnLock /
-	// Heartbeat / ReleaseTurnLock. Heartbeat staleness (TurnHeartbeatAt vs now)
-	// is the activity signal; TurnStartedAt is recorded for traces / UX only.
-	TurnState       SessionTurnState
-	TurnOwnerID     string
-	TurnStartedAt   time.Time
-	TurnHeartbeatAt time.Time
-	TurnTriggerTS   string
-
-	// Reserved for future interrupt support. Never read or written by Phase A
-	// code paths; populated by RequestInterrupt in a later spec.
-	InterruptRequestedAt time.Time
-	InterruptByTriggerTS string
 
 	// PendingQuestion mirrors the planner's most recent question payload when
 	// LastAction == SessionEndedWithQuestion. It is the single source of

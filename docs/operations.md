@@ -500,6 +500,70 @@ Every record carries `WorkspaceID`, `CaseID`, `JobID`, `RunID`,
 - Use the `JobRunRepository.List` API (over `workspaceID`) to surface
   per-Job state in an observability dashboard.
 
+## Agent runtime operations
+
+Every agent turn on `serve` — Slack mentions, case creation, case drafts, and
+scheduled Jobs — runs as an **agent process** on the durable runtime rather than
+inside the request that triggered it. The trigger records the run and returns;
+a worker in every `serve` instance drives it to completion.
+
+### What a worker does
+
+Each instance runs one worker with `--agent-worker-poll-concurrency` poll loops
+(default 2) looking for runnable processes every
+`--agent-worker-poll-interval` (default 2s), and drives at most
+`--agent-worker-concurrency` transitions at once (default 8). A claimed process
+is held for `--agent-worker-lease` (default 120s); if the instance dies, another
+instance may reclaim it once the lease expires.
+
+Sizing follows from what a transition is: **one LLM call or one tool call**. So
+worker concurrency is a cap on in-flight model/tool calls per instance, not on
+concurrent conversations — a single conversation occupies one slot at a time.
+
+Two ceilings apply to a run regardless of which instance drives which
+transition, because they are counted on the process itself: the step and token
+budgets (`--agent-max-*` / `--agent-task-max-*`, see
+[CLI Reference](./cli.md#agent-runtime-budgets)). A run that reaches one fails
+with a limit error and the host posts a fallback notice.
+
+### Concurrency per thread
+
+Two turns never run concurrently on one Slack thread: every turn is spawned
+under the thread's **subject**, and the runtime admits one live run per subject.
+A trigger that arrives while a run is live is refused, and the host posts the
+"already handling your previous request" notice. This is what replaced the
+previous per-thread turn lock; there is no heartbeat or staleness window to
+tune any more.
+
+Deployment-wide Job concurrency is separate and still enforced by the Firestore
+execution slots described under [Concurrency](#concurrency).
+
+### A run that never finishes
+
+A run stuck in `running` with an expired lease is reclaimed automatically. A run
+that is genuinely wedged — waiting on an answer nobody will give, or repeatedly
+failing its transition — has to be ended deliberately. There is **no CLI for
+this**: inspect and cancel via the `agentProcesses` collection in Firestore.
+
+- The run-detail page (`/ws/{workspaceID}/cases/{caseID}/agent/runs/{runID}`)
+  shows the per-transition timeline for case-scoped runs, which is the fastest
+  way to see where a run stopped.
+- A run parked on a question keeps a pending `Await`; answering the Slack form
+  resumes it. Deleting the process document abandons the turn — the user sees no
+  reply, and the run log stays `RUNNING`.
+- **A completed run whose completion handler was lost keeps its log `RUNNING`,
+  and for a Job the scheduler will run it again.** That gap is documented in
+  `.claude/rules/architecture.md` § "the completion handler is best-effort"; it
+  is narrow but not yet closed.
+
+### `tick` still executes its own runs
+
+`hecatoncheires tick` does **not** spawn onto the durable runtime — it executes
+each dispatched Job in-process and exits when they finish. A scheduled sweep
+therefore does not depend on a `serve` instance being up, and `--agent-worker-*`
+does not apply to it. The per-deployment Job slot limit does apply, so set
+`HECATONCHEIRES_JOB_MAX_CONCURRENCY` to the same value on `serve` and `tick`.
+
 ## `tick` scheduling
 
 Scheduled Jobs are time-driven by an external sweep — Hecatoncheires does

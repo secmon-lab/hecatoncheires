@@ -275,6 +275,11 @@ They are **not detected** — which is different from not implemented:
 - **Whether a referenced Case may be referenced.** `case_ref_missing` checks
   existence only. Privacy and draft state gate references when they are written;
   applying that here would flag references that were legitimate at write time.
+- **Agent processes.** The `agentProcesses` documents that back an in-flight
+  agent run carry no configuration-derived values — their workspace and case ids
+  are references, and everything else is runtime state (strategy state, metrics,
+  lease). There is nothing a configuration edit can leave inconsistent there, so
+  they are out of scope by construction rather than by choice.
 
 The check reads the data as it finds it and does not take a snapshot, so a
 workspace being written to concurrently can yield a count that is already stale.
