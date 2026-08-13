@@ -26,11 +26,16 @@ Differences worth knowing before changing it:
   planner asked for before deciding. A retry (a rejected plan, a rejected terminal
   output) is a fresh transition, never a loop inside one.
 - **The planner may call tools.** When a planning call returns FunctionCalls
-  instead of a decision, the run diverts to `planner_tool`, runs ONE of them, and
-  comes back. It is bounded by `plannerToolRoundsMax` per planning phase, because
-  those calls are free of the round budget — nothing else would stop a model that
-  only ever looks things up. The planning call that follows sends no user turn:
-  the request is already in the conversation.
+  instead of a decision, the run diverts to `planner_tool`, runs ONE of them per
+  transition, and comes back. It is bounded by `plannerToolRoundsMax` per planning
+  phase, because those calls are free of the round budget — nothing else would stop
+  a model that only ever looks things up. The bound is a NUDGE, not a gate: past it
+  the calls are still run and answered (dropping them breaks the conversation), and
+  what changes is that the planner is told to decide with what it has.
+  The planning call that follows sends the tool results and nothing else — no
+  restated request, and ALL results in that one call. See
+  `.claude/rules/architecture.md` § "a parallel tool-call turn is answered in ONE
+  call" for why one at a time is not an option.
 - **A question ENDS the turn by default** (`Output.Kind == OutputQuestion`) rather
   than waiting on an await. Holding a run open while a person takes hours would pin
   its subject and block every later turn on that thread; the answer arrives as a

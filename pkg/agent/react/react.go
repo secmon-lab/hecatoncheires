@@ -28,6 +28,9 @@ import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // Phases. A transition reads the phase, does one thing, and writes the phase it
@@ -68,7 +71,10 @@ type state struct {
 	// Pending are the tool calls the model asked for and this run has not made
 	// yet. They are consumed one per transition.
 	Pending []*gollem.FunctionCall `json:"pending,omitempty"`
-	Texts   []string               `json:"texts,omitempty"`
+	// ToolResponses are the results of the drained Pending calls, held until the
+	// next Generate reports them as ONE turn.
+	ToolResponses []toolcall.Response `json:"tool_responses,omitempty"`
+	Texts         []string            `json:"texts,omitempty"`
 }
 
 // Option configures the strategy.
@@ -144,11 +150,14 @@ func (s *strategy) Step(ctx context.Context, sys agentkit.Syscalls, st state) (s
 
 // stepGenerate makes the one LLM call this transition is allowed.
 func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
-	// An empty input continues from the conversation as it stands, which is what
-	// follows a tool result the previous transition already appended.
-	var input []gollem.Input
+	// Pending tool results go first and ALL of them go in this one call — see
+	// package toolcall for why they cannot be reported one at a time.
+	//
+	// With no results and an empty prompt this sends nothing and continues from
+	// the conversation as it stands.
+	input := toolcall.Inputs(st.ToolResponses)
 	if st.Prompt != "" {
-		input = []gollem.Input{gollem.Text(st.Prompt)}
+		input = append(input, gollem.Text(st.Prompt))
 	}
 
 	// A budget that is close to its ceiling has to be TOLD to the model, not
@@ -173,6 +182,10 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	if err != nil {
 		return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: generate")
 	}
+	// The call carried them, so they are now in the conversation. Cleared only
+	// after it succeeded: a failed transition is retried from the checkpoint, and
+	// dropping them earlier would leave its function calls unanswered forever.
+	st.ToolResponses = nil
 
 	st.Prompt = ""
 	st.Texts = append(st.Texts, res.Texts...)
@@ -196,13 +209,16 @@ func noticeInstruction(msg string) string {
 	return msg + "\nThis run is close to its budget. Answer now from what you already have, and do not call any more tools."
 }
 
-// stepTool runs exactly one pending tool call.
+// stepTool runs exactly one pending tool call and holds the result on the state.
+// The results are reported together by the next Generate — see package toolcall
+// for why they cannot be reported one at a time, and why this uses the primitive
+// CallTool rather than the session's.
 //
-// A tool that fails is not a transition failure: Session().CallTool appends a
-// tool_response carrying the error either way, so the conversation is closed and
-// the model gets to react to the failure on its next turn — which is how the
-// previous runtime behaved too. The one error that must not be swallowed is a
-// refusal from the budget: continuing past it would spend beyond the ceiling.
+// A tool that fails is not a transition failure: the failure is recorded as this
+// call's response, so the call is still answered and the model gets to react to
+// it on its next turn — which is how the previous runtime behaved too. The one
+// error that must not be swallowed is a refusal from the budget: continuing past
+// it would spend beyond the ceiling.
 //
 // That refusal check is DEFENSIVE rather than a path budget.Config can take.
 // agentkit evaluates Limit against "committed metrics plus whatever this
@@ -225,12 +241,20 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		return st, agentkit.Continue[Output](), nil
 	}
 
-	if _, err := sys.Session().CallTool(ctx, *call); err != nil {
+	out, err := sys.CallTool(ctx, *call)
+	if err != nil {
 		if errors.Is(err, agentkit.ErrLimitExceeded) {
 			return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: tool call refused by the budget",
 				goerr.V("tool", call.Name))
 		}
+		// Reported as well as fed back. The model needs the failure to react to;
+		// an operator needs it to tell a broken tool from a model that chose not
+		// to use its result, and the run timeline that also records it is only
+		// written for a run that keeps a run record.
+		errutil.Handle(ctx, goerr.Wrap(err, "react: tool call",
+			goerr.V("tool", call.Name), goerr.V("call_id", call.ID)), "react: tool call")
 	}
+	st.ToolResponses = append(st.ToolResponses, toolcall.New(*call, out, err))
 
 	if len(st.Pending) == 0 {
 		st.Phase = phaseGenerate

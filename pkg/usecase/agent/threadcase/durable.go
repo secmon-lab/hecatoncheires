@@ -400,6 +400,7 @@ func (d *Durable) onMentionFinish(ctx context.Context, pid agentkit.ProcessID,
 			if out.Data == nil {
 				runErr = goerr.New("the mention turn finished with no decision")
 				d.reportFallback(ctx, target, runErr.Error())
+				d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
 				break
 			}
 			if aerr := d.host.ApplyMention(ctx, target, out.Data); aerr != nil {
@@ -426,8 +427,14 @@ func (d *Durable) onMentionFinish(ctx context.Context, pid agentkit.ProcessID,
 	case res.Status == agentkit.ProcessFailed:
 		runErr = failureError(res.Failure)
 		d.reportFallback(ctx, target, runErr.Error())
+		d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
 	case res.Status == agentkit.ProcessCancelled:
 		runErr = goerr.New("run cancelled")
+		// No user-facing message: someone stopped this deliberately. The outcome is
+		// still stamped, because "how did the last turn end" must have an answer for
+		// every way a turn can end — a thread left unstamped reads as one whose turn
+		// never finished.
+		d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
 	}
 
 	d.finishRunLog(ctx, sc, pid, runErr)
@@ -460,6 +467,10 @@ func (d *Durable) onCreateFinish(ctx context.Context, pid agentkit.ProcessID,
 		}
 	case res.Status == agentkit.ProcessFailed:
 		d.reportFallback(ctx, target, failureError(res.Failure).Error())
+		d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
+	case res.Status == agentkit.ProcessCancelled:
+		// Stamped without a message, for the same reason as the mention path.
+		d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
 	}
 	return nil
 }

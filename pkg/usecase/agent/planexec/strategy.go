@@ -13,6 +13,7 @@ import (
 
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
@@ -242,6 +243,9 @@ type state struct {
 	// AfterTool is the phase to return to once PendingCalls is drained — the
 	// planning phase that asked for them.
 	AfterTool string `json:"after_tool,omitempty"`
+	// ToolResponses are the results of the drained PendingCalls, held until the
+	// planning call that follows sends them as ONE user turn.
+	ToolResponses []toolcall.Response `json:"tool_responses,omitempty"`
 	// PlannerToolRounds counts how many times the planner has asked for tools
 	// within one planning phase, so a model that only ever calls tools cannot spin
 	// forever inside a single round.
@@ -379,6 +383,10 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: planner generate")
 	}
+	// The call carried them, so they are now in the conversation. Cleared only
+	// after it succeeded: a failed transition is retried from the checkpoint, and
+	// dropping them earlier would leave its function calls unanswered forever.
+	st.ToolResponses = nil
 
 	if next, diverted := s.divertToTools(st, res, phasePlan); diverted {
 		return next, agentkit.Continue[Output[T]](), nil
@@ -400,35 +408,61 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 
 // plannerInput is the user turn a planning call sends.
 //
-// An empty NextInput sends nothing and continues from the conversation as it
-// stands, which is what follows the tool results a previous transition appended:
-// re-sending the original request there would ask the same question again as
-// though nothing had been learnt.
+// Pending tool results go first and ALL of them go in this one call. That is a
+// provider requirement, not a preference: a model turn holding N function calls
+// must be answered by a single turn holding N function responses, and Gemini
+// rejects the request outright otherwise ("the number of function response parts
+// is equal to the number of function call parts of the function call turn").
+// Sending them one at a time — which is what appending each result to the
+// conversation as its own message does — splits that one turn into N, and every
+// later call in the run is rejected.
+//
+// With no results and an empty NextInput it sends nothing and continues from the
+// conversation as it stands; re-sending the original request would ask the same
+// question again as though nothing had been learnt.
 func plannerInput(st state) []gollem.Input {
-	if st.NextInput == "" {
+	inputs := toolcall.Inputs(st.ToolResponses)
+	if st.NextInput != "" {
+		inputs = append(inputs, gollem.Text(st.NextInput))
+	}
+	if len(inputs) == 0 {
 		return nil
 	}
-	return []gollem.Input{gollem.Text(st.NextInput)}
+	return inputs
 }
 
-// plannerToolRoundsMax bounds how many times the planner may ask for tools before
-// committing to a decision, within one planning phase.
+// plannerToolRoundsMax is the number of tool rounds a planning phase may take
+// before the planner is told, in words, to decide with what it has.
 //
 // It exists because the planner's tool calls are free of the round budget — they
 // are not sub-agent work — so a model that answers every prompt with another
-// lookup would otherwise only be stopped by the token ceiling, having produced
-// nothing. Past the bound the tools are withheld and the planner must decide from
-// what it has.
+// lookup would otherwise only be stopped by the step ceiling, having produced
+// nothing.
+//
+// It is a NUDGE, not a gate, and deliberately so: the only way to stop a model
+// asking is to withhold the tools, and there is no option to do that — agentkit's
+// WithTools appends to the session's tools and nothing removes them. The hard stop
+// is MaxSteps, which every one of these calls charges.
 const plannerToolRoundsMax = 4
+
+// plannerToolBudgetNotice is what the planner is told once it has spent its tool
+// rounds. It is a user-turn instruction rather than a system prompt change because
+// it applies to this planning phase only.
+const plannerToolBudgetNotice = "You have used your tool allowance for this planning step. " +
+	"Do not call any more tools; decide now with what you already have."
 
 // divertToTools sends the run to the tool phase when the planner asked for tools
 // instead of deciding, and reports whether it did.
 //
-// Beyond plannerToolRoundsMax it does not divert: the calls are dropped and the
-// planner's own text is parsed as usual, which fails validation and comes back as
-// a correction telling it to decide.
+// It diverts whenever there are calls — including past plannerToolRoundsMax. That
+// is not optional: the model's function-call turn is already in the conversation,
+// and a provider rejects the next request unless every call in it has a matching
+// response ("the number of function response parts is equal to the number of
+// function call parts"). Dropping the calls produced exactly that error, retried
+// until the run failed. Past the bound the calls are still answered; what changes
+// is that the planner is then told to stop asking.
 func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from string) (state, bool) {
-	if len(res.FunctionCalls) == 0 || st.PlannerToolRounds >= plannerToolRoundsMax {
+	if len(res.FunctionCalls) == 0 {
 		return st, false
 	}
 	st.PendingCalls = res.FunctionCalls
@@ -442,13 +476,20 @@ func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from
 	return st, true
 }
 
-// stepPlannerTool runs exactly one tool call the planner asked for.
+// stepPlannerTool runs exactly one tool call the planner asked for and holds the
+// result on the state. The results are sent together by the planning call that
+// follows — see plannerInput for why they cannot be sent one at a time.
 //
-// A tool that fails is not a transition failure: CallTool appends a tool_response
-// carrying the error either way, so the planner gets to react to the failure on
-// its next call. A refusal from the budget is the one error that must not be
-// swallowed — continuing past it would spend beyond a ceiling its owner declared
-// closed.
+// It uses the primitive CallTool rather than the session's, because the session's
+// writes each result into the conversation as its own message, which is precisely
+// the split the provider rejects. The conversation is advanced once, by the next
+// Generate, with every result in that one turn.
+//
+// A tool that fails is not a transition failure: the failure is recorded as this
+// call's response, so the planner gets to react to it on its next call and the
+// call is still answered. A refusal from the budget is the one error that must not
+// be swallowed — continuing past it would spend beyond a ceiling its owner
+// declared closed.
 func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
 	if len(st.PendingCalls) == 0 {
 		st.Phase = st.AfterTool
@@ -458,17 +499,31 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 	call := st.PendingCalls[0]
 	st.PendingCalls = st.PendingCalls[1:]
 	if call != nil {
-		if _, err := sys.Session().CallTool(ctx, *call); err != nil {
+		out, err := sys.CallTool(ctx, *call)
+		if err != nil {
 			if errors.Is(err, agentkit.ErrLimitExceeded) {
 				return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err,
 					"planexec: planner tool call refused by the budget",
 					goerr.V("tool", call.Name))
 			}
+			// Reported as well as fed back: the planner needs the failure to react
+			// to, and an operator needs it to tell a broken tool from a model that
+			// chose not to use its result.
+			errutil.Handle(ctx, goerr.Wrap(err, "planexec: planner tool call",
+				goerr.V("tool", call.Name), goerr.V("call_id", call.ID)),
+				"planexec: planner tool call")
 		}
+		st.ToolResponses = append(st.ToolResponses, toolcall.New(*call, out, err))
 	}
 
 	if len(st.PendingCalls) == 0 {
 		st.Phase = st.AfterTool
+		// If the planner has now spent its allowance, say so on the way back:
+		// withholding the tools is not possible, so the instruction is the only
+		// lever. It rides along with the results in the same turn.
+		if st.PlannerToolRounds >= plannerToolRoundsMax {
+			st.NextInput = plannerToolBudgetNotice
+		}
 	}
 	return st, agentkit.Continue[Output[T]](), nil
 }
@@ -554,6 +609,7 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: replanner generate")
 	}
+	st.ToolResponses = nil // see stepPlan: cleared only once the call that carried them succeeded
 
 	if next, diverted := s.divertToTools(st, res, phaseReplan); diverted {
 		return next, agentkit.Continue[Output[T]](), nil

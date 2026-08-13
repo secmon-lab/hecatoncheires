@@ -595,9 +595,13 @@ func (t *recordingTool) calls() []map[string]any {
 // or, when the entry is a tool name, a request to call it.
 type toolCallingPlanner struct {
 	mu      sync.Mutex
-	replies []any // string (JSON) or *gollem.FunctionCall
+	replies []any // string (JSON), *gollem.FunctionCall, or []*gollem.FunctionCall
 	n       atomic.Int32
 	inputs  []string
+	// respIDs[i] is the tool-call ids the i-th Generate was answered with, in the
+	// order they arrived. Recorded per call because a turn's responses must all
+	// reach ONE call.
+	respIDs [][]string
 }
 
 func (p *toolCallingPlanner) client() gollem.LLMClient {
@@ -606,14 +610,19 @@ func (p *toolCallingPlanner) client() gollem.LLMClient {
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					var b strings.Builder
+					var ids []string
 					for _, in := range input {
-						if txt, ok := in.(gollem.Text); ok {
-							b.WriteString(string(txt))
+						switch v := in.(type) {
+						case gollem.Text:
+							b.WriteString(string(v))
+						case gollem.FunctionResponse:
+							ids = append(ids, v.ID)
 						}
 					}
 					i := int(p.n.Add(1)) - 1
 					p.mu.Lock()
 					p.inputs = append(p.inputs, b.String())
+					p.respIDs = append(p.respIDs, ids)
 					p.mu.Unlock()
 					if i >= len(p.replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
@@ -621,6 +630,9 @@ func (p *toolCallingPlanner) client() gollem.LLMClient {
 					switch reply := p.replies[i].(type) {
 					case *gollem.FunctionCall:
 						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{reply},
+							InputToken: 5, OutputToken: 3}, nil
+					case []*gollem.FunctionCall:
+						return &gollem.Response{FunctionCalls: reply,
 							InputToken: 5, OutputToken: 3}, nil
 					default:
 						return &gollem.Response{Texts: []string{reply.(string)},
@@ -640,6 +652,14 @@ func (p *toolCallingPlanner) seen() []string {
 	defer p.mu.Unlock()
 	out := make([]string, len(p.inputs))
 	copy(out, p.inputs)
+	return out
+}
+
+func (p *toolCallingPlanner) answeredWith() [][]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([][]string, len(p.respIDs))
+	copy(out, p.respIDs)
 	return out
 }
 
@@ -683,16 +703,25 @@ func TestPlannerToolCallRunsBeforeThePlan(t *testing.T) {
 
 // A planner that only ever calls tools must be stopped: its lookups are free of
 // the round budget, so nothing else would bound them.
-func TestPlannerToolCallsAreBounded(t *testing.T) {
+// EVERY tool call the planner makes must be answered, including the ones past its
+// allowance, and the allowance is enforced by telling the planner to stop.
+//
+// Leaving a call unanswered is not a lesser outcome, it is a broken conversation:
+// the model's function-call turn is already in the history, and a provider rejects
+// the next request unless the number of function responses equals the number of
+// calls in it. Dropping the over-budget calls did exactly that against a live
+// model — "Please ensure that the number of function response parts is equal to the
+// number of function call parts" — retried until the run failed, so a create turn
+// that asked for one lookup too many produced no case at all.
+func TestPlannerToolCallsAreAlwaysAnswered(t *testing.T) {
 	lookup := &recordingTool{name: "get_workspace"}
 	call := func() any {
 		return &gollem.FunctionCall{ID: "c", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}}
 	}
 	planner := &toolCallingPlanner{replies: []any{
-		call(), call(), call(), call(),
-		// The fifth is past the bound: the calls are dropped and this text is parsed
-		// as a plan instead, which fails validation and comes back as a correction.
-		call(),
+		// Four rounds spend the allowance; the fifth is past it and must STILL be
+		// answered rather than dropped.
+		call(), call(), call(), call(), call(),
 		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
@@ -706,11 +735,54 @@ func TestPlannerToolCallsAreBounded(t *testing.T) {
 	proc := rt.run(t, textInput(), nil)
 	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
 
-	// Four lookups ran; the fifth request was refused rather than executed.
-	gt.Array(t, lookup.calls()).Length(4)
-	// And the planner was told to decide instead.
+	// All five ran: none was dropped, so no call was left without a response.
+	gt.Array(t, lookup.calls()).Length(5)
+
+	// The allowance shows up as an instruction, which is the only lever there is:
+	// agentkit's WithTools appends to the session's tools and nothing removes them,
+	// so the planner cannot be denied the tools it already has.
 	seen := planner.seen()
-	gt.String(t, seen[5]).Contains("rejected")
+	gt.String(t, seen[4]).Contains("Do not call any more tools")
+}
+
+// A planner turn asking for several tools at once is answered by ONE call
+// carrying every result. Reporting them one at a time is what a provider rejects
+// ("the number of function response parts is equal to the number of function call
+// parts of the function call turn"), and once the conversation holds that split it
+// stays broken for the rest of the run.
+func TestParallelPlannerToolCallsAreAnsweredInOneTurn(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		[]*gollem.FunctionCall{
+			{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
+			{ID: "c2", Name: "get_workspace", Arguments: map[string]any{"id": "ws-2"}},
+			{ID: "c3", Name: "get_workspace", Arguments: map[string]any{"id": "ws-3"}},
+		},
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Answered.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// Each call ran once, as its own transition.
+	gt.Array(t, lookup.calls()).Length(3)
+
+	// The planning call that follows carries all three, in the order asked, and
+	// no other call carries any.
+	answered := planner.answeredWith()
+	gt.Array(t, answered).Length(5).Required()
+	gt.Array(t, answered[0]).Length(0)
+	gt.Value(t, answered[1]).Equal([]string{"c1", "c2", "c3"})
+	for i := 2; i < len(answered); i++ {
+		gt.Array(t, answered[i]).Length(0)
+	}
 }
 
 // countingProgress counts how many NEW messages were posted, which is the thing

@@ -359,6 +359,13 @@ func (d *Durable) onFinish(ctx context.Context, pid agentkit.ProcessID,
 		}
 	case res.Status == agentkit.ProcessFailed:
 		d.reportFallback(ctx, target, failureError(res.Failure).Error())
+		d.endSession(ctx, target, model.SessionEndedWithMaterialize)
+	case res.Status == agentkit.ProcessCancelled:
+		// No user-facing message: someone stopped this deliberately. The outcome is
+		// still stamped, because "how did the last turn end" must have an answer for
+		// every way a turn can end — a thread left unstamped reads as one whose turn
+		// never finished, and anything waiting on that answer waits forever.
+		d.endSession(ctx, target, model.SessionEndedWithMaterialize)
 	}
 	return nil
 }

@@ -582,6 +582,41 @@ Two things follow for anyone changing this area:
   adding locks around the handler. Until that is done, do not describe the thread
   as serialised end to end.
 
+## Agent runtime: a parallel tool-call turn is answered in ONE call (NON-NEGOTIABLE)
+
+A model turn holding N function calls must be answered by a SINGLE turn holding N
+function responses. Gemini rejects the request outright otherwise — "Please ensure
+that the number of function response parts is equal to the number of function call
+parts of the function call turn" — and once the conversation holds the wrong shape
+every later call in the run is rejected, so the turn dies with no answer.
+
+The obvious implementation violates this. `agentkit.Session().CallTool` appends
+each result to the conversation as its own message (`session.go`), and gollem's
+Gemini adapter maps one message to one turn (`llm/gemini/convert_message.go`,
+`convertMessagesToGemini` — it does not coalesce consecutive tool messages). So a
+Strategy that answers a parallel call turn one result at a time splits the one
+required turn into N. The pre-agentkit loop never hit this because it passed all
+results into one `Generate`, which gollem packs into one turn.
+
+Both Strategies therefore do the same thing, and a new one must too:
+
+- Run each call through the **primitive** `Syscalls.CallTool`, which executes the
+  tool (Limit, Metrics and trace unchanged — the session's CallTool calls it
+  internally) without touching the conversation.
+- Hold the results on the checkpointed state as `toolcall.Response`
+  (`pkg/agent/toolcall`), which survives the JSON round trip a checkpoint makes.
+  A FAILED tool is held too: the call still has to be answered, and the failure is
+  what the model reacts to.
+- Report all of them as the inputs of the next `Generate`, then clear them —
+  **after** that call succeeded, since a failed transition is retried from the
+  checkpoint and dropping them earlier leaves its calls unanswered forever.
+
+This does not change the transition split: one transition is still one LLM call or
+one tool call. What changes is only where the result is kept until it is reported.
+
+Pinned by `TestParallelToolResultsAreReportedInOneTurn` (react) and
+`TestParallelPlannerToolCallsAreAnsweredInOneTurn` (planexec).
+
 ## Budget
 
 The budget is **per Process**, enforced by the runtime rather than counted by
