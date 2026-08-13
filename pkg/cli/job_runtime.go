@@ -383,11 +383,16 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		return buildJobTools(deps, adapters, c, ws)
 	})
 
-	// No in-process executors are registered: every strategy runs on the durable
-	// runtime in both entry points — `serve` keeps a worker running, and the `tick`
-	// CLI drains its own runs before it exits. The runner's executor path is
-	// therefore unreachable from here; it survives only for the eval harness and
-	// tests, which drive the runner directly. Retiring it is tracked in the spec.
+	// Every strategy runs on the durable runtime whenever one exists — `serve` keeps
+	// a worker running, and the `tick` CLI drains its own runs before it exits — so
+	// no executor is registered for it.
+	//
+	// A deployment with no LLM configured builds no Kernel at all, and there the
+	// in-process executor is still what makes a run RECORDED: it fails on the absent
+	// model, but `Run` reaches the finish stage and writes the run log and the
+	// FAILED outcome an operator reads. Without it such a run would abort in the
+	// prepare stage, leaving nothing in the run history to explain itself.
+	executors := inProcessExecutors(deps.Durable)
 
 	// Reflection agent: knowledge/tag tools only, sharing the same knowledge use
 	// cases as the Job tools. Disabled (nil reflector) if knowledge is not
@@ -417,6 +422,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		Repo:          deps.Repo,
 		Registry:      deps.Registry,
 		LLMClient:     deps.LLMClient,
+		Executors:     executors,
 		ToolBuilder:   toolBuilder,
 		SlackNotifier: slackNotifier,
 		Reflector:     reflector,
@@ -444,6 +450,25 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner, nil
+}
+
+// inProcessExecutors returns the in-process executors a deployment still needs.
+//
+// With an agent runtime there are none: every strategy is Spawned onto it, in both
+// entry points (`serve` keeps a worker running, `tick` drains its own runs).
+//
+// Without one — a deployment with no LLM configured builds no Kernel at all — the
+// single-loop executor is what keeps a run RECORDED. It fails on the absent model,
+// but `Run` reaches its finish stage and writes the run log and the FAILED outcome
+// an operator reads in the run history. Returning nothing here instead would abort
+// such a run in the prepare stage, leaving no row to explain itself.
+func inProcessExecutors(durable *job.DurableRuntime) map[model.JobStrategy]jobagent.JobExecutor {
+	if durable != nil {
+		return map[model.JobStrategy]jobagent.JobExecutor{}
+	}
+	return map[model.JobStrategy]jobagent.JobExecutor{
+		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
+	}
 }
 
 // buildJobSlotLimiter builds the deployment-wide concurrency gate for scheduled

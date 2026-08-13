@@ -109,6 +109,9 @@ exempt_name := {
 	"BindAgentKernel",
 	"BindDurableDraft",
 	"AttachRunner",
+	# TrackSpawns is the same kind of startup switch: it initialises an in-memory
+	# slice so a batch command can later wait for its own runs. No I/O.
+	"TrackSpawns",
 	# returns the usecase's own completion-handler adapter; a struct literal.
 	"DurableDraftHost",
 	# agentkit Strategy methods. Their signatures are fixed by the library, and

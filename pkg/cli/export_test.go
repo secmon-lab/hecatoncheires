@@ -14,6 +14,10 @@ import (
 // RegistryHasInteractiveJobForTest exposes registryHasInteractiveJob.
 var RegistryHasInteractiveJobForTest = registryHasInteractiveJob
 
+// InProcessExecutorsForTest exposes inProcessExecutors so a test can pin which
+// deployments still get one without standing up a server.
+var InProcessExecutorsForTest = inProcessExecutors
+
 // BuildJobToolsForTest exposes buildJobTools so tests can assert the
 // per-workspace-mode tool composition without standing up a full job runtime.
 // Adapters are left zero-valued: buildJobTools only constructs tool structs

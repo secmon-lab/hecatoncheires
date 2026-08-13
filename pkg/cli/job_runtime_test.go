@@ -13,6 +13,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
 // The fakes below stub their interfaces by embedding them (nil), so any method
@@ -42,6 +43,27 @@ func fakeJiraTools() []gollem.Tool {
 		&fakeJiraTool{name: "jira_search_issues"},
 		&fakeJiraTool{name: "jira_get_issues"},
 	}
+}
+
+// A deployment with an agent runtime registers no in-process executor: every
+// strategy is Spawned onto the runtime instead.
+func TestInProcessExecutors_NoneWithAnAgentRuntime(t *testing.T) {
+	got := cli.InProcessExecutorsForTest(&job.DurableRuntime{})
+	gt.Number(t, len(got)).Equal(0)
+}
+
+// A deployment WITHOUT an agent runtime — no LLM configured, so no Kernel is built
+// — must still get the single-loop executor.
+//
+// It is not there to run an agent: with no model the run fails immediately. It is
+// there so the run is RECORDED. `Run` only reaches the stage that writes the run log
+// and the FAILED outcome by going through an executor; with none registered the
+// attempt aborts in the prepare stage and the run history shows nothing at all,
+// which is what the manual-run e2e caught.
+func TestInProcessExecutors_SingleLoopWithoutAnAgentRuntime(t *testing.T) {
+	got := cli.InProcessExecutorsForTest(nil)
+	gt.Number(t, len(got)).Equal(1)
+	gt.Value(t, got[model.JobStrategySimple]).NotNil()
 }
 
 func toolNames(tools []gollem.Tool) map[string]bool {
