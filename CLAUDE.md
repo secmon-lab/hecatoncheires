@@ -102,7 +102,7 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
   - `react/` - The generic single-loop Strategy (tool calls until the model answers), used for the case-channel agent and the shared task sub-agent.
   - `runtrace/` - Turns LLM / tool call boundaries into the `JobRunLog` / `JobRunEvent` records the run-detail UI reads.
 - `pkg/usecase/` - Application use cases orchestrating domain operations
-  - `agent/planexec/` - The plan-and-execute Strategy (plan → sub-agents → replan → terminal output), plus the legacy in-process `Runner` the `tick` CLI still drives. Shared by `agent/threadcase`, `agent/proposal` and `agent/job`.
+  - `agent/planexec/` - The plan-and-execute Strategy (plan → sub-agents → replan → terminal output). Shared by `agent/threadcase`, `agent/proposal` and `agent/job`. The legacy in-process `Runner` beside it drives no production path any more — only the eval harness and tests — and is scheduled for removal.
   - `agent/proposal/` - Case-draft (proposal) agent host: spawns the turn and applies its draft / question from the run's completion handler (`Host`).
   - `agent/threadcase/` - Thread-mode case host (creation and mention turns).
   - `agent/casebound/` / `agent/wsagent/` - Case-channel and workspace-channel mention hosts.

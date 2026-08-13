@@ -606,13 +606,29 @@ A normal rolling deploy overlaps revisions by design, so for this one release:
 Everything after this release is an ordinary rolling deploy: two instances of the
 agent runtime coordinate through the same subjects and leases.
 
-### `tick` still executes its own runs
+### `tick` runs its own worker
 
-`hecatoncheires tick` does **not** spawn onto the durable runtime — it executes
-each dispatched Job in-process and exits when they finish. A scheduled sweep
-therefore does not depend on a `serve` instance being up, and `--agent-worker-*`
-does not apply to it. The per-deployment Job slot limit does apply, so set
-`HECATONCHEIRES_JOB_MAX_CONCURRENCY` to the same value on `serve` and `tick`.
+`hecatoncheires tick` dispatches its Jobs onto the agent runtime like `serve`, then
+**drives the worker itself** until every run it dispatched has finished, and exits.
+So a scheduled run gets the same step / token budget and the same
+one-transition-at-a-time checkpointing as any other run, without the sweep
+depending on a `serve` instance being up to execute what it dispatched.
+
+Two consequences for how a sweep is configured:
+
+- **`tick` needs the agent configuration too**: `--cloud-storage-bucket`
+  (`HECATONCHEIRES_CLOUD_STORAGE_BUCKET`) for the runs' conversation and trace
+  archive, plus optionally the `--agent-*` budget and worker flags. A sweep invoked
+  without the bucket fails at startup rather than dispatching runs it cannot
+  record.
+- **It waits only for its own runs**, so a long-running `serve` workload never
+  delays it. Set `HECATONCHEIRES_JOB_MAX_CONCURRENCY` to the same value on `serve`
+  and `tick`: the limit is deployment-wide, and both sides now count the same
+  claim-time holds.
+
+If a sweep is killed mid-run, the runs it had in flight are not lost — whichever
+worker claims them next (the following sweep, or a `serve` instance) picks them up
+once `--agent-worker-lease` expires.
 
 ## `tick` scheduling
 

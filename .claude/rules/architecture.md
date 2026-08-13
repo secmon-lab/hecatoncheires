@@ -436,11 +436,13 @@ Two properties this relies on, which a change here must preserve:
   them. Never reintroduce an in-process counter; it would hand the same number
   out twice.
 
-The in-process Job path (still used by `tick`) is the exception: it wires the
-handler directly via `gollem.WithTrace`. The bug that produced this rule was a
-`planexec` Job whose executor never forwarded the handler it was given, so the
-run succeeded with an empty timeline. Under the middleware that failure mode no
-longer has a place to hide.
+Every production path now goes through the middleware — `tick` included, since it
+spawns onto the same runtime and drives the worker itself. The in-process Job
+executor still wires the handler directly via `gollem.WithTrace`, but nothing in
+production reaches it any more (only the eval harness and tests). The bug that
+produced this rule was a `planexec` Job whose executor never forwarded the handler
+it was given, so the run succeeded with an empty timeline. Under the middleware that
+failure mode no longer has a place to hide.
 
 ### Mention-triggered runs on the case agent page
 

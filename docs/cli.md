@@ -348,7 +348,9 @@ fix-unsent-action complete total=N fixed=X skipped=Y failed=Z
 
 ## `tick`
 
-The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches due ones. The same logic backs `POST /hooks/tick`; wire it to Cloud Scheduler (or any cron). The command exits when the sweep and in-flight async dispatches finish.
+The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches due ones. The same logic backs `POST /hooks/tick`; wire it to Cloud Scheduler (or any cron).
+
+The dispatched runs execute on the same agent runtime `serve` uses, and the sweep drives that runtime itself: **the command exits once every run it dispatched has finished**, so a scheduled sweep does not depend on a `serve` instance being up. That is why it takes the Cloud Storage and `--agent-*` flags below.
 
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
@@ -363,9 +365,16 @@ The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches 
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI (e.g. `global`, `us-central1`) |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of scheduled Agent Job runs executing concurrently across the whole deployment. Must match the value given to `serve`. `0` disables the limit |
+| `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Cond. | Cloud Storage bucket holding the runs' conversation and trace archive. Required whenever an LLM provider is configured — without it a sweep cannot record the runs it dispatches |
+| `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the bucket |
+
+`tick` also accepts every `--agent-*` flag listed under [`serve`](#serve); they bound
+the dispatched runs and the sweep's own worker the same way. See
+[Agent runtime budgets](#agent-runtime-budgets).
 
 Operational depth (scheduling cadence, relationship to `POST /hooks/tick`, the
-concurrency limit) lives in [operations.md](./operations.md).
+concurrency limit, what the sweep waits for) lives in
+[operations.md](./operations.md).
 
 ---
 

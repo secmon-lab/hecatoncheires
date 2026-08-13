@@ -2,8 +2,11 @@ package job
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
@@ -17,7 +20,9 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	agentjob "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 // Strategy state versions stamped on every Process the Job agents create. Bump
@@ -51,7 +56,126 @@ type DurableRuntime struct {
 	simple   agentkit.Agent[react.Input]
 	planexec agentkit.Agent[planexec.Input]
 	runner   *JobRunner
+
+	// trackedMu guards tracked. It is written by every spawn and read by Drain.
+	trackedMu sync.Mutex
+	// tracked accumulates the runs this process started, and is nil unless
+	// TrackSpawns turned it on. See TrackSpawns for why serve leaves it off.
+	tracked []agentkit.ProcessID
 }
+
+// TrackSpawns makes the runtime remember the runs it starts so Drain can wait for
+// exactly those.
+//
+// It is opt-in because only a batch command needs it. `serve` runs indefinitely and
+// never waits for a run, so keeping the list would grow it without bound; a
+// one-shot sweep, in contrast, must not exit while the runs it dispatched are still
+// going, and must not wait for runs some other instance started.
+func (d *DurableRuntime) TrackSpawns() {
+	if d == nil {
+		return
+	}
+	d.trackedMu.Lock()
+	defer d.trackedMu.Unlock()
+	if d.tracked == nil {
+		d.tracked = []agentkit.ProcessID{}
+	}
+}
+
+// track records a spawned run when tracking is on.
+func (d *DurableRuntime) track(pid agentkit.ProcessID) {
+	d.trackedMu.Lock()
+	defer d.trackedMu.Unlock()
+	if d.tracked == nil {
+		return
+	}
+	d.tracked = append(d.tracked, pid)
+}
+
+// tracking reports whether Drain has anything to wait for.
+func (d *DurableRuntime) trackedPIDs() []agentkit.ProcessID {
+	d.trackedMu.Lock()
+	defer d.trackedMu.Unlock()
+	return append([]agentkit.ProcessID(nil), d.tracked...)
+}
+
+// Drain runs the agent worker in the foreground until every run this process
+// started has reached a terminal state.
+//
+// A one-shot sweep owns this loop: it dispatched the runs, and nothing else is
+// guaranteed to be up to execute them. Waiting for exactly its own runs is what
+// keeps it from also waiting on a `serve` instance's work, which shares the store.
+//
+// serveOpts is for tests; production passes none.
+func (d *DurableRuntime) Drain(ctx context.Context, serveOpts ...agentkit.ServeOption) error {
+	if d == nil || d.Kernel == nil {
+		return nil
+	}
+	pending := make(map[agentkit.ProcessID]bool)
+	for _, pid := range d.trackedPIDs() {
+		pending[pid] = true
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	logger := logging.From(ctx)
+	logger.Info("draining job runs", "count", len(pending))
+
+	serveCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	served := make(chan error, 1)
+	async.DispatchCancelable(serveCtx, func(c context.Context) error {
+		served <- agentkernel.Serve(c, d.Kernel, serveOpts...)
+		// Reported through `served`, not returned: the normal exit here is the
+		// cancellation Drain performs itself, and returning it would have the async
+		// helper report every sweep as a failure.
+		return nil
+	})
+
+	unfinished := 0
+	for len(pending) > 0 {
+		for pid := range pending {
+			proc, err := d.Kernel.GetProcess(ctx, pid)
+			if err != nil {
+				// A run whose row cannot be read will never be observed to finish, so
+				// stop waiting on it rather than spinning forever.
+				errutil.Handle(ctx, goerr.Wrap(err, "read a job run while draining",
+					goerr.V("process", pid)), "read a job run while draining")
+				delete(pending, pid)
+				unfinished++
+				continue
+			}
+			if proc.Status.Terminal() {
+				delete(pending, pid)
+			}
+		}
+		if len(pending) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			stop()
+			<-served
+			return goerr.Wrap(ctx.Err(), "the sweep was interrupted while runs were still going",
+				goerr.V("unfinished", len(pending)))
+		case <-time.After(drainPollInterval):
+		}
+	}
+
+	stop()
+	// Serve returns the context error it stopped on; that is the expected exit
+	// here, not a failure of the sweep.
+	if err := <-served; err != nil && !errors.Is(err, context.Canceled) {
+		return goerr.Wrap(err, "run the agent worker for the sweep")
+	}
+	logger.Info("job runs finished", "unfinished", unfinished)
+	return nil
+}
+
+// drainPollInterval is how often Drain re-reads the runs it is waiting on. It
+// bounds only the delay between the last run finishing and the command exiting, so
+// a coarse value costs nothing.
+const drainPollInterval = 200 * time.Millisecond
 
 // alreadyLive reports whether a Process for this (workspace, case, job) is still
 // open, so the caller can drop the trigger before producing any outward evidence
@@ -270,6 +394,8 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 		return "", goerr.Wrap(err, "spawn the job agent",
 			goerr.V("job_id", p.key.JobID), goerr.V("run_id", p.runID))
 	}
+	// Only a batch command tracks; see TrackSpawns.
+	d.track(pid)
 	return pid, nil
 }
 
