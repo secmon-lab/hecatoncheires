@@ -33,4 +33,19 @@ type SessionRepository interface {
 	// thread somewhere else. Claim is the durable marker a host takes BEFORE
 	// that work.
 	Claim(ctx context.Context, channelID, threadTS string, newSessionFn func() *model.Session) (*model.Session, error)
+
+	// AdvanceLastMention moves the Session's LastMentionTS forward to mentionTS,
+	// and does nothing when the stored value is already at or past it.
+	//
+	// It is narrow on purpose. LastMentionTS is the cursor the next turn's delta
+	// scan starts after, so it must be stamped by the call that actually started a
+	// turn — but that call races the turn it just started, whose completion handler
+	// writes the same Session row. A full Put from the spawning side would clobber
+	// the outcome that handler recorded (a pending question, for one); touching one
+	// field cannot. Monotonic because two triggers may race and the later cursor
+	// must win regardless of which write lands second.
+	//
+	// A missing Session is not an error: the thread it named is gone, and there is
+	// no cursor to keep.
+	AdvanceLastMention(ctx context.Context, channelID, threadTS, mentionTS string) error
 }

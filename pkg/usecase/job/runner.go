@@ -399,6 +399,16 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		r.finalizeOrphanedSuspension(ctx, existing)
 	}
 
+	// Do not start a fresh run while a durable run of this Job is still live. The
+	// subject already refuses the second Spawn, but that refusal lands AFTER the run
+	// log and the "starting" marker below, so a long run would collect one spurious
+	// failed run and one starting/failed Slack pair per tick. Checked here, the
+	// trigger is dropped with no outward trace — the same shape as the lease skip.
+	if r.deps.Durable.alreadyLive(ctx, key) {
+		sum.outcome = outcomeSkippedRunning
+		return nil
+	}
+
 	// Admission gate for the deployment-wide concurrency limit. Only the
 	// scheduled domain is gated: one tick can make hundreds of (job, case)
 	// pairs due at once, and a skipped scheduled run costs nothing because
@@ -629,6 +639,12 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			sessionThreadTS: sessionThreadTS,
 		})
 		if spawnErr != nil {
+			// A busy subject cannot reach here: the caller holds the (workspace, case,
+			// job) lease across both the alreadyLive check above and this Spawn, so no
+			// other attempt can start a run in between. That is why busy is handled
+			// there — before the run log and the Slack marker exist — and treated as a
+			// genuine failure if it somehow surfaces here.
+			//
 			// Nothing is running, so this is the run's outcome: record it rather
 			// than leaving a RUNNING log nobody will finish.
 			stageAt = r.clock()

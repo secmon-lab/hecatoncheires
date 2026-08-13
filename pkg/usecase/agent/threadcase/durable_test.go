@@ -40,6 +40,10 @@ type durableHost struct {
 	// createErr, when set, is what CreateCase returns — the persistence failure
 	// that must be surfaced rather than fed back to the model.
 	createErr error
+	// questionErr, when set, is what AskQuestion returns — the Slack post or the
+	// Session write failing, after which the thread must NOT be recorded as waiting
+	// on a form that does not exist.
+	questionErr error
 }
 
 func (h *durableHost) ApplyMention(_ context.Context, target threadcase.Target, d *threadcase.Decision) error {
@@ -54,7 +58,7 @@ func (h *durableHost) CreateCase(_ context.Context, target threadcase.Target, p 
 
 func (h *durableHost) AskQuestion(_ context.Context, target threadcase.Target, q threadcase.QuestionPayload) error {
 	h.record(durableCall{Kind: "question", Target: target, Question: q})
-	return nil
+	return h.questionErr
 }
 
 func (h *durableHost) ReportFallback(_ context.Context, target threadcase.Target, reason string) error {
@@ -440,6 +444,39 @@ func TestDurableQuestionEndsTheTurn(t *testing.T) {
 	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithQuestion)
 }
 
+// A question the host could not deliver must NOT leave the thread recorded as
+// waiting on one.
+//
+// Whether the Slack post failed or the Session write after it did, the outcome is
+// the same from the thread's side: there is no form to answer. Recording
+// post_question anyway strands the user twice over — the submit handler reads the
+// missing PendingQuestion as stale and drops the answer, and a plain reply resumes
+// a turn with no question in it. A turn that could not ask reached no conclusion,
+// so it must report a fallback like any other.
+func TestDurableQuestionDeliveryFailureFallsBack(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(
+		investigatePlan,
+		"Read the thread; the environment is not stated.",
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+	))
+	h.host.questionErr = goerr.New("slack refused the form")
+	ssn := h.session(t, ctx, 0)
+
+	proc := h.run(t, h.createRequest(ssn, "1700000001.000031"))
+	// The run itself succeeded — delivery is the host's half, after the turn.
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The user is told the turn ended, rather than being left watching for a form.
+	gt.Array(t, h.host.kinds()).Equal([]string{"question", "fallback"})
+
+	stored, err := h.repo.Session().GetByThread(ctx, ssn.ChannelID, ssn.ThreadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored).NotNil().Required()
+	gt.Value(t, stored.LastAction).NotEqual(model.SessionEndedWithQuestion)
+	gt.Value(t, stored.PendingQuestion).Nil()
+}
+
 // A run the model never answers must tell the user the turn ended rather than
 // leaving the thread silent.
 func TestDurableReportsAFailedRun(t *testing.T) {
@@ -529,6 +566,35 @@ func TestDurableRefusesASecondTurnOnTheSameThread(t *testing.T) {
 
 	// A refused turn must leave the thread untouched.
 	gt.Array(t, h.host.Calls()).Length(0)
+
+	// And it must leave the mention cursor where the turn that IS running put it.
+	// The next turn's delta scan starts strictly after this value, so advancing it
+	// for a refused mention hides that mention AND every thread reply before it from
+	// whichever turn runs next — and a busy thread is exactly when a person keeps
+	// typing. The running turn cannot cover them: its input was fixed at its own
+	// spawn, before either existed.
+	stored, err := h.repo.Session().GetByThread(ctx, ssn.ChannelID, ssn.ThreadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored).NotNil().Required()
+	gt.String(t, stored.LastMentionTS).Equal("1700000001.000011")
+}
+
+// The turn that actually starts owns the cursor: the next turn's delta scan must
+// begin strictly after the mention this one processes.
+func TestDurableAdvancesTheMentionCursorOnAStartedTurn(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(investigatePlan))
+	ssn := h.session(t, ctx, 42)
+	gt.String(t, ssn.LastMentionTS).Equal("")
+
+	res, err := h.agent.StartTurn(ctx, h.mentionRequest(ssn, "1700000001.000021"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusStarted)
+
+	stored, err := h.repo.Session().GetByThread(ctx, ssn.ChannelID, ssn.ThreadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored).NotNil().Required()
+	gt.String(t, stored.LastMentionTS).Equal("1700000001.000021")
 }
 
 // A re-delivered Slack event must be dropped silently, with no second run and no

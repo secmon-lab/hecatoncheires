@@ -528,6 +528,35 @@ keyed on `(ProcessID, operation)` so a redelivery is a no-op. That is the
   unclean reclaims of a transition; it says nothing about the handler that runs
   after the transition committed.
 
+## Agent runtime: the subject is free before the handler finishes (KNOWN GAP)
+
+A Process holds its subject only while it is open. agentkit releases it at the
+terminal commit and calls the completion handler *after*
+(`fireFinish`, worker.go) — and `FindOpenProcessBySubject`, which is what makes a
+second `Spawn` report busy, matches pending/running/waiting only.
+
+So "one live run per thread" is exact for the RUN, and not exact for the run's
+outward work: from the terminal commit until the handler returns, a new trigger on
+the same thread can Spawn successfully while the previous turn is still applying
+its case update, its Slack post, and its Session write. Two consequences:
+
+- The new turn may read a Case or Session the previous handler has not written yet.
+- Two handlers' `Session.Put` calls can interleave, and a full write loses whatever
+  the other recorded.
+
+This is NOT the best-effort-handler gap above: no crash is involved.
+
+Two things follow for anyone changing this area:
+
+- **A write from the spawning side of a turn must be narrow, not a `Session.Put`.**
+  `AdvanceLastMention` is the shape to copy: one field, monotonic, so it cannot
+  clobber a concurrent handler's outcome. A full write there is a bug even though
+  it looks like it is "before" the run.
+- **Closing the gap properly means the outward work runs under the subject** — as a
+  final durable transition, or as a child Process the subject still covers — not by
+  adding locks around the handler. Until that is done, do not describe the thread
+  as serialised end to end.
+
 ## Budget
 
 The budget is **per Process**, enforced by the runtime rather than counted by

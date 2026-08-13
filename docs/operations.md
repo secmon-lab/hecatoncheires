@@ -286,6 +286,7 @@ no need to match message strings:
 | `suspended` | An interactive run asked the user and paused. |
 | `skipped_lease` | Another runner held the `(workspace, case, job)` lease. |
 | `skipped_suspended` | Stepped aside for a genuinely open question. |
+| `skipped_running` | A durable run of the same `(workspace, case, job)` was still live. Expected on every tick of a Job that takes longer than the sweep interval — the lease is released as soon as the run is recorded, so this, not the lease, is what keeps a long run from being started twice. |
 | `skipped_slots_full` | Refused by the deployment-wide concurrency gate. |
 | `skipped_stale` | A resume whose run was no longer awaiting input. |
 
@@ -328,8 +329,8 @@ its walk returns without a summary instead of waiting).
 `due_total` counts the `(job, case)` pairs the sweep raised an event
 for. `started` counts the attempts that reached the executor.
 `completed` / `failed` / `suspended` / `skipped_slots_full` /
-`skipped_lease` / `skipped_suspended` are always present, zero
-included. `elapsed_ms` covers the whole sweep; `settled` is `false`
+`skipped_lease` / `skipped_suspended` / `skipped_running` are always
+present, zero included. `elapsed_ms` covers the whole sweep; `settled` is `false`
 when the wait was given up on, which marks the counts as partial.
 
 With the gate enabled the line adds `slot_limit`, `slot_busy_ms` (the
@@ -528,15 +529,26 @@ with a limit error and the host posts a fallback notice.
 
 ### Concurrency per thread
 
-Two turns never run concurrently on one Slack thread: every turn is spawned
-under the thread's **subject**, and the runtime admits one live run per subject.
-A trigger that arrives while a run is live is refused, and the host posts the
-"already handling your previous request" notice. This is what replaced the
+Two agent runs never execute concurrently on one Slack thread: every turn is
+spawned under the thread's **subject**, and the runtime admits one live run per
+subject. A trigger that arrives while a run is live is refused, and the host posts
+the "already handling your previous request" notice. This is what replaced the
 previous per-thread turn lock; there is no heartbeat or staleness window to
 tune any more.
 
+One caveat worth knowing when reading a thread's history: the subject is released
+when the run reaches its terminal state, and the run's **outward work** — the Slack
+reply, the case update, the session bookkeeping — happens immediately after, in the
+completion handler. A trigger landing in that window starts a new run while the
+previous one is still applying its result, so the two can interleave. It is a
+narrow window, but it is why a thread can occasionally show a reply arriving after
+the next turn has already begun. See `.claude/rules/architecture.md` §
+"the subject is free before the handler finishes".
+
 Deployment-wide Job concurrency is separate and still enforced by the Firestore
-execution slots described under [Concurrency](#concurrency).
+execution slots described under [Concurrency](#concurrency). A scheduled trigger
+that finds a durable run of the same Job still live is skipped silently
+(`skipped_running` in the sweep summary) rather than recorded as a run.
 
 ### A run that never finishes
 
@@ -555,6 +567,30 @@ this**: inspect and cancel via the `agentProcesses` collection in Firestore.
   and for a Job the scheduler will run it again.** That gap is documented in
   `.claude/rules/architecture.md` § "the completion handler is best-effort"; it
   is narrow but not yet closed.
+
+### Cutting over to the agent runtime (one-time)
+
+The release that introduced the agent runtime **must not run alongside the release
+before it.** The two use different mutual exclusion for a Slack thread: the older
+one takes a lock recorded on the Session, the newer one takes the run's subject.
+Neither sees the other's, so during an overlap both can accept the same mention and
+process it twice — two replies, two case updates.
+
+A normal rolling deploy overlaps revisions by design, so for this one release:
+
+- Cut over with no overlap — stop the old revision (or move all traffic in one
+  step) before the new one serves Slack events. On Cloud Run, migrate 100% of
+  traffic in a single revision change rather than a gradual split.
+- Roll back the same way. Rolling back to the older revision is otherwise safe:
+  a Session it reads carries no lock fields (the newer code rewrites the row
+  without them), which the older code reads as "idle" — the direction that
+  acquires rather than refuses.
+- Before rolling back, let in-flight runs finish or cancel them. A Process the
+  older revision does not know about will never be driven, and its run log stays
+  `RUNNING`.
+
+Everything after this release is an ordinary rolling deploy: two instances of the
+agent runtime coordinate through the same subjects and leases.
 
 ### `tick` still executes its own runs
 

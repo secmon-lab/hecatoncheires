@@ -36,6 +36,12 @@ const (
 	// outcomeSkippedSuspended is a trigger that stepped aside for a genuinely
 	// open question on the same tuple.
 	outcomeSkippedSuspended runOutcome = "skipped_suspended"
+	// outcomeSkippedRunning is a trigger that found a durable run of the same
+	// tuple still live. It is separate from skipped_lease because the lease no
+	// longer spans the run: a durable run is recorded and the lease released
+	// immediately, so this is the outcome that keeps a long run from collecting one
+	// spurious failed run per tick.
+	outcomeSkippedRunning runOutcome = "skipped_running"
 	// outcomeSkippedSlotsFull is a scheduled trigger refused by the
 	// deployment-wide concurrency gate.
 	outcomeSkippedSlotsFull runOutcome = "skipped_slots_full"
@@ -208,6 +214,7 @@ func (s *tickStats) logAttrs(now time.Time, settled bool) []slog.Attr {
 		slog.Int("skipped_slots_full", s.outcomes[outcomeSkippedSlotsFull]),
 		slog.Int("skipped_lease", s.outcomes[outcomeSkippedLease]),
 		slog.Int("skipped_suspended", s.outcomes[outcomeSkippedSuspended]),
+		slog.Int("skipped_running", s.outcomes[outcomeSkippedRunning]),
 		slog.Int64("elapsed_ms", elapsedMs),
 		slog.Bool("settled", settled),
 	}

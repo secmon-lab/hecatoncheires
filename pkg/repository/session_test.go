@@ -210,6 +210,62 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Error(t, err)
 	})
 
+	// The cursor is what the next turn's delta scan starts after, and the call that
+	// advances it races the turn it just started — whose completion handler writes
+	// the same row. So it must move one field, monotonically, and never resurrect a
+	// Session that is gone.
+	t.Run("AdvanceLastMention moves the cursor forward only", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("cursor")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000200",
+			LastAction:    model.SessionEndedWithQuestion,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		// Forward: applied.
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000300")).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000300")
+		// Everything else survives: a full write from the spawning side would have
+		// dropped the pending outcome the completion handler recorded.
+		gt.Value(t, got.LastAction).Equal(model.SessionEndedWithQuestion)
+		gt.Value(t, got.ID).Equal(ssn.ID)
+
+		// Backward and equal: ignored, so two racing triggers leave the later cursor
+		// standing whichever write lands second.
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000100")).Required()
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000300")).Required()
+		got, err = repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000300")
+	})
+
+	t.Run("AdvanceLastMention on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("cursor-missing")
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000100")).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("AdvanceLastMention rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("cursor-invalid")
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, "", ts, "1700000000.000100"))
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, ch, "", "1700000000.000100"))
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, ch, ts, ""))
+	})
+
 	t.Run("rejects missing required fields on Put", func(t *testing.T) {
 		repo := newRepo(t)
 		gt.Error(t, repo.Session().Put(ctx, &model.Session{})).Is(model.ErrSessionValidation)

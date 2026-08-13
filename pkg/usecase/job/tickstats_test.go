@@ -34,6 +34,7 @@ func TestTickStats_CountsEveryOutcome(t *testing.T) {
 	job.TickStatsRecordOutcomeForTest(stats, scheduled, job.OutcomeFailedForTest, "run-2", 2, 1_000)
 	job.TickStatsRecordOutcomeForTest(stats, scheduled, job.OutcomeSkippedSlotsFullForTest, "", 2, 0)
 	job.TickStatsRecordOutcomeForTest(stats, scheduled, job.OutcomeSkippedLeaseForTest, "", 2, 0)
+	job.TickStatsRecordOutcomeForTest(stats, scheduled, job.OutcomeSkippedRunningForTest, "", 2, 0)
 
 	// 10s of wall clock against 2 slots = 20s of capacity; 6s of it was held.
 	attrs := attrValues(job.TickStatsLogAttrsForTest(stats, start.Add(10*time.Second), true))

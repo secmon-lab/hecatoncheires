@@ -43,10 +43,42 @@ type DurableRuntime struct {
 	// Process — a durable run's history is not in the by-run-id store the
 	// in-process executor used.
 	History agentkit.HistoryStore
+	// Locator answers whether a run of this Job is already live. It is what lets a
+	// re-trigger be refused BEFORE the run record and the Slack marker exist; a nil
+	// Locator degrades to finding out at Spawn, which is late but still correct.
+	Locator agentkernel.Locator
 
 	simple   agentkit.Agent[react.Input]
 	planexec agentkit.Agent[planexec.Input]
 	runner   *JobRunner
+}
+
+// alreadyLive reports whether a Process for this (workspace, case, job) is still
+// open, so the caller can drop the trigger before producing any outward evidence
+// of a run.
+//
+// It exists because the lease no longer covers the run: Run returns as soon as the
+// Process is recorded, so the next tick re-acquires the lease while the first run
+// is still going. Without this check that tick creates a run log, posts a
+// "starting" marker, and only THEN learns the subject is busy — which the caller
+// would record as a failed run.
+//
+// A read failure is reported as not-live rather than as an error: the Spawn that
+// follows is itself the authoritative check, and refusing a legitimate run because
+// a lookup blipped is the worse outcome.
+func (d *DurableRuntime) alreadyLive(ctx context.Context, key model.JobRunKey) bool {
+	if d == nil || d.Locator == nil {
+		return false
+	}
+	busy, err := d.Locator.Busy(ctx,
+		agentkernel.JobRunSubject(key.WorkspaceID, key.CaseID, key.JobID))
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "look up the live run of a job",
+			goerr.V("job_id", key.JobID), goerr.V("case_id", key.CaseID)),
+			"look up the live run of a job")
+		return false
+	}
+	return busy != nil
 }
 
 // Register registers the Job agents. Call it before building the Kernel, then

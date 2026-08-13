@@ -490,14 +490,41 @@ func wireDurableJobRuntime(
 ) {
 	t.Helper()
 
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	opts := append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, serveOpts...)
+	go func() { served <- agentkernel.Serve(ctx, k, opts...) }()
+	t.Cleanup(func() {
+		cancel()
+		<-served
+	})
+}
+
+// bindDurableJobRuntime wires the runtime but never claims anything, so a spawned
+// run stays exactly where Run left it. Use it to assert what the TRIGGER did — the
+// run record it opened, the Slack marker it posted — with a run still live and no
+// worker racing to finish it.
+func bindDurableJobRuntime(
+	t *testing.T, runner *job.JobRunner, durable *job.DurableRuntime,
+	repo interfaces.Repository, registry *model.WorkspaceRegistry, llm gollem.LLMClient,
+) *agentkit.Kernel {
+	t.Helper()
+
 	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
 	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(), durable.History)
 	gt.NoError(t, tErr).Required()
 	gt.NoError(t, durable.Register(reg, cfg.Limiter(), taskAgent)).Required()
 
+	procRepo := agentprocmemory.New()
+	locator, lErr := agentkernel.NewLocator(procRepo)
+	gt.NoError(t, lErr).Required()
+	durable.Locator = locator
+
 	k, err := agentkernel.Build(agentkernel.Deps{
-		Repo:    agentprocmemory.New(),
+		Repo:    procRepo,
 		History: durable.History,
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
@@ -508,15 +535,7 @@ func wireDurableJobRuntime(
 	gt.NoError(t, err).Required()
 	durable.Bind(k)
 	durable.AttachRunner(runner)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	served := make(chan error, 1)
-	opts := append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, serveOpts...)
-	go func() { served <- agentkernel.Serve(ctx, k, opts...) }()
-	t.Cleanup(func() {
-		cancel()
-		<-served
-	})
+	return k
 }
 
 // A simple-strategy Job on the durable runtime must record the same run the
@@ -573,6 +592,80 @@ func TestJobRunner_DurableSimpleRunRecordsItsOutcome(t *testing.T) {
 	gt.Array(t, events).Length(2).Required()
 	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
 	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+}
+
+// A trigger arriving while a durable run of the same Job is still live must leave
+// no trace at all.
+//
+// This is the shape the lease used to guarantee: Run held it for the whole
+// execution, so a second tick was a silent skip. A durable run releases the lease
+// as soon as the Process is recorded, so without an explicit check every tick of a
+// long-running Job would open a run log, post a "starting" marker, and only then
+// discover the subject was busy — recording that as a FAILED run and stamping
+// LastRunAt. Asserting on counts alone is not enough here: the point is that the
+// SECOND attempt adds nothing, so each surface is compared against its post-first
+// -attempt value.
+func TestJobRunner_DurableSkipsATriggerWhileARunIsLive(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-long",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	notifier := &fakeNotifier{}
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		SlackNotifier: notifier,
+		Executors:     map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	// No worker: the first run stays live for the whole test, which is exactly the
+	// state a long-running Job is in when the next tick arrives.
+	bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	ev := job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	}
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+
+	gt.NoError(t, runner.Run(ctx, j, ev)).Required()
+
+	logsAfterFirst, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logsAfterFirst).Length(1).Required()
+	gt.Value(t, logsAfterFirst[0].Stage).Equal(model.JobRunStageRunning)
+	postsAfterFirst := len(notifier.snapshot())
+	runAfterFirst, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, runAfterFirst).NotNil().Required()
+
+	// Second trigger, first run still live.
+	gt.NoError(t, runner.Run(ctx, j, ev)).Required()
+
+	// No second run log — in particular no FAILED one.
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].RunID).Equal(logsAfterFirst[0].RunID)
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageRunning)
+
+	// No second "starting" marker and no failure notice.
+	gt.Number(t, len(notifier.snapshot())).Equal(postsAfterFirst)
+
+	// And the schedule is untouched, so the next tick still finds the Job due
+	// rather than believing a run just happened.
+	runNow, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, runNow.LastStatus).Equal(runAfterFirst.LastStatus)
+	gt.Bool(t, runNow.LastRunAt.Equal(runAfterFirst.LastRunAt)).True()
 }
 
 // A durable run whose agent fails must record the failure, not leave a RUNNING

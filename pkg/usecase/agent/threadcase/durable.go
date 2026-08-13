@@ -193,20 +193,6 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		agentkit.WithMetadata(scope.Metadata()),
 	}
 
-	// The mention this turn processes is what the next turn's delta scan starts
-	// after. It is stamped BEFORE the spawn, not after: the moment the Process
-	// exists a worker may claim it, and a run that finishes first writes the
-	// Session too — a full write from here afterwards would clobber the outcome it
-	// recorded, including a pending question the user is looking at.
-	//
-	// Stamping a turn that then gets refused as busy is the harmless direction: the
-	// mention it names was genuinely seen, and the turn holding the thread is
-	// processing it.
-	if req.MentionTS != "" {
-		req.Session.LastMentionTS = req.MentionTS
-		d.persistSession(ctx, req.Session)
-	}
-
 	var err error
 	if isCreate {
 		_, err = d.create.Spawn(ctx, d.kernel, in, opts...)
@@ -220,6 +206,24 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 	case err != nil:
 		return nil, goerr.Wrap(err, "spawn the thread-mode agent",
 			goerr.V("session_id", req.Session.ID), goerr.V("agent", name))
+	}
+
+	// The mention this turn processes is what the next turn's delta scan starts
+	// after, so the cursor moves only for a turn that actually started. Stamping a
+	// refused turn would hide the mention it names AND every thread reply before it
+	// from whichever turn runs next — the delta scan skips everything at or below
+	// the cursor — and a busy thread is exactly when a person keeps typing.
+	//
+	// It is a narrow monotonic update rather than a Session write: by now a worker
+	// may already have claimed the Process, and that run's completion handler writes
+	// the same row. A full write from here would clobber the outcome it recorded,
+	// including a pending question the user is looking at.
+	if req.MentionTS != "" {
+		if advErr := d.repo.Session().AdvanceLastMention(ctx,
+			req.ChannelID, req.ThreadTS, req.MentionTS); advErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(advErr, "advance the mention cursor",
+				goerr.V("session_id", req.Session.ID)), "advance the mention cursor")
+		}
 	}
 
 	// The run record is opened only once the run exists, so a refused turn leaves
@@ -507,9 +511,20 @@ func (d *Durable) askQuestion(ctx context.Context, target Target, q *planexec.Qu
 			Options: it.Options,
 		}
 	}
+	// The question state is confirmed only once the form is actually posted AND
+	// recorded. Stamping it after a failed AskQuestion would leave the thread
+	// claiming to be waiting on a form that does not exist: the submit handler reads
+	// the missing PendingQuestion as stale and drops the answer, and a plain thread
+	// reply resumes a turn with no question to answer. A failure is a turn that
+	// reached no conclusion, which is what fallback already means.
 	if err := d.host.AskQuestion(ctx, target, payload); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "post the thread-mode question"),
 			"post the thread-mode question")
+		d.reportFallback(ctx, target, err.Error())
+		// Any outcome other than a question, so a later plain reply does not resume a
+		// turn that has no question to answer.
+		d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithCaseBoundReply)
+		return
 	}
 	d.endSession(ctx, target.ChannelID, target.ThreadTS, model.SessionEndedWithQuestion)
 }

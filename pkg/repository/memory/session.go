@@ -94,3 +94,30 @@ func (r *sessionRepository) Claim(_ context.Context, channelID, threadTS string,
 	r.sessions[key] = *fresh
 	return fresh, nil
 }
+
+func (r *sessionRepository) AdvanceLastMention(_ context.Context, channelID, threadTS, mentionTS string) error {
+	if channelID == "" || threadTS == "" || mentionTS == "" {
+		return goerr.New("channelID, threadTS and mentionTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("mention_ts", mentionTS),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	// Slack timestamps are fixed-width "<seconds>.<microseconds>", so string
+	// ordering is chronological ordering.
+	if cur.LastMentionTS >= mentionTS {
+		return nil
+	}
+	cur.LastMentionTS = mentionTS
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}

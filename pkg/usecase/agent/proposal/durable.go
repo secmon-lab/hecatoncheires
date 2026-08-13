@@ -354,9 +354,18 @@ func (d *Durable) ask(ctx context.Context, target Target, q *planexec.Question) 
 			Options: it.Options,
 		}
 	}
+	// The question state is confirmed only once the form is actually posted AND
+	// recorded. Stamping it after a failed Ask would leave the thread claiming to be
+	// waiting on a form that does not exist — the submit handler would read the
+	// missing PendingQuestion as stale and drop the answer — while the "working on
+	// it" placeholder stayed up forever. A failure is a turn that reached no
+	// conclusion, which is what fallback already means.
 	if err := d.host.Ask(ctx, target, payload); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "post the case-draft question"),
 			"post the case-draft question")
+		d.reportFallback(ctx, target, err.Error())
+		d.endSession(ctx, target, model.SessionEndedWithMaterialize)
+		return
 	}
 	d.endSession(ctx, target, model.SessionEndedWithQuestion)
 }

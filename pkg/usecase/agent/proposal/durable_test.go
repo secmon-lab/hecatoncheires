@@ -43,6 +43,10 @@ type durableCall struct {
 type durableHost struct {
 	mu    sync.Mutex
 	calls []durableCall
+	// askErr, when set, is what Ask returns — the Slack post or the Session write
+	// failing, after which the thread must NOT be recorded as waiting on a form that
+	// does not exist.
+	askErr error
 }
 
 func (h *durableHost) Propose(_ context.Context, target proposal.Target, m proposal.MaterializePayload) error {
@@ -52,7 +56,7 @@ func (h *durableHost) Propose(_ context.Context, target proposal.Target, m propo
 
 func (h *durableHost) Ask(_ context.Context, target proposal.Target, q proposal.QuestionPayload) error {
 	h.record(durableCall{Kind: "ask", Target: target, Question: q})
-	return nil
+	return h.askErr
 }
 
 func (h *durableHost) ReportFallback(_ context.Context, target proposal.Target, reason string) error {
@@ -71,6 +75,16 @@ func (h *durableHost) Calls() []durableCall {
 	defer h.mu.Unlock()
 	out := make([]durableCall, len(h.calls))
 	copy(out, h.calls)
+	return out
+}
+
+// kinds returns the Host calls in order, which is the turn's observable outcome.
+func (h *durableHost) kinds() []string {
+	calls := h.Calls()
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Kind
+	}
 	return out
 }
 
@@ -350,6 +364,37 @@ func TestDurableQuestionEndsTheTurn(t *testing.T) {
 	stored, err := h.repo.Session().GetByThread(ctx, draftChannelID, draftThreadTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithQuestion)
+}
+
+// A question the host could not deliver must NOT leave the thread recorded as
+// waiting on one.
+//
+// Whether the Slack post failed or the Session write after it did, there is no form
+// to answer. Recording post_question anyway leaves the "working on it" placeholder
+// up forever and makes the submit handler read the missing PendingQuestion as
+// stale. A turn that could not ask reached no conclusion, so it must fall back —
+// which is also what takes the placeholder down and unlocks the draft.
+func TestDurableQuestionDeliveryFailureFallsBack(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(
+		draftPlan,
+		"the thread does not say which environment",
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+	))
+	h.host.askErr = goerr.New("slack refused the form")
+	ssn := h.session(t, ctx)
+
+	proc := h.run(t, h.request(ssn, "1700000001.000041"))
+	// The run itself succeeded — delivery is the host's half, after the turn.
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	gt.Array(t, h.host.kinds()).Equal([]string{"ask", "fallback"})
+
+	stored, err := h.repo.Session().GetByThread(ctx, draftChannelID, draftThreadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored).NotNil().Required()
+	gt.Value(t, stored.LastAction).NotEqual(model.SessionEndedWithQuestion)
+	gt.Value(t, stored.PendingQuestion).Nil()
 }
 
 // A run the model never answers must tell the user, so nobody is left watching a

@@ -579,7 +579,14 @@ func cmdServe() *cli.Command {
 				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo, taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
 				}
-				durableJobs = &job.DurableRuntime{History: processHistory}
+				// One locator serves every host that needs to tell "already live" from
+				// "fresh": the Job runner drops a re-trigger with it, and the case-draft
+				// host tells a Slack re-delivery from a busy thread with it.
+				locator, lErr := agentkernel.NewLocator(agentProcessRepo)
+				if lErr != nil {
+					return goerr.Wrap(lErr, "failed to build the agent process locator")
+				}
+				durableJobs = &job.DurableRuntime{History: processHistory, Locator: locator}
 				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(), taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the job agents")
 				}
@@ -587,10 +594,6 @@ func cmdServe() *cli.Command {
 				// needs the persistent History/Trace archive, which a deployment without
 				// Cloud Storage does not have.
 				if uc.MentionProposal != nil {
-					locator, lErr := agentkernel.NewLocator(agentProcessRepo)
-					if lErr != nil {
-						return goerr.Wrap(lErr, "failed to build the agent process locator")
-					}
 					d, dErr := proposal.NewDurable(repo, registry,
 						uc.MentionProposal.DurableDraftHost(), locator)
 					if dErr != nil {

@@ -130,3 +130,50 @@ func (r *sessionRepository) Claim(ctx context.Context, channelID, threadTS strin
 	}
 	return claimed, nil
 }
+
+func (r *sessionRepository) AdvanceLastMention(ctx context.Context, channelID, threadTS, mentionTS string) error {
+	if channelID == "" || threadTS == "" || mentionTS == "" {
+		return goerr.New("channelID, threadTS and mentionTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("mention_ts", mentionTS),
+		)
+	}
+	doc := r.docRef(channelID, threadTS)
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(doc)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return nil
+			}
+			return goerr.Wrap(err, "tx get session for cursor advance")
+		}
+		var cur model.Session
+		if err := snap.DataTo(&cur); err != nil {
+			return goerr.Wrap(err, "decode session")
+		}
+		// Slack timestamps are fixed-width "<seconds>.<microseconds>", so string
+		// ordering is chronological ordering.
+		if cur.LastMentionTS >= mentionTS {
+			return nil
+		}
+		// Update, not Set: the completion handler of the turn this cursor belongs to
+		// writes the same row, and a full replace from here would drop what it
+		// recorded.
+		if err := tx.Update(doc, []firestore.Update{
+			{Path: "LastMentionTS", Value: mentionTS},
+			{Path: "UpdatedAt", Value: r.now()},
+		}); err != nil {
+			return goerr.Wrap(err, "tx update the mention cursor")
+		}
+		return nil
+	})
+	if err != nil {
+		return goerr.Wrap(err, "advance the mention cursor",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("mention_ts", mentionTS),
+		)
+	}
+	return nil
+}
