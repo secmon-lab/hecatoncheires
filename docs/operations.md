@@ -107,11 +107,16 @@ flowchart LR
   LEASE -->|busy| SKIP[silent skip]
   LEASE --> SLOT[Concurrency slot\nscheduled runs only]
   SLOT -->|slots full| SKIP
-  SLOT --> EXEC[SingleLoopJobExecutor]
-  EXEC --> LLM[gollem agent]
-  LLM <-->|tool calls| TOOLS[(read-only + writer tools)]
-  EXEC --> REC[RecordRun]
+  SLOT --> SPAWN[Spawn onto the agent runtime]
+  SPAWN --> WORK[Kernel worker\none transition at a time]
+  WORK <-->|tool calls| TOOLS[(read-only + writer tools)]
+  WORK --> FIN[Completion handler\nRecordRun]
 ```
+
+`Run` returns once the run is recorded and spawned; the run itself executes on
+the Kernel worker, and its outcome is written by the completion handler. A
+deployment with no LLM configured has no runtime to spawn onto, and falls back to
+running the simple strategy in process (`SingleLoopJobExecutor`).
 
 #### Event matching
 

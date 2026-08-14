@@ -92,10 +92,6 @@ type AgentDeps struct {
 	// mutation funnels through the single CaseUseCase entry point.
 	CaseUC *CaseUseCase
 
-	// ThreadcaseBudget overrides the planexec budget for the thread-mode
-	// agent. Zero values fall back to DefaultThreadcaseBudget.
-	ThreadcaseBudget planexec.BudgetConfig
-
 	// Optional Slack tool clients. SlackService is the Bot-token client;
 	// SlackSearch and SlackRetriever sit on the User OAuth Token.
 	SlackService   slack.Service
@@ -123,14 +119,6 @@ type AgentDeps struct {
 // requires; until they run, the mention handlers stand down.
 func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 	return &AgentUseCase{deps: deps}
-}
-
-// DefaultThreadcaseBudget is the planexec budget used for thread-mode agent
-// turns when AgentDeps.ThreadcaseBudget is unset. Conservative bounds keep a
-// mention turn responsive while allowing a couple of investigation rounds.
-var DefaultThreadcaseBudget = planexec.BudgetConfig{
-	PlannerLoopMax:  8,
-	SubAgentLoopMax: 20,
 }
 
 // RegisterAgents builds the agents that run on the agentkit runtime and

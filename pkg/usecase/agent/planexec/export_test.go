@@ -38,14 +38,6 @@ var RenderSubAgentPromptForTest = buildSubAgentSystemPrompt
 // FormatObservationsForTest exposes formatObservationsAsUserTurn.
 var FormatObservationsForTest = formatObservationsAsUserTurn
 
-// ExecutePhaseForTest exposes executePhase.
-var ExecutePhaseForTest = executePhase
-
-// CombineTraceForTest exposes combineTrace (and, transitively, the
-// multiTraceHandler fan-out) so external tests can assert the
-// single/none/multi collapsing behaviour and the broadcast semantics.
-var CombineTraceForTest = combineTrace
-
 // PlannerPromptInputForTest mirrors plannerPromptInput so tests can
 // build inputs without re-importing the internal alias.
 type PlannerPromptInputForTest = plannerPromptInput
@@ -61,15 +53,3 @@ var RenderFinalUserPromptForTest = renderFinalUserPrompt
 
 // RenderObservationsForFinalForTest exposes renderObservationsForFinal.
 var RenderObservationsForFinalForTest = renderObservationsForFinal
-
-// GenerateFinalResponseForTest exposes generateFinalResponse.
-var GenerateFinalResponseForTest = generateFinalResponse
-
-// DirectPromptInputForTest mirrors directPromptInput.
-type DirectPromptInputForTest = directPromptInput
-
-// RenderDirectUserPromptForTest exposes renderDirectUserPrompt.
-var RenderDirectUserPromptForTest = renderDirectUserPrompt
-
-// GenerateDirectResponseForTest exposes generateDirectResponse.
-var GenerateDirectResponseForTest = generateDirectResponse

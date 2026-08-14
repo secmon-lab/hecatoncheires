@@ -309,9 +309,13 @@ func TestRun_ScenarioError_ExitsNonZero(t *testing.T) {
 // the judge. Per-session counter sequences the job's two calls; the judge call
 // is routed by the "Artifact snapshot" marker.
 func jobScriptLLM() *mock.LLMClientMock {
+	// Counted across sessions, not per session: the run is a durable Process whose
+	// every transition opens its own gollem session, so a per-session counter would
+	// restart at 1 each time and the model would ask for the same tool for as long
+	// as the step budget allowed.
+	var calls atomic.Int32
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-			var calls atomic.Int32
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					var sb strings.Builder

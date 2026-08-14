@@ -319,32 +319,27 @@ Starting fresh is the correct degradation.
 
 **Entry points & final output.** planexec is a generic plan-execute
 framework — it knows nothing about `case` and performs no side effects
-itself. It exposes three package-level entry functions (NOT `Runner`
-methods, since Go methods cannot be generic):
+itself. It exists ONLY as an agentkit Strategy (`planexec.Register`): the
+in-process `Runner` and its `Run` / `RunText` / `ResumeText` entry functions are
+gone, and every host — `serve`, `tick`, the eval harness — spawns onto the
+runtime.
 
-- `Run[T Validatable](ctx, runner, req)` — structured turn. After the planner
-  finalizes, planexec generates the terminal JSON, decodes it into `T`, calls
-  `T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`;
-  gollem's schema check verifies shape only, so `Validate()` is where domain
-  invariants live). Returns `*RunResult[T]` with the validated value in `.Data`.
-- `RunText(ctx, runner, req)` / `ResumeText(ctx, runner, req)` — plain-text
-  turn / resume. The reply is in `RunResult.Text`.
+The host's terminal-output type is declared as `Config[T]` (`T` constrained by
+`Validatable`), and the reply comes back as `Output[T]` through the completion
+handler. planexec generates the terminal JSON, decodes it into `T`, calls
+`T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`;
+gollem's schema check verifies shape only, so `Validate()` is where domain
+invariants live). Plain-text hosts set `Config[T]{TextOnly: true}` with
+`T = TextResult`.
 
 Side effects (closing a case, posting a message, persisting the entity, …) are
 performed either by the **sub-agents' tools inside the loop** or by the host
-**after** the turn from the returned `*T` — never by planexec itself, and never
-inside the loop as a commit hook. The old `RunRequest.OnFinalize` /
-`FinalOutputSchema` commit hooks are gone.
+**after** the turn, from `onFinish` — never by planexec itself, and never inside
+the loop as a commit hook. That rule is now enforced by the fact that the loop
+and the handler are different processes.
 
-On the agentkit runtime the same contract is expressed as a Strategy
-(`planexec.Register`): the host's terminal-output type is `Config[T]`, the reply
-comes back as `Output[T]` through the completion handler, and the plain-text
-hosts set `Config[T]{TextOnly: true}` with `T = TextResult`. The host applies the
-output AFTER the turn, from `onFinish` — the same "never inside the loop" rule,
-now enforced by the fact that the loop and the handler are different processes.
-
-`Run[T]` does accept optional `finalizers ...func(*T) error` that run after
-`T.Validate()` inside the final-output regeneration loop, but they are
+`Config[T].Finalizers` run after `T.Validate()` inside the final-output
+regeneration loop, but they are
 **validation-only and side-effect-free**: they let a host enforce an invariant
 that needs context `T.Validate()` cannot see (e.g. a workspace field schema), and
 a returned error is fed back to the model and the output regenerated. This is how
@@ -362,14 +357,13 @@ replan round (the old "empty tasks = done" implicit termination is gone, so a
 planner that merely forgot to emit tasks can no longer silently terminate).
 
 **Direct mode (round-1 fast path).** When the host sets
-`RunRequest.AllowDirect`, the planner may answer a *genuinely trivial*
+`Input.AllowDirect`, the planner may answer a *genuinely trivial*
 request on round 1 without any investigation: instead of `tasks` it emits a
-`direct` payload (an optional tool-id subset), and the runtime replies in a
-single tool-enabled ReAct loop, returning plain text in `RunResult.Text`
-with `RunResult.Direct == true`. It is strictly a fast path for
-respond-style replies: even a `Run[T]` turn returns `.Text` (not `.Data`) on
-the direct path, because side-effecting terminal actions are by definition not
-"trivial" and must go through the normal `tasks` → replan → `finalize` loop.
+`direct` payload (an optional tool-id subset), and the runtime replies through a
+single ReAct child, returning plain text. It is strictly a fast path for
+respond-style replies: even a structured host's turn returns text (not a decoded
+`T`) on the direct path, because side-effecting terminal actions are by definition
+not "trivial" and must go through the normal `tasks` → replan → `finalize` loop.
 Hosts opt in (`threadcase` enables it for mention mode but disables it for
 `ModeCreate`; `job` enables it; structured-only hosts leave it off). The
 planner prompt guards it hard: "when in any doubt, investigate."
@@ -557,18 +551,23 @@ the same thread can Spawn successfully while the previous turn is still applying
 its case update, its Slack post, and its Session write. Two consequences:
 
 - The new turn may read a Case or Session the previous handler has not written yet.
-- Two handlers' `Session.Put` calls can interleave, and a full write loses whatever
-  the other recorded.
 
 This is NOT the best-effort-handler gap above: no crash is involved.
 
-Two things follow for anyone changing this area:
+The **clobbering** half of it is closed: no path that runs before or after a turn
+writes the whole Session document any more. Two things follow for anyone changing
+this area:
 
-- **A write from the spawning side of a turn must be narrow, not a `Session.Put`.**
-  `AdvanceLastMention` and `AssociateProposal` are the shapes to copy: one field,
-  and monotonic where two triggers can race, so neither can clobber a concurrent
-  handler's outcome. A full write there is a bug even though it looks like it is
-  "before" the run.
+- **Every Session write around a turn is field-scoped, never a `Session.Put`.**
+  That covers both sides — the spawning call and the completion handler — because
+  either can be running while the other writes the same row. The repository
+  operations are `AdvanceLastMention` (monotonic), `AssociateProposal`,
+  `StampLastAction`, `SetPendingQuestion` and `BindCase`; add another one rather
+  than reaching for `Put`. A full write there is a bug even though it looks like it
+  happens "before" or "after" the run.
+  The single exception is `persistCreateSession`, the create flow's FIRST write:
+  the row may not exist yet, so a field-scoped update has nothing to update. Its
+  residual risk is recorded at the function.
 - **Nothing a completion handler needs may be read back from mutable shared
   state.** The handler runs after the turn, and by then the thread may point
   somewhere else. Anything that identifies what THIS run was working on travels on
@@ -577,10 +576,12 @@ Two things follow for anyone changing this area:
   result. Corollary: a value that identifies the run's target must be written to
   shared state only AFTER the Spawn is accepted, or a refused turn leaves the
   thread pointing at work nobody is doing.
-- **Closing the gap properly means the outward work runs under the subject** — as a
-  final durable transition, or as a child Process the subject still covers — not by
-  adding locks around the handler. Until that is done, do not describe the thread
-  as serialised end to end.
+- **Closing the REST of the gap means the outward work runs under the subject** — as
+  a final durable transition, or as a child Process the subject still covers — not
+  by adding locks around the handler. Narrow writes stop one turn from erasing
+  another's record; they do not stop a new turn from reading state the previous
+  handler has not written yet. Until that is done, do not describe the thread as
+  serialised end to end.
 
 ## Agent runtime: a parallel tool-call turn is answered in ONE call (NON-NEGOTIABLE)
 

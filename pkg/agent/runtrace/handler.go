@@ -351,6 +351,14 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 //
 // The lookup happens at most once per claim, because the answer is then cached in
 // lastLLMResponseSeq and every later response overwrites it locally.
+//
+// Under a gollem mock LLM it returns 0 and the TOOL_CALL append is then rejected
+// by JobRunEvent.Validate, which shows up in test output as a non-fatal
+// "ToolCall must reference a parent LLMResponse" report. That is a property of the
+// mock, not a defect: gollem emits its LLM-call trace hooks from the provider
+// client packages only, so no LLM_RESPONSE is ever recorded for a mocked call and
+// there is nothing for the tool call to point at. It cannot happen against a real
+// provider.
 func (h *Handler) parentSequenceLocked(ctx context.Context) int64 {
 	if h.lastLLMResponseSeq != 0 {
 		return h.lastLLMResponseSeq

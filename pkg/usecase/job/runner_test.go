@@ -32,7 +32,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
@@ -2244,6 +2243,16 @@ type inputCapturingLLM struct {
 	inputs    []string
 }
 
+// captured returns a copy of the recorded inputs. It is a copy because the
+// worker goroutine keeps appending while the test reads.
+func (l *inputCapturingLLM) captured() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, len(l.inputs))
+	copy(out, l.inputs)
+	return out
+}
+
 func (l *inputCapturingLLM) client() gollem.LLMClient {
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
@@ -2264,7 +2273,13 @@ func (l *inputCapturingLLM) client() gollem.LLMClient {
 					}
 					next := l.responses[l.idx]
 					l.idx++
-					return &gollem.Response{Texts: []string{next}}, nil
+					return &gollem.Response{Texts: []string{next}, InputToken: 5, OutputToken: 3}, nil
+				},
+				// Required: the durable runtime commits the conversation after
+				// every transition, so a session that cannot hand its History back
+				// fails the transition and the run retries from the checkpoint.
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
 				},
 			}, nil
 		},
@@ -2288,7 +2303,7 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 
 	llm := &inputCapturingLLM{responses: []string{
 		// Turn 1, round 1: plan one task.
-		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["default"]}]}`,
+		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["core_job"]}]}`,
 		// Turn 1: sub-agent observation (carries the marker we assert on later).
 		observationMarker + " was found in the prod logs.",
 		// Turn 1, replan: ask the user which environment.
@@ -2298,12 +2313,6 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		// Turn 2: final response.
 		"Concluded: the prod environment was affected.",
 	}}
-
-	historyRepo := agentarchive.NewMemoryHistoryRepository()
-	peRunner, err := planexecRunnerForTest(llm.client(), historyRepo)
-	gt.NoError(t, err).Required()
-	planexecExec, err := jobagent.NewPlanexecJobExecutor(peRunner)
-	gt.NoError(t, err).Required()
 
 	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
 	registry := model.NewWorkspaceRegistry()
@@ -2329,19 +2338,20 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	})
 
 	poster := &fakeQuestionPoster{returnTS: "FORM-TS-1"}
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
 	runner := job.NewJobRunner(job.RunnerDeps{
 		Repo:              repo,
 		Registry:          registry,
 		LLMClient:         llm.client(),
-		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: planexecExec},
-		HistoryRepo:       historyRepo,
+		Durable:           durable,
 		InteractionPoster: poster,
 		NewRunID:          func() string { return "RUN-1" },
 		NewTraceID:        func() string { return "TRACE-1" },
 		Clock:             func() time.Time { return now },
 	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm.client())
 
-	// --- Turn 1: Run suspends at the question ----------------------------
+	// --- Turn 1: the run suspends at the question ------------------------
 	gt.NoError(t, runner.Run(ctx, j, job.Event{
 		Domain:        model.JobEventDomainCase,
 		WorkspaceID:   wsID,
@@ -2351,11 +2361,15 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		CaseLifecycle: model.CaseLifecycleCreated,
 	})).Required()
 
+	// Run returns once the run is recorded and spawned; the worker takes it from
+	// there, so the suspend is waited for rather than assumed.
 	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
-	suspendedLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
-	gt.NoError(t, err).Required()
-	gt.Value(t, suspendedLog.Stage).Equal(model.JobRunStageAwaitingInput)
+	suspendedLog := awaitRunStage(t, repo, key, "RUN-1", model.JobRunStageAwaitingInput)
 	gt.Value(t, suspendedLog.PendingInteraction).NotNil().Required()
+	// The run parks on an await of the SAME Process, which is what makes the
+	// resume continue one conversation instead of starting a second run.
+	gt.String(t, suspendedLog.AgentProcessID).NotEqual("")
+	gt.String(t, suspendedLog.AgentAwaitKey).NotEqual("")
 	gt.Array(t, poster.posts).Length(1).Required()
 
 	runDoc, err := repo.JobRun().Get(ctx, key)
@@ -2382,10 +2396,12 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	gt.NoError(t, runner.HandleQuestionSubmit(ctx, callback, action)).Required()
 
 	// The run completed under the SAME RunID (no fresh run minted).
-	finalLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
-	gt.NoError(t, err).Required()
-	gt.Value(t, finalLog.Stage).Equal(model.JobRunStageSuccess)
+	finalLog := awaitRunStage(t, repo, key, "RUN-1", model.JobRunStageSuccess)
 	gt.Value(t, finalLog.PendingInteraction).Nil()
+	// The await pointer is dropped when the answer is delivered, so a second
+	// submit of the same form finds nothing to answer instead of responding twice.
+	gt.String(t, finalLog.AgentProcessID).Equal("")
+	gt.String(t, finalLog.AgentAwaitKey).Equal("")
 
 	finalRun, err := repo.JobRun().Get(ctx, key)
 	gt.NoError(t, err).Required()
@@ -2398,38 +2414,59 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	gt.Number(t, len(poster.updates)).GreaterOrEqual(1)
 
 	// --- The decisive assertions: history continuity --------------------
-	// gollem persists the conversation under HistoryKey, and the JobRunner
-	// sets HistoryKey == RunID for BOTH the initial run and the resume (the
-	// run completed under the same "RUN-1" asserted above), so the resumed
-	// planner loads the same conversation. We verify the Job-level halves of
-	// that contract on the captured planner inputs:
-	//   1. the pre-question sub-agent observation entered the conversation
-	//      (turn-1 replan input), and
-	//   2. the post-question answer is folded into the resumed planner input
-	//      under the same run — proving resume continued the dialogue rather
-	//      than restarting from a blank round-0 plan.
-	gt.Number(t, len(llm.inputs)).GreaterOrEqual(4)
-	gt.Bool(t, strings.Contains(llm.inputs[2], observationMarker)).True()
-	gt.Bool(t, strings.Contains(llm.inputs[3], "User answers")).True()
-	gt.Bool(t, strings.Contains(llm.inputs[3], "prod")).True()
-	// The marker is NOT re-stated in the resumed input — it lives in the
-	// loaded gollem history, not the fresh turn input — confirming the resume
-	// relies on the persisted conversation rather than re-sending observations.
-	gt.Bool(t, strings.Contains(llm.inputs[3], observationMarker)).False()
+	// The answer resumes the SAME Process, so the conversation it continues is
+	// the one the pre-question rounds built. The Job-level halves of that:
+	//   1. the sub-agent's observation reached the planner before the question,
+	//      and
+	//   2. the answer is folded into the resumed planner call, WITHOUT the
+	//      observation being re-sent — it is in the Process's history, not in
+	//      the turn input, which is what distinguishes a resume from a restart.
+	inputs := llm.captured()
+	resumed := -1
+	for i, in := range inputs {
+		if strings.Contains(in, "# User answers") {
+			resumed = i
+			break
+		}
+	}
+	gt.Number(t, resumed).GreaterOrEqual(1).Required()
+	gt.Bool(t, strings.Contains(inputs[resumed], "Answer (select): prod")).True()
+	gt.Bool(t, strings.Contains(inputs[resumed], observationMarker)).False()
+
+	sawMarker := false
+	for _, in := range inputs[:resumed] {
+		if strings.Contains(in, observationMarker) {
+			sawMarker = true
+		}
+	}
+	gt.Bool(t, sawMarker).True()
 }
 
-// planexecRunnerForTest builds a planexec.Runner sharing the given history
-// repository (so the JobRunner and the planner persist into the same store).
-func planexecRunnerForTest(llm gollem.LLMClient, historyRepo gollem.HistoryRepository) (*planexec.Runner, error) {
-	return planexec.NewRunner(planexec.RunnerDeps{
-		LLMClient:   llm,
-		HistoryRepo: historyRepo,
-		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
-		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:  8,
-			SubAgentLoopMax: 20,
-		},
-	})
+// awaitRunStage polls the run log until it reaches want, and returns it. A
+// durable run executes on the worker after Run returns, so a test asserting on
+// its outcome has to wait for it rather than read straight through.
+func awaitRunStage(t *testing.T, repo interfaces.Repository, key model.JobRunKey,
+	runID string, want model.JobRunStage,
+) *model.JobRunLog {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := repo.JobRunLog().Get(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		if got != nil && got.Stage == want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			stage := model.JobRunStage("")
+			if got != nil {
+				stage = got.Stage
+			}
+			gt.Value(t, stage).Equal(want).Required()
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // submitValueFromBlocks pulls the Submit button's value out of a posted

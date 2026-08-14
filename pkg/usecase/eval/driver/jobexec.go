@@ -19,9 +19,12 @@ import (
 
 // JobExecution drives a workspace Job against a seeded case and judges what the
 // job produced: its run outcome (success/failure + summary), the case state
-// after the run, the actions present, and the tool-call trajectory. The job is
-// run through the real JobRunner, so this faithfully exercises the production
-// executor (simple / planexec), source resolution, and tool wiring.
+// after the run, the actions present, and the tool-call trajectory.
+//
+// The job goes through the real JobRunner onto the same agent runtime serve and
+// tick dispatch to, so a scenario exercises the production strategy (simple /
+// planexec), its per-transition checkpointing and budget, source resolution and
+// tool wiring — not a second implementation of them.
 type JobExecution struct{}
 
 // NewJobExecution builds the driver.
@@ -76,7 +79,12 @@ func (*JobExecution) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario,
 		}
 		return nil, goerr.New("job run produced no log records")
 	}
-	latest := logs[0]
+	// The run is a durable Process: Run returned once it was recorded and spawned,
+	// so its outcome, timeline and case writes land afterwards.
+	latest, err := e.AwaitJobRun(ctx, key)
+	if err != nil {
+		return nil, err
+	}
 
 	art := &evaltype.JobArtifact{
 		JobID: jobModel.ID,
