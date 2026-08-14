@@ -785,6 +785,116 @@ func TestParallelPlannerToolCallsAreAnsweredInOneTurn(t *testing.T) {
 	}
 }
 
+// A planning phase that asked for tools can reach the terminal output without
+// another planning call: the budget notice routes plan / replan straight to final.
+// The terminal call therefore has to carry those results too — leaving the model's
+// function calls unanswered is what a provider rejects, and it would reject this
+// request and every one after it.
+func TestPlannerToolResultsReachTheTerminalCall(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		// Round 1: look something up instead of planning.
+		[]*gollem.FunctionCall{
+			{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
+			{ID: "c2", Name: "get_workspace", Arguments: map[string]any{"id": "ws-2"}},
+		},
+		// The planning call that follows never happens: the notice fires first and
+		// the run goes to produce its answer. This reply is the terminal one.
+		`the partial answer`,
+	}}
+	// The notice fires almost immediately, so the run wraps up right after the
+	// tool phase drains.
+	cfg := budget.Config{MaxSteps: 8, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.1}
+	rt := newTextRuntime(t, planner.client(), cfg, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.String(t, out.Text).Contains("partial answer")
+
+	gt.Array(t, lookup.calls()).Length(2)
+
+	// Both results reached the terminal call, in the order asked.
+	answered := planner.answeredWith()
+	gt.Array(t, answered).Length(2).Required()
+	gt.Array(t, answered[0]).Length(0)
+	gt.Value(t, answered[1]).Equal([]string{"c1", "c2"})
+}
+
+// The terminal call may itself ask for a tool: agentkit declares the claim's tools
+// on every call, so a model that spent the run calling tools can answer this one
+// with another call. The run must service it and come back for the answer — reading
+// a function-call reply as "no answer" ended the turn in a fallback that had
+// nothing to say, with the investigation already paid for.
+func TestTerminalCallMayAskForATool(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		// The terminal call asks for a lookup instead of writing the answer.
+		&gollem.FunctionCall{ID: "f1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
+		// With the result in hand it writes it.
+		`The workspace has a severity field.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.String(t, out.Text).Contains("severity field")
+
+	gt.Array(t, lookup.calls()).Length(1)
+	// The result reached the call that then produced the answer.
+	answered := planner.answeredWith()
+	gt.Array(t, answered).Length(5).Required()
+	gt.Value(t, answered[4]).Equal([]string{"f1"})
+}
+
+// A terminal call that keeps asking for tools has to be told to stop, or the run
+// spends its whole step budget looking things up and ends with a fallback instead
+// of the answer it had already paid for. The instruction is the only lever:
+// agentkit's WithTools appends and nothing removes them.
+func TestTerminalCallIsToldWhenItsToolAllowanceIsSpent(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	call := func() any {
+		return &gollem.FunctionCall{ID: "f", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}}
+	}
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		// Four terminal calls that each ask for a lookup instead of answering.
+		call(), call(), call(), call(),
+		`Answered at last.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.String(t, out.Text).Contains("Answered at last")
+
+	// Every call was answered, and the last terminal call carried the instruction
+	// to stop.
+	gt.Array(t, lookup.calls()).Length(4)
+	seen := planner.seen()
+	gt.Array(t, seen).Length(8).Required()
+	gt.String(t, seen[7]).Contains("Do not call any more tools")
+}
+
 // countingProgress counts how many NEW messages were posted, which is the thing
 // a duplicate would show up as.
 type countingProgress struct {

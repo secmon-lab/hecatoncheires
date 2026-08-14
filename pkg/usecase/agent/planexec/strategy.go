@@ -28,8 +28,9 @@ const (
 	phaseReplan = "replan"
 	// phaseFinal produces the terminal output.
 	phaseFinal = "final"
-	// phasePlannerTool runs ONE tool call the planner asked for before it decides.
-	// It is a phase of its own, rather than a loop inside the planning transition,
+	// phasePlannerTool runs ONE tool call the planner asked for before it decides,
+	// or that the terminal call asked for before it writes the answer.
+	// It is a phase of its own, rather than a loop inside the calling transition,
 	// for the same reason every other step is: one transition is one LLM call or
 	// one tool call, so a crash costs at most one of them.
 	phasePlannerTool = "planner_tool"
@@ -188,6 +189,16 @@ func (TextResult) Validate() error { return nil }
 // the case) instead of closing over a single run's values, since a strategy is
 // registered once at startup and then serves every run of that agent.
 type Finalizer[T any] func(ctx context.Context, meta map[string]string, out *T) error
+
+// Validatable is the constraint on the structured terminal-output type. The
+// strategy decodes the planner's terminal JSON into T, then calls Validate() and
+// regenerates on failure: gollem's response-schema check verifies the JSON shape
+// only, so Validate() is where a host enforces its domain invariants (required
+// fields, allowed values). A TextOnly host instantiates T as TextResult, whose
+// Validate always accepts.
+type Validatable interface {
+	Validate() error
+}
 
 // Config is the host's terminal-output contract.
 type Config[T Validatable] struct {
@@ -445,11 +456,13 @@ func plannerInput(st state) []gollem.Input {
 // is MaxSteps, which every one of these calls charges.
 const plannerToolRoundsMax = 4
 
-// plannerToolBudgetNotice is what the planner is told once it has spent its tool
-// rounds. It is a user-turn instruction rather than a system prompt change because
-// it applies to this planning phase only.
-const plannerToolBudgetNotice = "You have used your tool allowance for this planning step. " +
-	"Do not call any more tools; decide now with what you already have."
+// plannerToolBudgetNotice is what the model is told once it has spent its tool
+// rounds, on a planning call or on the terminal one. It is a user-turn instruction
+// rather than a system prompt change because it applies to the current phase only,
+// and it is worded for both: a planning call has to decide, a terminal call has to
+// write the answer, and neither may keep looking things up.
+const plannerToolBudgetNotice = "You have used your tool allowance for this step. " +
+	"Do not call any more tools; continue now with what you already have."
 
 // divertToTools sends the run to the tool phase when the planner asked for tools
 // instead of deciding, and reports whether it did.
@@ -757,6 +770,13 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		}
 		userPrompt = rendered
 	}
+	// A terminal call that has been diverting to tools has to be told to stop, the
+	// same way a planning call is. It cannot arrive through NextInput: the branch
+	// above re-renders the prompt whenever there is no rejection to feed back, so
+	// the notice would be dropped exactly when it is needed.
+	if st.PlannerToolRounds >= plannerToolRoundsMax {
+		userPrompt = plannerToolBudgetNotice + "\n\n" + userPrompt
+	}
 
 	prompt, err := s.plannerPrompt(st)
 	if err != nil {
@@ -777,10 +797,29 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		opts = append(opts, agentkit.WithSchema(schema))
 	}
 
-	res, err := sys.Session().Generate(ctx, []gollem.Input{gollem.Text(userPrompt)}, opts...)
+	// Pending tool results ride along here too. A planning phase that asked for
+	// tools can reach the terminal output without another planning call — the
+	// budget notice routes plan / replan straight to final — and leaving those
+	// calls unanswered makes the provider reject this request and every one after
+	// it. See plannerInput.
+	input := append(toolcall.Inputs(st.ToolResponses), gollem.Text(userPrompt))
+	res, err := sys.Session().Generate(ctx, input, opts...)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: final generate")
 	}
+	st.ToolResponses = nil
+
+	// The model may look something up before it can write the answer, and the
+	// terminal call is no exception: agentkit's managed session declares the
+	// claim's tools on EVERY call, so a model that has been calling tools for the
+	// whole run can well answer this one with another call. Run them and come back
+	// here, exactly as a planning phase does — reading that as "no answer" is what
+	// turned a lookup into a fallback with nothing to say. The same round bound and
+	// the step ceiling apply.
+	if next, diverted := s.divertToTools(st, res, phaseFinal); diverted {
+		return next, agentkit.Continue[Output[T]](), nil
+	}
+
 	body := strings.Join(res.Texts, "\n")
 	if strings.TrimSpace(body) == "" {
 		return st, agentkit.Done(Output[T]{
