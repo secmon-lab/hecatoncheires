@@ -242,7 +242,10 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	answerText := formatDraftQuestionAnswers(pq, answers)
 	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
-	if err := uc.deps.Repo.Session().Put(ctx, session); err != nil {
+	// One field, not a Put: this is the spawning side of the resumed turn, and the
+	// previous turn's completion handler may still be writing the same row.
+	if err := uc.deps.Repo.Session().SetPendingQuestion(ctx,
+		session.ChannelID, session.ThreadTS, nil); err != nil {
 		errutil.Handle(ctx, err, "clear thread PendingQuestion before resuming")
 	}
 

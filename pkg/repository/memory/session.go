@@ -143,3 +143,76 @@ func (r *sessionRepository) AssociateProposal(_ context.Context, channelID, thre
 	r.sessions[key] = cur
 	return nil
 }
+
+func (r *sessionRepository) StampLastAction(_ context.Context, channelID, threadTS string, ended model.SessionEndReason) error {
+	if channelID == "" || threadTS == "" || ended == "" {
+		return goerr.New("channelID, threadTS and ended are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	cur.LastAction = ended
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}
+
+func (r *sessionRepository) BindCase(_ context.Context, channelID, threadTS string, caseID int64) error {
+	if channelID == "" || threadTS == "" || caseID == 0 {
+		return goerr.New("channelID, threadTS and caseID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	cur.CaseID = caseID
+	cur.PendingQuestion = nil
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}
+
+func (r *sessionRepository) SetPendingQuestion(_ context.Context, channelID, threadTS string, q *model.PendingQuestion) error {
+	if channelID == "" || threadTS == "" {
+		return goerr.New("channelID and threadTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	// Copied, not aliased: the caller keeps its own pointer and the stored map
+	// value must not change under it (the same reason Put and Claim copy).
+	if q == nil {
+		cur.PendingQuestion = nil
+	} else {
+		pq := *q
+		cur.PendingQuestion = &pq
+	}
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}

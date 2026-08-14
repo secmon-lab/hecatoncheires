@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 
@@ -46,8 +45,11 @@ func (h proposalHost) Ask(ctx context.Context, target proposal.Target, q proposa
 	// same Session instance and wrote it when the turn ended — but here the run
 	// has no instance to write, so a form left unsaved would be read back as
 	// stale and the user's answer refused.
-	session.UpdatedAt = time.Now().UTC()
-	if err := h.uc.repo.Session().Put(ctx, session); err != nil {
+	//
+	// One field, not a Put: this runs after the terminal commit released the
+	// thread's subject, so a later turn may already be writing the same row.
+	if err := h.uc.repo.Session().SetPendingQuestion(ctx,
+		session.ChannelID, session.ThreadTS, session.PendingQuestion); err != nil {
 		return goerr.Wrap(err, "persist the pending question",
 			goerr.V("session_id", session.ID))
 	}

@@ -254,9 +254,11 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 	}
 
 	// Persist the ProposalID on the Session so future thread replies / WS
-	// switches can look up the draft from the session row.
+	// switches can look up the draft from the session row. One field, not a Put:
+	// this runs after the turn, once the thread's subject was released, so a later
+	// turn may already be writing the same row.
 	ssn.ProposalID = h.proposalID
-	if err := h.repo.Session().Put(ctx, ssn); err != nil {
+	if err := h.repo.Session().AssociateProposal(ctx, ssn.ChannelID, ssn.ThreadTS, h.proposalID); err != nil {
 		errutil.Handle(ctx, err, "save session with draft id")
 	}
 

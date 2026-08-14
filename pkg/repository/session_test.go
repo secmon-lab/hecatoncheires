@@ -266,6 +266,144 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Error(t, repo.Session().AdvanceLastMention(ctx, ch, ts, ""))
 	})
 
+	// The outcome stamp runs in a run's completion handler, which agentkit calls
+	// after the terminal transition released the thread's subject — so a later turn
+	// may already have advanced the cursor on the same row. Writing one field is
+	// what keeps this from restoring the finishing turn's stale copy.
+	t.Run("StampLastAction writes only the outcome", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000500",
+			ProposalID:    model.CaseProposalID("p-1"),
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		gt.NoError(t, repo.Session().StampLastAction(ctx, ch, ts, model.SessionEndedWithQuestion)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.Value(t, got.LastAction).Equal(model.SessionEndedWithQuestion)
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000500")
+		gt.Value(t, got.ProposalID).Equal(model.CaseProposalID("p-1"))
+		gt.Value(t, got.ID).Equal(ssn.ID)
+	})
+
+	t.Run("StampLastAction on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome-missing")
+		gt.NoError(t, repo.Session().StampLastAction(ctx, ch, ts, model.SessionEndedWithQuestion)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("StampLastAction rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome-invalid")
+		gt.Error(t, repo.Session().StampLastAction(ctx, "", ts, model.SessionEndedWithQuestion))
+		gt.Error(t, repo.Session().StampLastAction(ctx, ch, "", model.SessionEndedWithQuestion))
+		gt.Error(t, repo.Session().StampLastAction(ctx, ch, ts, ""))
+	})
+
+	t.Run("SetPendingQuestion records the form and clears it", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000700",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		pq := &model.PendingQuestion{
+			PostedChannelID:  ch,
+			PostedMessageTS:  "1700000000.000800",
+			AskedByProcessID: "proc-1",
+		}
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, pq)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.PendingQuestion).NotNil().Required()
+		gt.String(t, got.PendingQuestion.PostedMessageTS).Equal("1700000000.000800")
+		gt.String(t, got.PendingQuestion.AskedByProcessID).Equal("proc-1")
+		// The rest of the row is untouched.
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000700")
+
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, nil)).Required()
+		got, err = repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.PendingQuestion).Nil()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000700")
+	})
+
+	t.Run("SetPendingQuestion on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending-missing")
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, nil)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("SetPendingQuestion rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending-invalid")
+		gt.Error(t, repo.Session().SetPendingQuestion(ctx, "", ts, nil))
+		gt.Error(t, repo.Session().SetPendingQuestion(ctx, ch, "", nil))
+	})
+
+	t.Run("BindCase points the thread at its case and drops the form", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:              uuid.Must(uuid.NewV7()).String(),
+			ChannelID:       ch,
+			ThreadTS:        ts,
+			LastMentionTS:   "1700000000.000900",
+			PendingQuestion: &model.PendingQuestion{PostedChannelID: ch, PostedMessageTS: "1700000000.000901"},
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		gt.NoError(t, repo.Session().BindCase(ctx, ch, ts, 42)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Number(t, got.CaseID).Equal(42)
+		gt.Value(t, got.PendingQuestion).Nil()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000900")
+		gt.Value(t, got.ID).Equal(ssn.ID)
+	})
+
+	t.Run("BindCase on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind-missing")
+		gt.NoError(t, repo.Session().BindCase(ctx, ch, ts, 42)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("BindCase rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind-invalid")
+		gt.Error(t, repo.Session().BindCase(ctx, "", ts, 42))
+		gt.Error(t, repo.Session().BindCase(ctx, ch, "", 42))
+		gt.Error(t, repo.Session().BindCase(ctx, ch, ts, 0))
+	})
+
 	t.Run("rejects missing required fields on Put", func(t *testing.T) {
 		repo := newRepo(t)
 		gt.Error(t, repo.Session().Put(ctx, &model.Session{})).Is(model.ErrSessionValidation)

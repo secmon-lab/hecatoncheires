@@ -60,4 +60,31 @@ type SessionRepository interface {
 	//
 	// A missing Session is not an error.
 	AssociateProposal(ctx context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error
+
+	// StampLastAction records how a turn ended.
+	//
+	// It is narrow for the reason AdvanceLastMention is: this write happens in a
+	// run's completion handler, which agentkit calls AFTER the terminal transition
+	// released the thread's subject — so a later turn may already be running and
+	// writing the same row. A full Put from here would restore this turn's stale
+	// copy of the cursor the later turn advanced.
+	//
+	// A missing Session is not an error.
+	StampLastAction(ctx context.Context, channelID, threadTS string, ended model.SessionEndReason) error
+
+	// SetPendingQuestion records the question form a turn left open, or clears it
+	// when q is nil. It is narrow for the same reason as StampLastAction.
+	//
+	// A missing Session is not an error.
+	SetPendingQuestion(ctx context.Context, channelID, threadTS string, q *model.PendingQuestion) error
+
+	// BindCase points the thread at the Case a create turn committed, and clears
+	// any pending question in the same write: the case exists, so the form that
+	// was asked to produce it can no longer be answered.
+	//
+	// It is narrow for the same reason as StampLastAction — it runs in the create
+	// run's completion handler, after the subject was released.
+	//
+	// A missing Session is not an error.
+	BindCase(ctx context.Context, channelID, threadTS string, caseID int64) error
 }

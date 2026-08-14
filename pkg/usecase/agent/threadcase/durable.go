@@ -599,32 +599,19 @@ func (d *Durable) finished(ctx context.Context, pid agentkit.ProcessID) (agentke
 // endSession stamps how the turn ended. The host reads it to decide whether a
 // later event resumes a pending question or starts a fresh turn.
 //
-// The Session is re-loaded rather than carried from StartTurn: this runs after the
-// turn, so the in-memory copy the spawning call held is stale — the question form
-// the host just posted, for one, is recorded on the stored row.
+// It is a one-field repository call rather than a read-modify-write. This runs
+// after the turn, and agentkit released the thread's subject at the terminal
+// commit — so by now a later turn may be running and writing the same row. A full
+// write from here would restore this turn's stale copy of whatever that turn
+// recorded, the mention cursor included.
 func (d *Durable) endSession(ctx context.Context, channelID, threadTS string, ended model.SessionEndReason) {
 	if channelID == "" || threadTS == "" {
 		return
 	}
-	ssn, err := d.repo.Session().GetByThread(ctx, channelID, threadTS)
-	if err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "load the session to stamp its outcome",
+	if err := d.repo.Session().StampLastAction(ctx, channelID, threadTS, ended); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "stamp the session outcome",
 			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS)),
-			"load the session to stamp its outcome")
-		return
-	}
-	if ssn == nil {
-		return
-	}
-	ssn.LastAction = ended
-	d.persistSession(ctx, ssn)
-}
-
-func (d *Durable) persistSession(ctx context.Context, ssn *model.Session) {
-	ssn.UpdatedAt = time.Now().UTC()
-	if err := d.repo.Session().Put(ctx, ssn); err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "persist the thread-mode session",
-			goerr.V("session_id", ssn.ID)), "persist the thread-mode session")
+			"stamp the session outcome")
 	}
 }
 

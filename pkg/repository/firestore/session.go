@@ -205,3 +205,82 @@ func (r *sessionRepository) AssociateProposal(ctx context.Context, channelID, th
 	}
 	return nil
 }
+
+func (r *sessionRepository) StampLastAction(ctx context.Context, channelID, threadTS string, ended model.SessionEndReason) error {
+	if channelID == "" || threadTS == "" || ended == "" {
+		return goerr.New("channelID, threadTS and ended are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
+	}
+	// Update, not Set: this runs in a completion handler, after the subject was
+	// released, so the next turn may already be writing the same row.
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "LastAction", Value: ended},
+	}); err != nil {
+		return goerr.Wrap(err, "stamp the session outcome",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
+	}
+	return nil
+}
+
+func (r *sessionRepository) SetPendingQuestion(ctx context.Context, channelID, threadTS string, q *model.PendingQuestion) error {
+	if channelID == "" || threadTS == "" {
+		return goerr.New("channelID and threadTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	// nil clears the field rather than deleting it, so a reader always decodes a
+	// Session whose PendingQuestion is simply absent.
+	var value any
+	if q != nil {
+		value = q
+	}
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "PendingQuestion", Value: value},
+	}); err != nil {
+		return goerr.Wrap(err, "record the pending question",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	return nil
+}
+
+func (r *sessionRepository) BindCase(ctx context.Context, channelID, threadTS string, caseID int64) error {
+	if channelID == "" || threadTS == "" || caseID == 0 {
+		return goerr.New("channelID, threadTS and caseID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
+	}
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "CaseID", Value: caseID},
+		{Path: "PendingQuestion", Value: nil},
+	}); err != nil {
+		return goerr.Wrap(err, "bind the thread to its case",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
+	}
+	return nil
+}
+
+// updateFields applies a field-scoped update to one Session, stamping UpdatedAt
+// alongside. A missing document is not an error: the thread it named is gone, and
+// there is nothing left to record against it.
+func (r *sessionRepository) updateFields(ctx context.Context, channelID, threadTS string, updates []firestore.Update) error {
+	doc := r.docRef(channelID, threadTS)
+	_, err := doc.Update(ctx, append(updates, firestore.Update{Path: "UpdatedAt", Value: r.now()}))
+	if err != nil && status.Code(err) != codes.NotFound {
+		return err
+	}
+	return nil
+}

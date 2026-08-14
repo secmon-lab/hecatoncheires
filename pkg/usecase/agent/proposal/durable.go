@@ -7,7 +7,6 @@ import (
 	"errors"
 	"sync"
 	"text/template"
-	"time"
 
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
@@ -430,24 +429,19 @@ func (d *Durable) reportFallback(ctx context.Context, target Target, reason stri
 
 // endSession stamps how the turn ended. The host reads it to decide whether a
 // later event resumes a pending question or starts a fresh turn.
+//
+// It is a one-field repository call rather than a read-modify-write. This runs
+// after the turn, and agentkit released the thread's subject at the terminal
+// commit — so by now a later turn may be running and writing the same row. A full
+// write from here would restore this turn's stale copy of whatever that turn
+// recorded, the mention cursor included.
 func (d *Durable) endSession(ctx context.Context, target Target, ended model.SessionEndReason) {
 	if target.ChannelID == "" || target.ThreadTS == "" {
 		return
 	}
-	ssn, err := d.repo.Session().GetByThread(ctx, target.ChannelID, target.ThreadTS)
-	if err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "load the session to stamp its outcome",
-			goerr.V("session_id", target.SessionID)), "load the session to stamp its outcome")
-		return
-	}
-	if ssn == nil {
-		return
-	}
-	ssn.LastAction = ended
-	ssn.UpdatedAt = time.Now().UTC()
-	if err := d.repo.Session().Put(ctx, ssn); err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "persist the case-draft session",
-			goerr.V("session_id", ssn.ID)), "persist the case-draft session")
+	if err := d.repo.Session().StampLastAction(ctx, target.ChannelID, target.ThreadTS, ended); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "stamp the session outcome",
+			goerr.V("session_id", target.SessionID)), "stamp the session outcome")
 	}
 }
 

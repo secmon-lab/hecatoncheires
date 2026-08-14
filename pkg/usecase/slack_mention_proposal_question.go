@@ -413,7 +413,10 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 	// inherits its conversation, and clearing drops the record.
 	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
-	if err := uc.repo.Session().Put(ctx, session); err != nil {
+	// One field, not a Put: this is the spawning side of the resumed turn, and the
+	// previous turn's completion handler may still be writing the same row.
+	if err := uc.repo.Session().SetPendingQuestion(ctx,
+		session.ChannelID, session.ThreadTS, nil); err != nil {
 		errutil.Handle(ctx, err, "clear PendingQuestion before resuming planner")
 	}
 

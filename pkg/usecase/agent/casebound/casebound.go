@@ -192,7 +192,7 @@ func (uc *UseCase) StartTurn(ctx context.Context, req TurnRequest) (*Result, err
 	// The mention this turn processes is what the next turn's delta scan starts
 	// after. It is stamped now rather than at the end because a second mention
 	// arriving mid-run must not re-read messages this run already holds.
-	uc.stampSession(ctx, req.Session, req.MentionTS)
+	uc.stampSession(ctx, req.ChannelID, req.ThreadTS, req.MentionTS)
 
 	return &Result{Status: StatusStarted, ProcessID: pid}, nil
 }
@@ -344,29 +344,27 @@ func (uc *UseCase) finishRunLog(ctx context.Context, sc agentkernel.Scope, m age
 		runErr, time.Now().UTC())
 }
 
-// stampSession records the mention this turn is processing and what kind of turn
-// it is. It is the turn's ONLY Session write, and it happens while the turn still
-// holds the thread's subject.
+// stampSession moves the mention cursor to the mention this turn is processing.
 //
-// That single-write shape is what keeps two turns from clobbering each other.
-// SessionRepository.Put replaces the whole document, and agentkit releases the
-// subject when the terminal transition commits — before the completion handler
-// runs — so a second write from the finishing turn could interleave with the next
-// turn's and restore an older LastMentionTS. A stale LastMentionTS is not
-// cosmetic: the next turn's delta scan would re-read messages an earlier turn
-// already processed, and act on them again.
+// It is deliberately a one-field, monotonic repository call rather than a
+// Session.Put. Put replaces the whole document, and this write races the turn it
+// has just started: agentkit releases the thread's subject when the terminal
+// transition commits — BEFORE the completion handler runs — so by the time this
+// line executes a later turn may already have been spawned and stamped its own
+// cursor. A full write from here would restore this turn's older LastMentionTS,
+// and a stale cursor is not cosmetic: the next turn's delta scan would re-read
+// messages an earlier turn already processed, and act on them again.
 //
-// Recording LastAction here rather than at the end is equivalent in effect: the
-// only reader asks whether it is SessionEndedWithQuestion (a pending form), and a
-// channel-mode mention turn never sets that.
-func (uc *UseCase) stampSession(ctx context.Context, ssn *model.Session, mentionTS string) {
+// LastAction is deliberately NOT written. Its only reader is
+// Session.ResumeOnReply, and a case-bound Session never reaches it: the
+// thread-reply filter returns at the case-bound check first (F7, see
+// SlackUseCases.shouldResumeOnReply). Writing it would mean a full-document write
+// for a field nothing reads.
+func (uc *UseCase) stampSession(ctx context.Context, channelID, threadTS, mentionTS string) {
 	if mentionTS == "" {
 		return
 	}
-	ssn.LastMentionTS = mentionTS
-	ssn.LastAction = model.SessionEndedWithCaseBoundReply
-	ssn.UpdatedAt = time.Now().UTC()
-	if err := uc.repo.Session().Put(ctx, ssn); err != nil {
+	if err := uc.repo.Session().AdvanceLastMention(ctx, channelID, threadTS, mentionTS); err != nil {
 		errutil.Handle(ctx, err, "persist the session mention position")
 	}
 }

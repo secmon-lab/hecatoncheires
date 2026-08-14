@@ -270,7 +270,37 @@ func TestStartTurnPostsTheReplyAndRecordsTheRun(t *testing.T) {
 	stored, err := h.repo.Session().GetByThread(ctx, testChannelID, testThreadTS)
 	gt.NoError(t, err).Required()
 	gt.String(t, stored.LastMentionTS).Equal("1700000001.000001")
-	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithCaseBoundReply)
+}
+
+// The cursor write from the spawning side must not roll anything back. It races
+// the turn it just started — agentkit frees the thread's subject at the terminal
+// commit, before the completion handler runs — so a later turn's cursor and any
+// field another path recorded meanwhile have to survive it. A full Session.Put
+// here would restore this turn's stale copy of both.
+func TestStartTurnNeverRollsTheSessionBack(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, scriptedLLM(&gollem.Response{Texts: []string{"Here is the answer."}}))
+	ssn := h.session(t, ctx)
+
+	// Stand in for what a concurrent turn / another path wrote after this turn's
+	// request was built: a later cursor, and an end reason on the same row.
+	ahead := &model.Session{
+		ID: ssn.ID, ChannelID: testChannelID, ThreadTS: testThreadTS,
+		WorkspaceID: "ws-1", CaseID: 55, Kind: model.SessionKindCase,
+		LastMentionTS: "1700000009.000001",
+		LastAction:    model.SessionEndedWithQuestion,
+	}
+	gt.NoError(t, h.repo.Session().Put(ctx, ahead)).Required()
+
+	// The request still carries the earlier mention this turn is processing.
+	res, err := h.uc.StartTurn(ctx, h.request(ssn, "1700000001.000001"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(casebound.StatusStarted)
+
+	stored, err := h.repo.Session().GetByThread(ctx, testChannelID, testThreadTS)
+	gt.NoError(t, err).Required()
+	gt.String(t, stored.LastMentionTS).Equal("1700000009.000001")
+	gt.Value(t, stored.LastAction).Equal(model.SessionEndedWithQuestion)
 }
 
 // A failed turn must tell the user, and record the failure on the run so the

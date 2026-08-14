@@ -413,6 +413,15 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 // The in-process path did not need this: the create handler closed over the same
 // values. A durable run has no such closure — its handler runs after the turn, on
 // whichever instance committed the terminal transition.
+//
+// This is the one Session write left that replaces the whole document, and it is
+// the create flow's FIRST write: loadOrCreateSession may hand back a row that does
+// not exist in storage yet, so a field-scoped update has nothing to update. The
+// residual risk is the same one the narrow writes elsewhere remove — a previous
+// turn's completion handler finishing on this thread between the read and this
+// write loses what it recorded. Closing it means reshaping the bootstrap into
+// create-if-absent plus a set-once fill of CreatorUserID / ReactionSource*, which
+// is a change to how a case is attributed and is deliberately not folded in here.
 func (uc *AgentUseCase) persistCreateSession(ctx context.Context, session *model.Session) {
 	if uc.durableThreadcase == nil {
 		return
@@ -500,30 +509,18 @@ func (uc *AgentUseCase) slackPermalink(ctx context.Context, channelID, messageTS
 }
 
 // bindSessionToCase stamps the freshly created case id onto the thread's
-// session (Session.ID stays stable so the gollem history stays continuous).
-// It re-reads the session on purpose: RunTurn swaps its working session to the
-// turn-lock's own object (`req.Session = handle.Session`) and persists the
-// turn's LastAction / PendingQuestion there, so the caller's in-flight pointer
-// is stale after the turn. Binding via that stale pointer would clobber the
-// turn's writes (e.g. re-persist LastAction == question after a resume created
-// the case, which would loop a driver waiting on that flag). Best-effort: a
-// failure here only means later mentions re-resolve the case by thread lookup.
+// session (Session.ID stays stable so the gollem history stays continuous) and
+// drops the question form that produced it, since the case now exists.
+//
+// It writes those two fields rather than the whole document. It runs in the
+// create run's completion handler, which agentkit calls after the terminal
+// transition released the thread's subject, so a later turn may already be
+// writing the same row — and the caller's in-flight Session pointer is stale by
+// then regardless. Best-effort: a failure here only means later mentions
+// re-resolve the case by thread lookup.
 func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, channelID, threadTS string, caseID int64) {
-	ssn, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
-	if err != nil || ssn == nil {
-		if err != nil {
-			errutil.Handle(ctx, err, "thread case: reload session to bind case")
-		}
-		return
-	}
-	if ssn.CaseID == caseID && ssn.PendingQuestion == nil {
-		return
-	}
-	ssn.CaseID = caseID
-	// The case is created; no question is outstanding anymore.
-	ssn.PendingQuestion = nil
-	if perr := uc.deps.Repo.Session().Put(ctx, ssn); perr != nil {
-		errutil.Handle(ctx, perr, "thread case: bind session to case")
+	if err := uc.deps.Repo.Session().BindCase(ctx, channelID, threadTS, caseID); err != nil {
+		errutil.Handle(ctx, err, "thread case: bind session to case")
 	}
 }
 
