@@ -30,10 +30,14 @@ func TestAgentDefaults(t *testing.T) {
 
 	budgets, err := cfg.Budgets()
 	gt.NoError(t, err).Required()
-	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(64))
+	// The root ceiling covers the planner AND every sub-agent it spawns, because a
+	// finished child's usage is folded into its parent. It therefore has to stay
+	// well clear of the task ceiling: at 64 a single busy sub-agent ended the turn.
+	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(128))
 	gt.Value(t, budgets.Root.MaxInputTokens).Equal(int64(500_000))
 	gt.Value(t, budgets.Root.MaxOutputTokens).Equal(int64(100_000))
 	gt.Value(t, budgets.Task.MaxSteps).Equal(int64(48))
+	gt.Bool(t, budgets.Root.MaxSteps > budgets.Task.MaxSteps*2).True()
 	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(100_000))
 	gt.Value(t, budgets.Task.MaxOutputTokens).Equal(int64(20_000))
 	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.8)

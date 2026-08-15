@@ -87,7 +87,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--policy` | `HECATONCHEIRES_POLICY` | - | Cond. | Path(s) to Rego policy files or directories used to authorize MCP requests (`data.auth.mcp`). Repeatable. **Required** when `--mcp` is set |
 | `--mcp-env` | `HECATONCHEIRES_MCP_ENV` | - | No | Names of environment variables to expose to the Rego policy as `input.env` (allow-list). Repeatable |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of **scheduled** Agent Job runs executing concurrently across the whole deployment. Set the same value on every instance (including `tick`). `0` disables the limit. See [operations.md](./operations.md) |
-| `--agent-max-steps` | `HECATONCHEIRES_AGENT_MAX_STEPS` | `64` | No | Maximum committed transitions one agent run may execute, sub-agents included. See [Agent runtime budgets](#agent-runtime-budgets) |
+| `--agent-max-steps` | `HECATONCHEIRES_AGENT_MAX_STEPS` | `128` | No | Maximum committed transitions one agent run may execute, sub-agents included. See [Agent runtime budgets](#agent-runtime-budgets) |
 | `--agent-max-input-tokens` | `HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS` | `500000` | No | Maximum input tokens one agent run may consume, sub-agents included |
 | `--agent-max-output-tokens` | `HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS` | `100000` | No | Maximum output tokens one agent run may produce, sub-agents included |
 | `--agent-task-max-steps` | `HECATONCHEIRES_AGENT_TASK_MAX_STEPS` | `48` | No | Maximum committed transitions one sub-agent may execute |
@@ -116,7 +116,16 @@ hide an output run-away — the expensive half — until the whole budget was go
 
 All three are cumulative over the whole run, sub-agents included: a sub-agent's
 usage is added to its parent when it finishes, so the ceiling on a run covers
-everything it spawned. A sub-agent's own allowance is a fifth of the root one.
+everything it spawned. Read the two tiers together — `--agent-task-max-steps`
+bounds ONE investigation, `--agent-max-steps` bounds the planner plus all of
+them. Raising the task allowance without raising the root one buys nothing: the
+turn simply runs out sooner. The default pair (128 root, 48 task) affords the
+planner's own work plus roughly two sub-agents at their full allowance, or
+several modest ones.
+
+Because a sub-agent's usage arrives in one addition when it finishes, a run can
+cross a ceiling by a whole sub-agent's worth at once; the reported figure is then
+past the ceiling rather than at it.
 Crossing `--agent-budget-notice-ratio` of any ceiling adds a line to the agent's
 next turn telling it to answer from what it already has and to stop calling
 tools; crossing the ceiling itself stops the run, and the user gets the same

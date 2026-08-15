@@ -13,29 +13,36 @@ import (
 
 // Agent runtime defaults.
 //
-// The two step ceilings are derived from the loop bounds the pre-agentkit
-// runtime used. A plan-execute turn spends three transitions per round (plan,
-// collect, replan) and ran at most eight rounds, so 24 covered the loop; 64
-// leaves room for the direct path, the terminal output and a planner that has
-// to re-emit malformed JSON. A sub-agent spends two transitions per tool round
-// (generate, then the tool) and ran at most twenty rounds, so 40 covered it and
-// 48 leaves headroom.
+// THE ROOT CEILING IS A TOTAL FOR THE WHOLE TURN, not the planner's own count.
+// agentkit folds a finished child's entire Metrics into its parent (see
+// `.claude/rules/architecture.md` § Budget), so a root run is charged for every
+// sub-agent it spawns as well as for its own transitions. Root and Task must
+// therefore be read together: Task bounds ONE investigation, Root bounds the
+// planner plus all of them.
+//
+// The Task step ceiling is derived from the loop bounds the pre-agentkit runtime
+// used: a sub-agent spends two transitions per tool round (generate, then the
+// tool) and ran at most twenty rounds, so 40 covered it and 48 leaves headroom.
+// The Root step ceiling is then what a turn needs on top: a plan-execute turn
+// spends three transitions per round (plan, collect, replan) plus the terminal
+// output and any re-emit of malformed JSON, and it has to afford the sub-agents
+// underneath. 128 covers the planner's own work plus roughly two sub-agents at
+// their full allowance, or several modest ones. It was 64, which could not even
+// cover one — a single busy sub-agent ended the turn with "step budget
+// exhausted" and no answer.
 //
 // The token ceilings are NOT derived from measurement: the previous runtime
 // counted no tokens at all, so there is no baseline in this repository to
 // derive one from. Replace them with measured values once Process.Metrics has
-// recorded real usage.
+// recorded real usage. Note they fold the same way — the root's input allowance
+// is five times a task's, so five sub-agents at their ceiling would spend it.
 //
 // Input and output are bounded separately because output tokens cost several
 // times what input tokens do: under one combined ceiling a large input
 // allowance would hide an output run-away — the expensive half — until the
 // whole budget was gone.
-//
-// A sub-agent gets a fifth of the root allowance, the ratio the previous
-// runtime's loop bounds already implied (one investigation is a fraction of a
-// turn, and a turn may run several).
 const (
-	defaultAgentMaxSteps            = 64
+	defaultAgentMaxSteps            = 128
 	defaultAgentMaxInputTokens      = 500_000
 	defaultAgentMaxOutputTokens     = 100_000
 	defaultAgentTaskMaxSteps        = 48
