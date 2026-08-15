@@ -392,27 +392,43 @@ func TestTokenBudgetsStopTheRun(t *testing.T) {
 	}
 }
 
-// inputRecordingLLM is scriptedLLM plus a record of the inputs each Generate
-// received, so a test can assert what the model was actually told.
-func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() []string) {
+// call is what one Generate was told: the text of its inputs, the system prompt
+// in force for it, and the tool-call ids it answered.
+type call struct {
+	text         string
+	systemPrompt string
+	answered     []string
+}
+
+// inputRecordingLLM is scriptedLLM plus a record of what each Generate received,
+// so a test can assert what the model was actually told and in which turn.
+func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() []call) {
 	t.Helper()
 	var mu sync.Mutex
-	var seen []string
+	var seen []call
 	var n atomic.Int32
 
 	client := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, so it is read here and
+			// attributed to the calls this session makes.
+			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					rec := call{systemPrompt: cfg.SystemPrompt()}
 					var b strings.Builder
 					for _, in := range input {
-						if txt, ok := in.(gollem.Text); ok {
-							b.WriteString(string(txt))
+						switch v := in.(type) {
+						case gollem.Text:
+							b.WriteString(string(v))
 							b.WriteString("\n")
+						case gollem.FunctionResponse:
+							rec.answered = append(rec.answered, v.ID)
 						}
 					}
+					rec.text = b.String()
 					mu.Lock()
-					seen = append(seen, b.String())
+					seen = append(seen, rec)
 					mu.Unlock()
 
 					i := int(n.Add(1)) - 1
@@ -427,10 +443,10 @@ func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMC
 			}, nil
 		},
 	}
-	return client, func() []string {
+	return client, func() []call {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make([]string, len(seen))
+		out := make([]call, len(seen))
 		copy(out, seen)
 		return out
 	}
@@ -459,13 +475,19 @@ func TestBudgetNoticeReachesTheModel(t *testing.T) {
 
 	seen := inputs()
 	gt.Array(t, seen).Length(3).Required()
-	// The opening turn is nowhere near the ceiling, so it must not be nagged.
-	gt.Bool(t, strings.Contains(seen[0], "close to its budget")).False()
-	// The last turn is past the notice threshold and must carry both the
-	// limiter's own message and the instruction derived from it.
-	gt.String(t, seen[2]).Contains("close to its budget")
-	gt.String(t, seen[2]).Contains("do not call any more tools")
-	gt.String(t, seen[2]).Contains("nearly exhausted")
+	// The opening call is nowhere near the ceiling, so it must not be nagged.
+	gt.Bool(t, strings.Contains(seen[0].systemPrompt, "close to its budget")).False()
+	// The last call is past the notice threshold and must carry both the
+	// limiter's own message and the instruction derived from it — in the system
+	// prompt, because its user turn is reporting a tool result and a turn holding
+	// function responses may hold nothing else.
+	gt.String(t, seen[2].systemPrompt).Contains("close to its budget")
+	gt.String(t, seen[2].systemPrompt).Contains("do not call any more tools")
+	gt.String(t, seen[2].systemPrompt).Contains("nearly exhausted")
+	gt.String(t, seen[2].systemPrompt).Contains("be helpful")
+	// The turn itself carried the result and nothing else.
+	gt.Value(t, seen[2].answered).Equal([]string{"c"})
+	gt.String(t, seen[2].text).Equal("")
 }
 
 func TestRegisterRequiresALimiter(t *testing.T) {

@@ -618,6 +618,28 @@ one tool call. What changes is only where the result is kept until it is reporte
 Pinned by `TestParallelToolResultsAreReportedInOneTurn` (react) and
 `TestParallelPlannerToolCallsAreAnsweredInOneTurn` (planexec).
 
+**Two consequences, both learnt from live rejections.** Both surface as the same
+unhelpful message — "Requests ending with a model turn are not supported" — and
+both repeat on every retry, so a run that hits either produces nothing.
+
+1. **A turn carrying function responses carries NOTHING ELSE.** Mixing text into it
+   makes the provider stop recognising it as the answer to the model's call, so it
+   reports the request as ending on the model turn. Whatever text was waiting keeps
+   waiting; an instruction that must reach the model NOW goes in the system prompt
+   for that call, which is rebuilt per call from the state. That is where planexec's
+   tool-allowance notice and react's budget notice live — the notices fire exactly
+   when a turn is likely to be reporting results, which is why they cannot be
+   inputs.
+2. **A call must never send an empty input.** gollem appends no user content for
+   one (`llm/gemini/client.go`, `len(parts) > 0`), so the request ends on the
+   previous model turn. "Send nothing and continue from the conversation" was safe
+   while results lived in the conversation and is not any more: planexec's
+   `plannerInput` and react's `stepGenerate` send a short continuation instead.
+
+Pinned by `TestAPlanningCallSendsOneWellFormedTurn`,
+`TestTheToolAllowanceIsToldInTheSystemPrompt` (planexec) and
+`TestBudgetNoticeReachesTheModel` (react).
+
 ## Budget
 
 The budget is **per Process**, enforced by the runtime rather than counted by
@@ -637,11 +659,33 @@ Three consequences to keep in mind:
 - **A ceiling produces `LimitKindStop`, the notice threshold produces
   `LimitKindNotice`, and Stop wins when both apply.** A Strategy that observes a
   notice is expected to skip further fan-out and head for its terminal output;
-  planexec does exactly that.
-- **Sub-agents get their own Process and therefore their own budget** (the Task
-  tier of `agentkernel.Budgets`). There is no per-turn total sub-agent count and
-  none should be reintroduced — a parent's `MaxSteps` bounds how many times it
-  can fan out, and each child's own budget bounds that child.
+  planexec does exactly that. The notice reaches the model through the SYSTEM
+  prompt, never as an input — see § "a parallel tool-call turn is answered in ONE
+  call" for why a turn reporting tool results can carry nothing else.
+- **A sub-agent's spend is charged to its parent as well as to itself.** A child
+  gets its own Process and its own ceiling (the Task tier of
+  `agentkernel.Budgets`), AND agentkit folds the finished child's whole `Metrics`
+  into the parent at the child's terminal commit (`worker.go`, `reportToParent`:
+  `pClone.Metrics = pClone.Metrics.add(child.Metrics)`). So the ROOT ceiling bounds
+  the **entire subtree**, not the planner's own transitions.
+
+  Two things follow, and both have already bitten:
+
+  - **A root ceiling must be sized to cover every child a turn can spawn.** Plan
+    validation allows up to 5 tasks per round and a turn may run several rounds,
+    so a root ceiling near a single task's ceiling means the run dies of its
+    children's spend with the planner barely started.
+  - **The ceiling is crossed in jumps, not one step at a time.** The fold lands in
+    a single write when the child finishes, so the parent can go from well under
+    the ceiling to far past it between two of its own transitions. The
+    per-transition `Limit` check (`worker.go`, `driveClaim` → `callLimit`) cannot
+    prevent that; it only reports it afterwards. A "step budget exhausted (122/64)"
+    is not a bug in the accounting — it is this fold.
+
+  Pinned by `TestAChildsStepsAreChargedToItsParent` and
+  `TestAParentIsStoppedByItsChildrensSpend` in
+  `pkg/usecase/agent/planexec/strategy_test.go`. There is no per-turn total
+  sub-agent count and none should be reintroduced: the root ceiling IS that bound.
 - **The budget spans the whole task, not one turn.** Because the counters live on
   the Process, a run resumed after a question continues against the same
   ceilings; a fresh trigger spawns a fresh Process with fresh ones.

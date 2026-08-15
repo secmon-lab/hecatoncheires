@@ -428,19 +428,34 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 // conversation as its own message does — splits that one turn into N, and every
 // later call in the run is rejected.
 //
-// With no results and an empty NextInput it sends nothing and continues from the
-// conversation as it stands; re-sending the original request would ask the same
-// question again as though nothing had been learnt.
+// A turn carrying tool results carries NOTHING ELSE. Gemini rejects a turn that
+// mixes function responses with text: it stops recognising the turn as the answer
+// to the model's call and reports the request as "ending with a model turn", which
+// then repeats on every retry. Whatever text was waiting keeps waiting — the
+// results are what the model asked for, and the instruction that would have
+// accompanied them belongs in the system prompt (see plannerPrompt).
+//
+// With no results and no NextInput it sends plannerContinue rather than nothing.
+// Sending nothing is what "continue from the conversation" used to mean, and it is
+// no longer safe either: gollem appends no user turn for an empty input, so the
+// request then ENDS on the previous model turn — the same rejection by a different
+// route. A short continuation keeps the request well-formed without re-asking the
+// original request, which would ask the same question again as though nothing had
+// been learnt.
 func plannerInput(st state) []gollem.Input {
-	inputs := toolcall.Inputs(st.ToolResponses)
+	if inputs := toolcall.Inputs(st.ToolResponses); len(inputs) > 0 {
+		return inputs
+	}
 	if st.NextInput != "" {
-		inputs = append(inputs, gollem.Text(st.NextInput))
+		return []gollem.Input{gollem.Text(st.NextInput)}
 	}
-	if len(inputs) == 0 {
-		return nil
-	}
-	return inputs
+	return []gollem.Input{gollem.Text(plannerContinue)}
 }
+
+// plannerContinue is the user turn a planning call sends when it has nothing new
+// to say. It must not restate the request: everything the planner needs is already
+// in the conversation, and repeating it invites the same answer again.
+const plannerContinue = "Continue from what you have so far, and give your next decision."
 
 // plannerToolRoundsMax is the number of tool rounds a planning phase may take
 // before the planner is told, in words, to decide with what it has.
@@ -797,12 +812,18 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		opts = append(opts, agentkit.WithSchema(schema))
 	}
 
-	// Pending tool results ride along here too. A planning phase that asked for
-	// tools can reach the terminal output without another planning call — the
-	// budget notice routes plan / replan straight to final — and leaving those
-	// calls unanswered makes the provider reject this request and every one after
-	// it. See plannerInput.
-	input := append(toolcall.Inputs(st.ToolResponses), gollem.Text(userPrompt))
+	// Pending tool results are reported here too — a planning phase that asked for
+	// tools can reach the terminal output without another planning call, since the
+	// budget notice routes plan / replan straight to final, and leaving those calls
+	// unanswered makes the provider reject this request and every one after it.
+	//
+	// They go ALONE when present, for the reason plannerInput gives: a turn holding
+	// function responses may hold nothing else. The prompt is not lost — it is
+	// re-rendered on the next transition, which is where it can be sent.
+	input := toolcall.Inputs(st.ToolResponses)
+	if len(input) == 0 {
+		input = []gollem.Input{gollem.Text(userPrompt)}
+	}
 	res, err := sys.Session().Generate(ctx, input, opts...)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: final generate")
@@ -1096,6 +1117,12 @@ func (s *strategy[T]) plannerPrompt(st state) (string, error) {
 	})
 	if err != nil {
 		return "", goerr.Wrap(err, "planexec: render the planner prompt")
+	}
+	// The tool allowance is spent: say so here rather than as a user turn. The turn
+	// that would carry it is the one reporting the tool results, and that turn may
+	// hold nothing but function responses — see plannerInput.
+	if st.PlannerToolRounds >= plannerToolRoundsMax {
+		prompt += "\n\n" + plannerToolBudgetNotice
 	}
 	return prompt, nil
 }

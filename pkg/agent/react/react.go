@@ -150,14 +150,20 @@ func (s *strategy) Step(ctx context.Context, sys agentkit.Syscalls, st state) (s
 
 // stepGenerate makes the one LLM call this transition is allowed.
 func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
-	// Pending tool results go first and ALL of them go in this one call — see
-	// package toolcall for why they cannot be reported one at a time.
+	// Pending tool results go in this one call, and go ALONE — see package toolcall
+	// for why they cannot be reported one at a time, and why a turn holding them
+	// may hold nothing else.
 	//
-	// With no results and an empty prompt this sends nothing and continues from
-	// the conversation as it stands.
+	// With no results and an empty prompt it still sends a turn: gollem appends no
+	// user content for an empty input, so the request would END on the previous
+	// model turn and the provider rejects that outright.
 	input := toolcall.Inputs(st.ToolResponses)
-	if st.Prompt != "" {
-		input = append(input, gollem.Text(st.Prompt))
+	if len(input) == 0 {
+		text := st.Prompt
+		if text == "" {
+			text = continueInstruction
+		}
+		input = []gollem.Input{gollem.Text(text)}
 	}
 
 	// A budget that is close to its ceiling has to be TOLD to the model, not
@@ -166,14 +172,15 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	// notice, the model can spend its last call on a conclusion instead of
 	// another tool.
 	//
-	// The notice is appended as a fresh input rather than folded into the system
-	// prompt because the system prompt is fixed at Init and this crossing happens
-	// mid-run.
+	// It rides in the system prompt for this call, not as an input: the crossing
+	// happens mid-run, exactly when a turn is likely to be reporting tool results,
+	// and such a turn may carry nothing else.
+	systemPrompt := st.SystemPrompt
 	if notice := sys.LimitStatus(); notice.Kind() == agentkit.LimitKindNotice {
-		input = append(input, gollem.Text(noticeInstruction(notice.Message())))
+		systemPrompt += "\n\n" + noticeInstruction(notice.Message())
 	}
 
-	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(st.SystemPrompt)}
+	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(systemPrompt)}
 	if s.role != nil {
 		opts = append(opts, agentkit.WithRole(s.role))
 	}
@@ -198,6 +205,11 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	st.Phase = phaseTool
 	return st, agentkit.Continue[Output](), nil
 }
+
+// continueInstruction is the user turn a call sends when it has nothing new to
+// say. It must not restate the request: everything the model needs is already in
+// the conversation, and repeating it invites the same answer again.
+const continueInstruction = "Continue from what you have so far."
 
 // noticeInstruction turns a budget notice into an instruction the model can act
 // on. The limiter's message says what is nearly spent; this says what to do

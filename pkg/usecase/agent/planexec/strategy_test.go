@@ -692,13 +692,15 @@ func TestPlannerToolCallRunsBeforeThePlan(t *testing.T) {
 	gt.Array(t, calls).Length(1).Required()
 	gt.Value(t, calls[0]["id"]).Equal("ws-1")
 
-	// The planning call that followed the lookup sent no user turn: the request is
-	// already in the conversation, and re-sending it would ask again as though
-	// nothing had been learnt.
+	// The planning call that followed the lookup restated nothing: its user turn
+	// carries the tool result and no text, because the request is already in the
+	// conversation and re-sending it would ask again as though nothing had been
+	// learnt.
 	seen := planner.seen()
 	gt.Number(t, len(seen)).GreaterOrEqual(2).Required()
 	gt.String(t, seen[0]).Contains("what happened here?")
 	gt.String(t, seen[1]).Equal("")
+	gt.Value(t, planner.answeredWith()[1]).Equal([]string{"c1"})
 }
 
 // A planner that only ever calls tools must be stopped: its lookups are free of
@@ -738,11 +740,34 @@ func TestPlannerToolCallsAreAlwaysAnswered(t *testing.T) {
 	// All five ran: none was dropped, so no call was left without a response.
 	gt.Array(t, lookup.calls()).Length(5)
 
-	// The allowance shows up as an instruction, which is the only lever there is:
-	// agentkit's WithTools appends to the session's tools and nothing removes them,
-	// so the planner cannot be denied the tools it already has.
+	// Each of the five answering turns reported its result and nothing else, which
+	// is the only shape a provider accepts for them. (Call 0 is the opening
+	// request; the calls after the fifth answer are the plan and what follows it.)
+	answered := planner.answeredWith()
 	seen := planner.seen()
-	gt.String(t, seen[4]).Contains("Do not call any more tools")
+	for i := 1; i <= 5; i++ {
+		gt.Array(t, answered[i]).Length(1)
+		gt.String(t, seen[i]).Equal("")
+	}
+}
+
+// The allowance is enforced by telling the planner to stop, which is the only
+// lever there is: agentkit's WithTools appends to the session's tools and nothing
+// removes them, so the planner cannot be denied the tools it already has.
+//
+// The instruction rides in the SYSTEM prompt. It cannot ride in the user turn: the
+// turn that would carry it is the one reporting the tool results, and a turn
+// holding function responses may hold nothing else.
+func TestTheToolAllowanceIsToldInTheSystemPrompt(t *testing.T) {
+	within, err := planexec.PlannerSystemPromptForTest(planexec.PlannerToolRoundsMaxForTest - 1)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, contains(within, "Do not call any more tools")).False()
+
+	spent, err := planexec.PlannerSystemPromptForTest(planexec.PlannerToolRoundsMaxForTest)
+	gt.NoError(t, err).Required()
+	gt.String(t, spent).Contains("Do not call any more tools")
+	// The host's own prompt survives alongside it.
+	gt.String(t, spent).Contains("host prompt")
 }
 
 // A planner turn asking for several tools at once is answered by ONE call
@@ -887,12 +912,113 @@ func TestTerminalCallIsToldWhenItsToolAllowanceIsSpent(t *testing.T) {
 	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
 	gt.String(t, out.Text).Contains("Answered at last")
 
-	// Every call was answered, and the last terminal call carried the instruction
-	// to stop.
+	// Every call was answered, and each answering turn carried the result alone.
 	gt.Array(t, lookup.calls()).Length(4)
-	seen := planner.seen()
-	gt.Array(t, seen).Length(8).Required()
-	gt.String(t, seen[7]).Contains("Do not call any more tools")
+	answered := planner.answeredWith()
+	gt.Array(t, answered).Length(8).Required()
+	for i := 4; i < 8; i++ {
+		gt.Array(t, answered[i]).Length(1)
+		gt.String(t, planner.seen()[i]).Equal("")
+	}
+}
+
+// A SUB-AGENT'S SPEND IS CHARGED TO ITS PARENT, and lands in one jump at the
+// child's terminal commit.
+//
+// agentkit folds a finished child's whole Metrics into its parent
+// (worker.go reportToParent: `pClone.Metrics = pClone.Metrics.add(child.Metrics)`),
+// so a planexec run's MaxSteps bounds the WHOLE SUBTREE, not the planner's own
+// transitions — and the parent's counter can cross the ceiling by a child's worth
+// of steps in a single fold, which the per-transition Limit check cannot catch
+// beforehand.
+//
+// This test pins that, because the two numbers a host configures (root vs task)
+// only make sense once it is known: a root ceiling must cover every child it can
+// spawn, or the run dies of its children's spend with the planner barely started.
+func TestAChildsStepsAreChargedToItsParent(t *testing.T) {
+	tool := &recordingTool{name: "get_workspace"}
+	// The child is asked to call the tool four times before answering, so its own
+	// spend is unmistakably larger than the planner's handful of transitions.
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		&gollem.FunctionCall{ID: "a1", Name: "get_workspace", Arguments: map[string]any{"id": "1"}},
+		&gollem.FunctionCall{ID: "a2", Name: "get_workspace", Arguments: map[string]any{"id": "2"}},
+		&gollem.FunctionCall{ID: "a3", Name: "get_workspace", Arguments: map[string]any{"id": "3"}},
+		&gollem.FunctionCall{ID: "a4", Name: "get_workspace", Arguments: map[string]any{"id": "4"}},
+		`the child is done`,
+		`{"finalize":{"reason":"done"}}`,
+		`the answer`,
+	}}
+	cfg := budget.Config{MaxSteps: 1000, MaxInputTokens: 10_000_000, MaxOutputTokens: 10_000_000, NoticeRatio: 0.99}
+	rt := newTextRuntime(t, planner.client(), cfg, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{tool}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	gt.Array(t, tool.calls()).Length(4)
+
+	// The planner itself ran: plan, collect, replan, final — a single-digit number
+	// of transitions. Its recorded Steps is far larger, because the child's are in
+	// it: 4 tool calls plus the LLM calls around them.
+	gt.Number(t, proc.Metrics.Steps).GreaterOrEqual(13)
+	// The same fold applies to LLM calls: the planner made 3 (plan, replan, final)
+	// and the child 5.
+	gt.Number(t, proc.Metrics.LLMCalls).Equal(8)
+	gt.Number(t, proc.Metrics.ToolCalls).Equal(4)
+}
+
+// A parent can therefore be killed by its children's spend while it has barely
+// run: the fold lands after the child finishes, so the ceiling is crossed between
+// two of the parent's own transitions and the next Limit check stops the run.
+func TestAParentIsStoppedByItsChildrensSpend(t *testing.T) {
+	tool := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		&gollem.FunctionCall{ID: "a1", Name: "get_workspace", Arguments: map[string]any{"id": "1"}},
+		&gollem.FunctionCall{ID: "a2", Name: "get_workspace", Arguments: map[string]any{"id": "2"}},
+		&gollem.FunctionCall{ID: "a3", Name: "get_workspace", Arguments: map[string]any{"id": "3"}},
+		&gollem.FunctionCall{ID: "a4", Name: "get_workspace", Arguments: map[string]any{"id": "4"}},
+		`the child is done`,
+		// Never reached: the fold stops the parent before it can replan.
+		`{"finalize":{"reason":"done"}}`,
+		`the answer`,
+	}}
+	// Ten steps is more than the planner needs to plan and collect, and less than
+	// the child spends.
+	cfg := budget.Config{MaxSteps: 10, MaxInputTokens: 10_000_000, MaxOutputTokens: 10_000_000, NoticeRatio: 0.99}
+	rt := newTextRuntime(t, planner.client(), cfg, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{tool}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessFailed)
+	gt.Value(t, proc.Failure).NotNil().Required()
+	gt.String(t, proc.Failure.Message).Contains("step budget exhausted")
+	// Past the ceiling, not at it: the child's spend arrived in one fold.
+	gt.Number(t, proc.Metrics.Steps).GreaterOrEqual(int64(cfg.MaxSteps))
+}
+
+// A planning call always sends a user turn, and a turn reporting tool results
+// reports nothing else.
+//
+// Both halves were learnt from live rejections. Sending nothing used to mean
+// "continue from the conversation" and stopped being safe once tool results left
+// the conversation: gollem appends no user turn for an empty input, so the request
+// ENDS on the previous model turn. Mixing text into a results turn fails the same
+// way, because the provider stops recognising it as the answer to the model's
+// call. Both surface as "Requests ending with a model turn are not supported".
+func TestAPlanningCallSendsOneWellFormedTurn(t *testing.T) {
+	// Nothing to report and nothing to say: still one turn.
+	gt.Number(t, planexec.PlannerInputsForTest("", 0)).Equal(1)
+	// Tool results are the whole turn.
+	gt.Number(t, planexec.PlannerInputsForTest("", 3)).Equal(3)
+	// Text waits when results are pending: 3 results, not 3 results + text.
+	gt.Number(t, planexec.PlannerInputsForTest("here are the observations", 3)).Equal(3)
+	// With nothing pending, the text is the turn.
+	gt.Number(t, planexec.PlannerInputsForTest("here are the observations", 0)).Equal(1)
 }
 
 // countingProgress counts how many NEW messages were posted, which is the thing

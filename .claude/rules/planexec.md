@@ -31,21 +31,23 @@ Differences worth knowing before changing it:
   phase, because those calls are free of the round budget — nothing else would stop
   a model that only ever looks things up. The bound is a NUDGE, not a gate: past it
   the calls are still run and answered (dropping them breaks the conversation), and
-  what changes is that the planner is told to decide with what it has.
-  The planning call that follows sends the tool results and nothing else — no
-  restated request, and ALL results in that one call. See
+  what changes is that the planner is told to stop — through the SYSTEM prompt
+  (`plannerPrompt`), because the turn that would otherwise carry the instruction is
+  the one reporting the results, and such a turn may carry nothing else.
+  The planning call that follows sends the tool results and NOTHING else — no
+  restated request, no instruction, and ALL results in that one call. See
   `.claude/rules/architecture.md` § "a parallel tool-call turn is answered in ONE
-  call" for why one at a time is not an option.
+  call" for both halves of that rule and the rejections that taught them.
 - **The terminal call may ask for tools too, and is treated the same way.**
   agentkit's managed session declares the claim's tools on EVERY call, so a model
   that spent the run calling tools can answer the terminal call with another call
-  instead of the answer. `stepFinal` diverts to the tool phase and comes back; the
-  results ride along with the re-asked terminal prompt. Reading a function-call
-  reply as "the final response was empty" ends the turn in a fallback with nothing
-  to say, after the investigation has already been paid for — pinned by
-  `TestTerminalCallMayAskForATool`. The wrap-up path needs the same care for the
-  opposite reason: a budget notice sends plan / replan straight to final, so the
-  terminal call is where pending results are reported
+  instead of the answer. `stepFinal` diverts to the tool phase and comes back,
+  reporting the results alone; its prompt is re-rendered on the transition after
+  that. Reading a function-call reply as "the final response was empty" ends the
+  turn in a fallback with nothing to say, after the investigation has already been
+  paid for — pinned by `TestTerminalCallMayAskForATool`. The wrap-up path needs the
+  same care for the opposite reason: a budget notice sends plan / replan straight to
+  final, so the terminal call is where pending results are reported
   (`TestPlannerToolResultsReachTheTerminalCall`).
 - **A question ENDS the turn by default** (`Output.Kind == OutputQuestion`) rather
   than waiting on an await. Holding a run open while a person takes hours would pin

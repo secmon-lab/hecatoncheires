@@ -168,17 +168,25 @@ func (e *Env) AwaitJobRun(ctx context.Context, key model.JobRunKey) (*model.JobR
 	}
 }
 
-// evalBudget is deliberately generous: a scenario is meant to fail on the
-// agent's judgement, not on a ceiling the harness imposed.
+// The scenario budgets are deliberately generous: a scenario is meant to fail on
+// the agent's judgement, not on a ceiling the harness imposed.
 //
-// MaxSteps counts committed transitions, and a transition is one LLM call or one
-// tool call, so a run with a few investigation rounds spends tens of them. It is
-// nonetheless kept low: raising it to 256 was tried and made a live-model scenario
-// run past the driver's 10-minute AwaitTurn instead of finishing, which is a worse
-// outcome than a bounded run that reports what it has. The ceiling bounds
-// wall-clock as much as spend.
-var evalBudget = budget.Config{
-	MaxSteps: 64, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000, NoticeRatio: 0.9,
+// They are two different ceilings on purpose. A finished sub-agent's whole
+// Metrics is folded into its parent (see `.claude/rules/architecture.md` §
+// Budget), so the ROOT ceiling has to cover the planner's own transitions PLUS
+// every sub-agent a turn spawns — up to 5 per round, over several rounds. Giving
+// both tiers the same number is what made live scenarios die of
+// "step budget exhausted (122/64)" with the planner barely started: one busy
+// sub-agent was enough to spend the whole root allowance.
+//
+// evalTaskBudget bounds one investigation; evalRootBudget bounds the turn, and is
+// sized for several rounds of them.
+var evalTaskBudget = budget.Config{
+	MaxSteps: 48, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000, NoticeRatio: 0.9,
+}
+
+var evalRootBudget = budget.Config{
+	MaxSteps: 480, MaxInputTokens: 5_000_000, MaxOutputTokens: 5_000_000, NoticeRatio: 0.9,
 }
 
 // agentRuntime is the started runtime plus the handles a scenario needs from it:
@@ -212,15 +220,15 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 	}
 
 	reg := agentkit.NewRegistry()
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalBudget.Limiter(), history)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalTaskBudget.Limiter(), history)
 	if err != nil {
 		return nil, goerr.Wrap(err, "env: register the task sub-agent")
 	}
-	if err := uc.Agent.RegisterAgents(reg, evalBudget.Limiter(), history, procRepo, taskAgent); err != nil {
+	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(), history, procRepo, taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the agents")
 	}
 	durable := &job.DurableRuntime{History: history, Locator: locator}
-	if err := durable.Register(reg, evalBudget.Limiter(), taskAgent); err != nil {
+	if err := durable.Register(reg, evalRootBudget.Limiter(), taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the job agents")
 	}
 
@@ -229,7 +237,7 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 		History: history,
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: agentkernel.Budgets{Root: evalBudget, Task: evalBudget},
+		Budgets: agentkernel.Budgets{Root: evalRootBudget, Task: evalTaskBudget},
 		Agents:  reg,
 		Tools: agentkernel.ToolDeps{
 			Repo:              repo,
