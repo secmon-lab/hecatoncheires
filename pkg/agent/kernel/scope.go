@@ -17,18 +17,24 @@ import (
 // typo away from a silently empty scope, and the failure would surface as an
 // agent with no tools rather than as a compile error.
 const (
-	metaWorkspaceID = "workspace_id"
-	metaCaseID      = "case_id"
-	metaChannelID   = "channel_id"
-	metaThreadTS    = "thread_ts"
-	metaSessionID   = "session_id"
-	metaActorUserID = "actor_user_id"
-	metaLang        = "lang"
-	metaToolSets    = "toolsets"
-	metaPrivateCase = "private_case"
-	metaJobID       = "job_id"
-	metaJobRunID    = "job_run_id"
-	metaEventType   = "event_type"
+	metaWorkspaceID  = "workspace_id"
+	metaCaseID       = "case_id"
+	metaChannelID    = "channel_id"
+	metaThreadTS     = "thread_ts"
+	metaSessionID    = "session_id"
+	metaActorUserID  = "actor_user_id"
+	metaLang         = "lang"
+	metaToolSets     = "toolsets"
+	metaPrivateCase  = "private_case"
+	metaJobID        = "job_id"
+	metaJobRunID     = "job_run_id"
+	metaEventType    = "event_type"
+	metaSlotGated    = "slot_gated"
+	metaUIChannelID  = "ui_channel_id"
+	metaUIThreadTS   = "ui_thread_ts"
+	metaProcessingTS = "processing_ts"
+	metaPreviewTS    = "preview_ts"
+	metaProposalID   = "proposal_id"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -55,9 +61,28 @@ type Scope struct {
 	// CaseID is the case this Process is pinned to, or 0 when there is none
 	// (a draft turn, or a create turn before the case exists).
 	CaseID int64
-	// ChannelID / ThreadTS locate the Slack thread the run reports into.
+	// ChannelID / ThreadTS locate the run's own Slack thread — the one its Session
+	// is keyed on, and the one its answer belongs in.
 	ChannelID string
 	ThreadTS  string
+	// UIChannelID / UIThreadTS locate the thread the person who triggered the run
+	// is watching, for the runs where that is a DIFFERENT thread: a case raised by
+	// a reaction lives in the monitored channel, while the reactor is watching the
+	// thread they reacted in. Progress, questions and failure notices go here;
+	// the case's own content still goes to ChannelID / ThreadTS.
+	//
+	// Empty means the two are the same thread, which is the case for every other
+	// run. UITarget resolves that.
+	UIChannelID string
+	UIThreadTS  string
+	// ProcessingTS and PreviewTS name the Slack message a case-draft turn's result
+	// replaces, and are mutually exclusive: ProcessingTS is the "working on it"
+	// placeholder a fresh mention posted, PreviewTS is the existing draft preview a
+	// workspace switch updates in place. They live on the scope because the turn
+	// that posted them returns long before the result exists, and the completion
+	// handler runs on whichever instance committed the last transition.
+	ProcessingTS string
+	PreviewTS    string
 	// SessionID is the model.Session this thread belongs to. It doubles as the
 	// turn-lock subject id.
 	SessionID string
@@ -78,6 +103,24 @@ type Scope struct {
 	JobID     string
 	JobRunID  string
 	EventType string
+	// SlotGated subjects the run to the deployment-wide concurrency gate: a
+	// claim on it waits for a free execution slot before any transition runs.
+	//
+	// The host decides it at spawn rather than the runtime inferring it, so the
+	// kernel needs no opinion about which kinds of run are rate-limited. Today
+	// only scheduled Job runs set it — an interactive turn is a person waiting
+	// for an answer, and a lifecycle or manual run is a single deliberate
+	// action, so making either queue behind a batch would be the wrong trade.
+	SlotGated bool
+	// ProposalID names the case draft this run writes its result into. Empty for
+	// every run that is not a case-draft turn.
+	//
+	// It travels on the run because the Session's ProposalID is MUTABLE: a later
+	// mention on the same thread points the Session at a new draft, and it can do
+	// so while this run is still going. A completion handler that read the Session
+	// instead would write this run's draft into whatever draft the thread points at
+	// by then.
+	ProposalID string
 }
 
 // Validate enforces the invariants the claim path depends on, so a wiring
@@ -86,6 +129,17 @@ func (s Scope) Validate() error {
 	if (s.ChannelID == "") != (s.ThreadTS == "") {
 		return goerr.New("channel id and thread ts must be set together",
 			goerr.V("channel_id", s.ChannelID), goerr.V("thread_ts", s.ThreadTS))
+	}
+	if (s.UIChannelID == "") != (s.UIThreadTS == "") {
+		return goerr.New("ui channel id and ui thread ts must be set together",
+			goerr.V("ui_channel_id", s.UIChannelID), goerr.V("ui_thread_ts", s.UIThreadTS))
+	}
+	// The two name different lifecycles of the same slot — a placeholder to
+	// replace, or a preview to update in place — so a run carrying both would have
+	// two answers to "where does the result go".
+	if s.ProcessingTS != "" && s.PreviewTS != "" {
+		return goerr.New("a run may name a processing placeholder or a preview to update, not both",
+			goerr.V("processing_ts", s.ProcessingTS), goerr.V("preview_ts", s.PreviewTS))
 	}
 	if s.CaseID != 0 && s.WorkspaceID == "" {
 		return goerr.New("workspace id is required when a case id is set",
@@ -103,6 +157,17 @@ func (s Scope) Validate() error {
 	if s.JobRunID != "" && s.JobID == "" {
 		return goerr.New("job id is required when a job run id is set",
 			goerr.V("job_run_id", s.JobRunID))
+	}
+	// A gated run must be fully identified, because the gate records WHICH run
+	// holds a slot. Without that the gate rejects the acquisition, the claim is
+	// refused, and — since a refusal deliberately does not spend the retry budget
+	// — the Process waits forever for capacity it can never be granted. Catching
+	// it at Spawn turns a run that never starts into an error someone can read.
+	if s.SlotGated && (s.WorkspaceID == "" || s.CaseID == 0 || s.JobID == "") {
+		return goerr.New("a slot-gated run must name its workspace, case and job",
+			goerr.V("workspace_id", s.WorkspaceID),
+			goerr.V("case_id", s.CaseID),
+			goerr.V("job_id", s.JobID))
 	}
 	return nil
 }
@@ -122,6 +187,11 @@ func (s Scope) Metadata() map[string]string {
 	}
 	put(metaChannelID, s.ChannelID)
 	put(metaThreadTS, s.ThreadTS)
+	put(metaUIChannelID, s.UIChannelID)
+	put(metaUIThreadTS, s.UIThreadTS)
+	put(metaProcessingTS, s.ProcessingTS)
+	put(metaPreviewTS, s.PreviewTS)
+	put(metaProposalID, s.ProposalID)
 	put(metaSessionID, s.SessionID)
 	put(metaActorUserID, s.ActorUserID)
 	put(metaLang, s.Lang)
@@ -132,6 +202,9 @@ func (s Scope) Metadata() map[string]string {
 	put(metaJobID, s.JobID)
 	put(metaJobRunID, s.JobRunID)
 	put(metaEventType, s.EventType)
+	if s.SlotGated {
+		m[metaSlotGated] = "1"
+	}
 	return m
 }
 
@@ -144,19 +217,36 @@ func (s Scope) Metadata() map[string]string {
 func ScopeFrom(m map[string]string) Scope {
 	caseID, _ := strconv.ParseInt(m[metaCaseID], 10, 64)
 	return Scope{
-		WorkspaceID: m[metaWorkspaceID],
-		CaseID:      caseID,
-		ChannelID:   m[metaChannelID],
-		ThreadTS:    m[metaThreadTS],
-		SessionID:   m[metaSessionID],
-		ActorUserID: m[metaActorUserID],
-		Lang:        m[metaLang],
-		ToolSets:    splitToolSets(m[metaToolSets]),
-		PrivateCase: m[metaPrivateCase] == "1",
-		JobID:       m[metaJobID],
-		JobRunID:    m[metaJobRunID],
-		EventType:   m[metaEventType],
+		WorkspaceID:  m[metaWorkspaceID],
+		CaseID:       caseID,
+		ChannelID:    m[metaChannelID],
+		ThreadTS:     m[metaThreadTS],
+		UIChannelID:  m[metaUIChannelID],
+		UIThreadTS:   m[metaUIThreadTS],
+		ProcessingTS: m[metaProcessingTS],
+		PreviewTS:    m[metaPreviewTS],
+		ProposalID:   m[metaProposalID],
+		SessionID:    m[metaSessionID],
+		ActorUserID:  m[metaActorUserID],
+		Lang:         m[metaLang],
+		ToolSets:     splitToolSets(m[metaToolSets]),
+		PrivateCase:  m[metaPrivateCase] == "1",
+		JobID:        m[metaJobID],
+		JobRunID:     m[metaJobRunID],
+		EventType:    m[metaEventType],
+		SlotGated:    m[metaSlotGated] == "1",
 	}
+}
+
+// UITarget returns the thread the requester is watching, falling back to the
+// run's own thread when they are the same. Callers use it instead of reading
+// UIChannelID directly, so the "empty means the same thread" rule lives in one
+// place.
+func (s Scope) UITarget() (channelID, threadTS string) {
+	if s.UIChannelID != "" {
+		return s.UIChannelID, s.UIThreadTS
+	}
+	return s.ChannelID, s.ThreadTS
 }
 
 // WithToolSets returns a copy of the metadata map carrying a different toolset

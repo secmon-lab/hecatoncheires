@@ -177,10 +177,11 @@ field values. Assignees are mutated only through the delta `AssignCase` /
 `UnassignCase` path (never as a full-list replace on `UpdateCase`), so
 concurrent edits cannot clobber one another.
 
-A per-thread **turn lock** (CAS-backed in Firestore, mutex-backed in memory)
-prevents two turns from running concurrently on the same thread. A heartbeat
-goroutine refreshes the lock every 10s; if the holder dies, the next caller
-reclaims the stale lock after the staleness window (default 30s).
+Two turns never run concurrently on the same thread: every turn is spawned on
+the agent runtime under the thread's **subject**, and the runtime admits one
+live run per subject. A trigger that arrives while a run is live is refused
+(`ErrSubjectBusy`) and the host posts the "already handling your previous
+request" notice.
 
 #### Case-mode invariants (enforced at the usecase boundary)
 
@@ -285,8 +286,8 @@ re-emitting the same JSON — it is surfaced and the turn falls back rather than
 wasting a regeneration cycle. On success the host posts a Block Kit summary; on
 retry/budget exhaustion or a persistence failure it posts a fallback notice.
 
-Because a `question` ends the turn (the per-thread turn-lock cannot be held
-while waiting on an async Slack reply), the task can span multiple turns. A
+Because a `question` ends the turn (a run cannot stay live for the minutes or
+hours a Slack reply may take), the task can span multiple turns. A
 pending question is answered through the question form's **Submit** interaction
 (`HandleThreadCaseQuestionSubmit`), which resumes the create agent via
 `runThreadCaseCreation` — free-text replies / mentions in the not-yet-a-case
@@ -322,7 +323,7 @@ Object layout under the bucket:
 The `serve` command refuses to start when the bucket flag is unset.
 
 Session metadata (workspace, case, thread TS, action linkage, last mention
-TS, turn-lock fields, optional draft binding) is stored in Firestore keyed
+TS, pending question, optional draft binding) is stored in Firestore keyed
 by Slack channel + thread TS:
 
 ```
@@ -383,10 +384,10 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
 
 - Both mention hosts — `casebound` (channel-mode) and `threadcase`
   `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`, the same
-  machinery the Job runner uses. `threadcase` still uses `runtrace.Recorder` +
-  `runtrace.Handler`; `casebound` runs on agentkit, where a run outlives the
-  request that started it, so it opens the log with `runtrace.Open` after Spawn
-  and closes it with `runtrace.FinishRun` from the completion handler.
+  machinery the Job runner uses. On agentkit a run outlives the request that
+  started it, so both open the log with `runtrace.Open` after Spawn and close it
+  with `runtrace.FinishRun` from the completion handler; the pre-agentkit path
+  used `runtrace.Recorder` + `runtrace.Handler` inside the turn instead.
 - Mention runs are not configured Jobs, so each mention turn gets its own
   fresh per-turn JobID and is tagged `EventType = model.EventTypeMention`;
   the page shows a localized "Mention" label (resolved from the eventType, not
@@ -395,11 +396,12 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
   `Process.Metrics`**, not from a trace handler: the run's transitions are
   spread across claims and possibly instances, so only the Process row
   accumulates the whole total.
-- **The per-call event timeline is not yet available for agentkit-hosted
-  runs.** `JobRunEvent` rows need a sequence allocator that survives a run
-  moving between instances; until that exists, a `casebound` run shows its
-  totals and its outcome on the page but no per-call rows. `threadcase` and
-  Job runs are unaffected.
+- **The per-call event timeline works for agentkit-hosted runs too.** Each claim
+  opens a `runtrace.Handler` alongside the archive recorder, and `Sequence` is
+  allocated by the repository inside each write — so a run that moves between
+  instances, or a resumed turn, keeps appending to one ordered timeline. This is
+  why there is no in-process sequence counter any more: two claims would both
+  start at 1.
 - Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
   mentions in an already-created case are listed.
 

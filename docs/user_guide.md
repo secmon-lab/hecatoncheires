@@ -392,10 +392,10 @@ with workspace selector + Submit / Edit / Cancel buttons.
      anchor without spending a tool call on it. The lookup is
      non-fatal: a failure is funneled through `errutil.Handle` and the
      section is omitted; the rest of the prompt still renders.
-3. **Planner-driven turn** — the open-mode `draft.UseCase` (in
-   `pkg/usecase/agent/draft`) acquires a per-thread turn lock on the
-   Session, then runs a planner LLM round-trip against the conversation
-   history. The planner agent is **tool-enabled**: the system prompt
+3. **Planner-driven turn** — the case-draft agent (in
+   `pkg/usecase/agent/proposal`) is spawned on the agent runtime under the
+   thread's subject, then runs a planner LLM round-trip against the
+   conversation history. The planner agent is **tool-enabled**: the system prompt
    carries only the workspace identity tier (id / name / description), and
    the planner pulls the field schema and source list per turn via the
    `pkg/agent/tool/wsmeta` tools (`list_workspaces`, `get_workspace`).
@@ -516,9 +516,9 @@ no `app_mention` event is delivered and message collection has no source.
   `Permalink`; the failure is logged via `errutil.Handle`.
 - **No accessible workspace** — an ephemeral error message is shown to the
   user and no draft is created.
-- **Concurrent turn on the same thread** — the per-thread turn lock
-  rejects the new trigger; the host posts the i18n busy notice and the
-  duplicate trigger is dropped (`StatusBusy` / `StatusIdempotent`).
+- **Concurrent turn on the same thread** — the agent runtime refuses the
+  second spawn on the thread's subject; the host takes down the "working on
+  it" placeholder and drops the trigger (`StatusBusy` / `StatusIdempotent`).
 
 ## Actions and Steps
 
@@ -773,8 +773,9 @@ agent validates the values before saving: unknown fields, invalid option ids,
 and assignees / user fields that are not known Slack users are refused with an
 explanation rather than written.
 
-A per-thread **turn lock** prevents two turns from running concurrently on
-the same thread.
+Two turns never run concurrently on the same thread: every turn is spawned on
+the agent runtime under the thread's subject, and the runtime admits one live
+run per subject.
 
 ### Lifecycle
 

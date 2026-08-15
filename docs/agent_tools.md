@@ -26,7 +26,7 @@ mention agent) and a Job-safe subset.
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
 | `core__list_actions` | R | List the case's actions. | Optional `include_archived` (default `false`). |
-| `core__get_action` | R | Fetch one action by id. | |
+| `core__get_action` | R | Fetch one action by id. | Scoped to the case the run is pinned to: an action of another case is reported as **not found**, with the same wording as a missing one so the other case's existence is not confirmed. An action id is a small integer a model can guess, or be told to fetch by text it read. |
 | `core__list_action_steps` | R | List the binary-state steps under an action. | |
 | `core__search_referenceable_cases` | R | Search the target workspace of a `case_ref` / `multi_case_ref` field for a case id to reference. | Only wired when the workspace defines such a field. Private and draft cases are excluded. |
 | `core__get_referenceable_cases` | R | Batch-fetch full details of referenced cases. | Same gating as above. Set the value itself via `case__update_case`'s `fields`. |
@@ -203,13 +203,19 @@ interactive/investigation only.
 
 ### Planner metadata tools (`wsmeta`)
 
-Used **only** by the proposal (case-draft) planner — not by Jobs, the mention
-agent, or sub-agents. Listed here for completeness.
+Used **only** by the proposal (case-draft) flow — not by Jobs, the mention
+agent, or the other hosts' sub-agents. Every other host already knows which
+workspace it runs in and hands that workspace's schema to its tools directly;
+the draft flow is the one that must choose.
+
+The planner calls them itself, before it decides anything: a plan-execute
+planner may make tool calls, each as its own transition, and only then emits its
+plan. A planned task may also request the `wsmeta` toolset.
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
 | `list_workspaces` | R | List id / name / description of all registered workspaces. |
-| `get_workspace` | R | Fetch a workspace's identity, full field schema (with option metadata), and sources. The planner must call this before materialising a case so it uses exact field / option ids. |
+| `get_workspace` | R | Fetch a workspace's identity, full field schema (with option metadata), and sources. The planner must call this before proposing a case so it uses exact field / option ids. |
 
 ## Tools available by context
 
@@ -230,7 +236,7 @@ the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 | `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | — | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
 | `memo__*` | ✓ (if memos enabled) | — | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
-| `wsmeta` | — | — | — | — | — | planner only |
+| `wsmeta` | — | — | — | — | — | ✓ (and the planner itself) |
 
 Notes:
 

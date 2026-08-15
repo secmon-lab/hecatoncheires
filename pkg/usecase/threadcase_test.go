@@ -101,6 +101,9 @@ func TestThreadCase_Creation(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -114,9 +117,7 @@ func TestThreadCase_Creation(t *testing.T) {
 
 	// The create agent committed a case bound to the thread, carrying the
 	// validated fields (creation was deferred until a valid create decision).
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.Description).Equal("Users cannot log in.")
 	gt.Value(t, c.BoardStatus).Equal("TRIAGE")
@@ -184,6 +185,9 @@ func TestThreadCase_Creation_BotRelayedReporter(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -200,9 +204,7 @@ func TestThreadCase_Creation_BotRelayedReporter(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
 	async.Wait()
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", threadTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", threadTS)
 	gt.Value(t, c.Title).Equal("Backlog API risk review")
 	// The reporter was resolved from the body mention, skipping the bot's own ID
 	// and the (bot) author.
@@ -235,6 +237,9 @@ func TestThreadCase_Creation_BotNoReporterEmpty(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -248,9 +253,7 @@ func TestThreadCase_Creation_BotNoReporterEmpty(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
 	async.Wait()
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", threadTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", threadTS)
 	gt.Value(t, c.Title).Equal("Heartbeat case")
 	// No human could be resolved, so the reporter is empty (allowed in thread mode).
 	gt.Value(t, c.ReporterID).Equal("")
@@ -281,6 +284,9 @@ func TestThreadCase_Creation_Idempotent(t *testing.T) {
 		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 		SlackService: slackMock,
 		CaseUC:       caseUC,
+	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
 	})
 
 	msg := slackmodel.NewMessageFromData(
@@ -324,6 +330,9 @@ func TestThreadCase_MentionRespond(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	msg := slackmodel.NewMessageFromData(
 		"1700000005.000001", "C-MONITOR", "1700000000.000100", "T1", "U-ASKER", "bob",
@@ -332,13 +341,8 @@ func TestThreadCase_MentionRespond(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseMention(ctx, msg, entry, c)).Required()
 	async.Wait()
 
-	foundReply := false
-	for _, m := range slackMock.postedMessages {
-		if strings.Contains(m.Text, "ETA 1 hour") {
-			foundReply = true
-		}
-	}
-	gt.Bool(t, foundReply).True()
+	// The reply is posted by the run's completion handler.
+	waitForPostContaining(t, slackMock, "ETA 1 hour")
 }
 
 func TestThreadCase_MentionClose(t *testing.T) {
@@ -395,6 +399,9 @@ func TestThreadCase_MentionClose(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm, CaseUC: caseUC,
+	})
 
 	msg := slackmodel.NewMessageFromData(
 		"1700000006.000001", "C-MONITOR", "1700000000.000100", "T1", "U-ASKER", "bob",
@@ -403,10 +410,31 @@ func TestThreadCase_MentionClose(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseMention(ctx, msg, entry, c)).Required()
 	async.Wait()
 
-	closed, err := repo.Case().Get(ctx, "support", c.ID)
-	gt.NoError(t, err).Required()
+	// The close is a sub-agent tool call inside the run, so it lands from the
+	// worker rather than before this call returns.
+	closed := waitForCaseStatus(t, repo, "support", c.ID, types.CaseStatusClosed)
 	gt.Value(t, closed.BoardStatus).Equal("DONE")
-	gt.Value(t, closed.Status).Equal(types.CaseStatusClosed)
+}
+
+// waitForCaseStatus blocks until the case reaches want and returns it.
+func waitForCaseStatus(t *testing.T, repo *memory.Memory, wsID string, caseID int64,
+	want types.CaseStatus,
+) *model.Case {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		c, err := repo.Case().Get(ctx, wsID, caseID)
+		gt.NoError(t, err).Required()
+		if c != nil && c.Status == want {
+			return c
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, c.Status).Equal(want).Required()
+			return nil
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
 }
 
 // TestLifecycle_ThreadCaseCreate_QuestionResume drives the full deferred-create
@@ -442,6 +470,9 @@ func TestLifecycle_ThreadCaseCreate_QuestionResume(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
@@ -452,15 +483,14 @@ func TestLifecycle_ThreadCaseCreate_QuestionResume(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, post, entry)).Required()
 	async.Wait()
 
+	// The question is posted and recorded by the run's completion handler.
+	ssn := waitForPendingQuestion(t, repo, "C-MONITOR", "1700000000.000100")
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithQuestion)
+	sessionIDTurn1 := ssn.ID
+
 	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
 	gt.NoError(t, err).Required()
 	gt.Value(t, noCase).Nil() // deferred: no case while the question is pending
-
-	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, ssn).NotNil().Required()
-	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithQuestion)
-	sessionIDTurn1 := ssn.ID
 
 	// Turn 2: a thread reply answers the question and resumes the create agent.
 	reply := slackmodel.NewMessageFromData(
@@ -470,9 +500,7 @@ func TestLifecycle_ThreadCaseCreate_QuestionResume(t *testing.T) {
 	async.Wait()
 
 	// The case now exists with the validated fields.
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
 	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
@@ -511,6 +539,9 @@ func TestThreadCase_MentionCreation(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -523,9 +554,7 @@ func TestThreadCase_MentionCreation(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, msg, entry)).Required()
 	async.Wait()
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.Description).Equal("Users cannot log in.")
 	gt.Value(t, c.BoardStatus).Equal("TRIAGE")
@@ -571,6 +600,9 @@ func TestThreadCase_MentionCreation_InThread(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -588,9 +620,7 @@ func TestThreadCase_MentionCreation_InThread(t *testing.T) {
 
 	gt.Bool(t, repliesFetched).True() // thread context was collected for the seed
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Portal outage")
 	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
 	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
@@ -625,6 +655,9 @@ func TestThreadCase_MentionCreation_Idempotent(t *testing.T) {
 		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 		SlackService: slackMock,
 		CaseUC:       caseUC,
+	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: probe,
 	})
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
@@ -714,6 +747,9 @@ func TestLifecycle_ThreadCaseMentionCreate_FollowupResume(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
@@ -724,18 +760,17 @@ func TestLifecycle_ThreadCaseMentionCreate_FollowupResume(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, first, entry)).Required()
 	async.Wait()
 
-	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, noCase).Nil()
-
-	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, ssn).NotNil().Required()
+	// The question is posted and recorded by the run's completion handler.
+	ssn := waitForPendingQuestion(t, repo, "C-MONITOR", "1700000000.000100")
 	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithQuestion)
 	// The first mention advanced the delta watermark, so the follow-up scans only
 	// messages newer than it.
 	gt.Value(t, ssn.LastMentionTS).Equal("1700000000.000100")
 	sessionIDTurn1 := ssn.ID
+
+	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, noCase).Nil()
 
 	// Turn 2: a follow-up mention inside the same still-case-less thread resumes
 	// the create agent, superseding the pending question, and commits the case.
@@ -745,9 +780,7 @@ func TestLifecycle_ThreadCaseMentionCreate_FollowupResume(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, followup, entry)).Required()
 	async.Wait()
 
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
 	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
@@ -872,6 +905,9 @@ func TestRealLLM_ThreadCaseCreate_VagueToCreate(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
@@ -950,6 +986,9 @@ func TestThreadCase_QuestionSubmit(t *testing.T) {
 		SlackService: slackMock,
 		CaseUC:       caseUC,
 	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
+	})
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
@@ -961,14 +1000,12 @@ func TestThreadCase_QuestionSubmit(t *testing.T) {
 	async.Wait()
 
 	// No case yet; the form was posted and the snapshot persisted.
+	ssn := waitForPendingQuestion(t, repo, channel, rootTS)
+	formTS := ssn.PendingQuestion.PostedMessageTS
+	gt.String(t, formTS).NotEqual("")
 	noCase, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, noCase).Nil()
-	ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, ssn.PendingQuestion).NotNil().Required()
-	formTS := ssn.PendingQuestion.PostedMessageTS
-	gt.String(t, formTS).NotEqual("")
 
 	// The user submits "high".
 	cb := &goslack.InteractionCallback{
@@ -991,9 +1028,7 @@ func TestThreadCase_QuestionSubmit(t *testing.T) {
 	async.Wait()
 
 	// The case was created from the answer; PendingQuestion cleared.
-	c, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
-	gt.NoError(t, err).Required()
-	gt.Value(t, c).NotNil().Required()
+	c := waitForThreadCase(t, repo, "support", channel, rootTS)
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
 
@@ -1015,14 +1050,18 @@ func TestThreadCase_QuestionSubmit_StaleAfterCreate(t *testing.T) {
 	reg := newThreadWorkspaceRegistry()
 	slackMock := &agentTestSlackService{}
 	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+	llm := newScriptedClient(nil)
 	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 		Repo:         repo,
 		Registry:     reg,
-		LLM:          newScriptedClient(nil),
+		LLM:          llm,
 		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 		SlackService: slackMock,
 		CaseUC:       caseUC,
+	})
+	startAgentRuntime(t, agentRuntimeDeps{
+		UC: agentUC, Repo: repo, Registry: reg, LLM: llm,
 	})
 
 	const channel = "C-MONITOR"

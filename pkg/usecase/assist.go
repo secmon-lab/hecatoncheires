@@ -245,9 +245,8 @@ func (uc *AssistUseCase) drain(ctx context.Context, pids []agentkit.ProcessID) e
 	serveCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	served := make(chan error, 1)
-	opts := append([]agentkit.ServeOption{agentkernel.NoDuplicateSideEffects()}, uc.serveOpts...)
 	async.DispatchCancelable(serveCtx, func(c context.Context) error {
-		err := uc.kernel.Serve(c, opts...)
+		err := agentkernel.Serve(c, uc.kernel, uc.serveOpts...)
 		served <- err
 		// Reported to the caller through `served`, not returned: the normal exit
 		// here is the cancellation drain performs itself, and returning that would

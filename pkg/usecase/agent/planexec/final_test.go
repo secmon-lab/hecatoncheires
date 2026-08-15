@@ -1,15 +1,10 @@
 package planexec_test
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
 
-	"github.com/gollem-dev/gollem"
-	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 )
 
@@ -43,72 +38,10 @@ func TestFinalUserPrompt_EmptyObservationsLabel(t *testing.T) {
 	gt.String(t, got).Contains("no investigations were run")
 }
 
-func TestGenerateFinalResponse_PlainText(t *testing.T) {
-	ctx := context.Background()
-	llm := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
-					return &gollem.Response{Texts: []string{"the final answer"}}, nil
-				},
-			}, nil
-		},
-	}
-	text, raw, err := planexec.GenerateFinalResponseForTest(
-		ctx,
-		llm,
-		agentarchive.NewMemoryHistoryRepository(),
-		nil,
-		"sys",
-		"hist-1",
-		"",
-		nil, // no phase results
-		nil, // no schema
-	)
-	gt.NoError(t, err).Required()
-	gt.String(t, text).Equal("the final answer")
-	gt.Value(t, raw).Nil()
-}
-
-func TestGenerateFinalResponse_StructuredJSON(t *testing.T) {
-	ctx := context.Background()
-	llm := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
-					return &gollem.Response{Texts: []string{`{"title":"hi","desc":"there"}`}}, nil
-				},
-			}, nil
-		},
-	}
-	schema := &gollem.Parameter{
-		Type: gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{
-			"title": {Type: gollem.TypeString},
-			"desc":  {Type: gollem.TypeString},
-		},
-	}
-	text, raw, err := planexec.GenerateFinalResponseForTest(
-		ctx,
-		llm,
-		agentarchive.NewMemoryHistoryRepository(),
-		nil,
-		"sys",
-		"hist-1",
-		"",
-		nil,
-		schema,
-	)
-	gt.NoError(t, err).Required()
-	gt.String(t, text).Equal("")
-	var got struct {
-		Title string `json:"title"`
-		Desc  string `json:"desc"`
-	}
-	gt.NoError(t, json.Unmarshal(raw, &got)).Required()
-	gt.String(t, got.Title).Equal("hi")
-	gt.String(t, got.Desc).Equal("there")
-}
+// The terminal LLM call itself is exercised on the live path by
+// TestPlanCollectReplanFinal (plain text) and
+// TestStructuredFinalIsValidatedAndRegenerated (JSON, with regeneration) in
+// strategy_test.go, which drive the strategy rather than a helper.
 
 // containsAny is a thin substring helper used by negative-presence
 // assertions in this file.

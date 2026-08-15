@@ -28,6 +28,9 @@ import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // Phases. A transition reads the phase, does one thing, and writes the phase it
@@ -68,7 +71,10 @@ type state struct {
 	// Pending are the tool calls the model asked for and this run has not made
 	// yet. They are consumed one per transition.
 	Pending []*gollem.FunctionCall `json:"pending,omitempty"`
-	Texts   []string               `json:"texts,omitempty"`
+	// ToolResponses are the results of the drained Pending calls, held until the
+	// next Generate reports them as ONE turn.
+	ToolResponses []toolcall.Response `json:"tool_responses,omitempty"`
+	Texts         []string            `json:"texts,omitempty"`
 }
 
 // Option configures the strategy.
@@ -144,11 +150,20 @@ func (s *strategy) Step(ctx context.Context, sys agentkit.Syscalls, st state) (s
 
 // stepGenerate makes the one LLM call this transition is allowed.
 func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
-	// An empty input continues from the conversation as it stands, which is what
-	// follows a tool result the previous transition already appended.
-	var input []gollem.Input
-	if st.Prompt != "" {
-		input = []gollem.Input{gollem.Text(st.Prompt)}
+	// Pending tool results go in this one call, and go ALONE — see package toolcall
+	// for why they cannot be reported one at a time, and why a turn holding them
+	// may hold nothing else.
+	//
+	// With no results and an empty prompt it still sends a turn: gollem appends no
+	// user content for an empty input, so the request would END on the previous
+	// model turn and the provider rejects that outright.
+	input := toolcall.Inputs(st.ToolResponses)
+	if len(input) == 0 {
+		text := st.Prompt
+		if text == "" {
+			text = continueInstruction
+		}
+		input = []gollem.Input{gollem.Text(text)}
 	}
 
 	// A budget that is close to its ceiling has to be TOLD to the model, not
@@ -157,14 +172,15 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	// notice, the model can spend its last call on a conclusion instead of
 	// another tool.
 	//
-	// The notice is appended as a fresh input rather than folded into the system
-	// prompt because the system prompt is fixed at Init and this crossing happens
-	// mid-run.
+	// It rides in the system prompt for this call, not as an input: the crossing
+	// happens mid-run, exactly when a turn is likely to be reporting tool results,
+	// and such a turn may carry nothing else.
+	systemPrompt := st.SystemPrompt
 	if notice := sys.LimitStatus(); notice.Kind() == agentkit.LimitKindNotice {
-		input = append(input, gollem.Text(noticeInstruction(notice.Message())))
+		systemPrompt += "\n\n" + noticeInstruction(notice.Message())
 	}
 
-	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(st.SystemPrompt)}
+	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(systemPrompt)}
 	if s.role != nil {
 		opts = append(opts, agentkit.WithRole(s.role))
 	}
@@ -173,6 +189,10 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	if err != nil {
 		return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: generate")
 	}
+	// The call carried them, so they are now in the conversation. Cleared only
+	// after it succeeded: a failed transition is retried from the checkpoint, and
+	// dropping them earlier would leave its function calls unanswered forever.
+	st.ToolResponses = nil
 
 	st.Prompt = ""
 	st.Texts = append(st.Texts, res.Texts...)
@@ -186,6 +206,11 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	return st, agentkit.Continue[Output](), nil
 }
 
+// continueInstruction is the user turn a call sends when it has nothing new to
+// say. It must not restate the request: everything the model needs is already in
+// the conversation, and repeating it invites the same answer again.
+const continueInstruction = "Continue from what you have so far."
+
 // noticeInstruction turns a budget notice into an instruction the model can act
 // on. The limiter's message says what is nearly spent; this says what to do
 // about it.
@@ -196,13 +221,26 @@ func noticeInstruction(msg string) string {
 	return msg + "\nThis run is close to its budget. Answer now from what you already have, and do not call any more tools."
 }
 
-// stepTool runs exactly one pending tool call.
+// stepTool runs exactly one pending tool call and holds the result on the state.
+// The results are reported together by the next Generate — see package toolcall
+// for why they cannot be reported one at a time, and why this uses the primitive
+// CallTool rather than the session's.
 //
-// A tool that fails is not a transition failure: Session().CallTool appends a
-// tool_response carrying the error either way, so the conversation is closed and
-// the model gets to react to the failure on its next turn — which is how the
-// previous runtime behaved too. The one error that must not be swallowed is a
-// refusal from the budget: continuing past it would spend beyond the ceiling.
+// A tool that fails is not a transition failure: the failure is recorded as this
+// call's response, so the call is still answered and the model gets to react to
+// it on its next turn — which is how the previous runtime behaved too. The one
+// error that must not be swallowed is a refusal from the budget: continuing past
+// it would spend beyond the ceiling.
+//
+// That refusal check is DEFENSIVE rather than a path budget.Config can take.
+// agentkit evaluates Limit against "committed metrics plus whatever this
+// transition has already spent", and this transition spends nothing before the
+// call — so a metrics-based limiter that let the transition begin also lets the
+// call through, and the run is stopped at the next transition boundary instead.
+// The check is kept because Limit is an arbitrary function: a stateful or
+// time-based one can refuse here, and swallowing that would spend past a ceiling
+// its owner had already declared closed. Do not remove it on the grounds that no
+// test drives it; no test can, with the limiter this application ships.
 func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
 	if len(st.Pending) == 0 {
 		st.Phase = phaseGenerate
@@ -215,12 +253,20 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		return st, agentkit.Continue[Output](), nil
 	}
 
-	if _, err := sys.Session().CallTool(ctx, *call); err != nil {
+	out, err := sys.CallTool(ctx, *call)
+	if err != nil {
 		if errors.Is(err, agentkit.ErrLimitExceeded) {
 			return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: tool call refused by the budget",
 				goerr.V("tool", call.Name))
 		}
+		// Reported as well as fed back. The model needs the failure to react to;
+		// an operator needs it to tell a broken tool from a model that chose not
+		// to use its result, and the run timeline that also records it is only
+		// written for a run that keeps a run record.
+		errutil.Handle(ctx, goerr.Wrap(err, "react: tool call",
+			goerr.V("tool", call.Name), goerr.V("call_id", call.ID)), "react: tool call")
 	}
+	st.ToolResponses = append(st.ToolResponses, toolcall.New(*call, out, err))
 
 	if len(st.Pending) == 0 {
 		st.Phase = phaseGenerate

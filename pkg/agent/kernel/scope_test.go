@@ -18,6 +18,8 @@ func TestScopeRoundTrip(t *testing.T) {
 		CaseID:      42,
 		ChannelID:   "C123",
 		ThreadTS:    "1700000000.000100",
+		UIChannelID: "C456",
+		UIThreadTS:  "1700000000.000200",
 		SessionID:   "ssn-1",
 		ActorUserID: "U999",
 		Lang:        "ja",
@@ -26,10 +28,42 @@ func TestScopeRoundTrip(t *testing.T) {
 		JobID:       "job-1",
 		JobRunID:    "run-1",
 		EventType:   "mention",
+		SlotGated:   true,
+		PreviewTS:   "1700000000.000300",
 	}
 
 	got := kernel.ScopeFrom(want.Metadata())
 	gt.Value(t, got).Equal(want)
+}
+
+// A processing placeholder round-trips too. It is a separate case because it and
+// PreviewTS are mutually exclusive, so one round-trip cannot carry both.
+func TestScopeRoundTripProcessingPlaceholder(t *testing.T) {
+	want := kernel.Scope{
+		ToolSets:     []string{kernel.ToolSetsAll},
+		ProcessingTS: "1700000000.000400",
+	}
+
+	got := kernel.ScopeFrom(want.Metadata())
+	gt.Value(t, got).Equal(want)
+}
+
+// UITarget answers "where does the requester see this", falling back to the run's
+// own thread when they are the same — which is every run except a case raised by
+// a reaction in another channel.
+func TestScopeUITarget(t *testing.T) {
+	own := kernel.Scope{ChannelID: "C-CASE", ThreadTS: "1700000000.000100"}
+	ch, ts := own.UITarget()
+	gt.Value(t, ch).Equal("C-CASE")
+	gt.Value(t, ts).Equal("1700000000.000100")
+
+	split := kernel.Scope{
+		ChannelID: "C-CASE", ThreadTS: "1700000000.000100",
+		UIChannelID: "C-SOURCE", UIThreadTS: "1700000000.000200",
+	}
+	ch, ts = split.UITarget()
+	gt.Value(t, ch).Equal("C-SOURCE")
+	gt.Value(t, ts).Equal("1700000000.000200")
 }
 
 func TestScopeMetadataOmitsEmptyValues(t *testing.T) {
@@ -39,8 +73,9 @@ func TestScopeMetadataOmitsEmptyValues(t *testing.T) {
 	gt.Map(t, m).HasKey("toolsets")
 	for _, key := range []string{
 		"workspace_id", "case_id", "channel_id", "thread_ts",
+		"ui_channel_id", "ui_thread_ts", "processing_ts", "preview_ts",
 		"session_id", "actor_user_id", "lang", "private_case",
-		"job_id", "job_run_id", "event_type",
+		"job_id", "job_run_id", "event_type", "slot_gated",
 	} {
 		_, ok := m[key]
 		gt.Bool(t, ok).False()
@@ -114,8 +149,64 @@ func TestScopeValidate(t *testing.T) {
 			mutate:  func(s kernel.Scope) kernel.Scope { s.JobRunID = "run-1"; return s },
 			wantErr: true,
 		},
+		"ui thread without ui channel": {
+			mutate:  func(s kernel.Scope) kernel.Scope { s.UIThreadTS = "1.2"; return s },
+			wantErr: true,
+		},
+		"ui channel without ui thread": {
+			mutate:  func(s kernel.Scope) kernel.Scope { s.UIChannelID = "C2"; return s },
+			wantErr: true,
+		},
+		"both ui coordinates is fine": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.UIChannelID = "C2"; s.UIThreadTS = "1.2"; return s },
+		},
+		// The two name different lifecycles of the same slot, so a run carrying both
+		// would have two answers to "where does the result go".
+		"processing and preview together": {
+			mutate: func(s kernel.Scope) kernel.Scope {
+				s.ProcessingTS = "1.3"
+				s.PreviewTS = "1.4"
+				return s
+			},
+			wantErr: true,
+		},
+		"processing alone is fine": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.ProcessingTS = "1.3"; return s },
+		},
+		"preview alone is fine": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.PreviewTS = "1.4"; return s },
+		},
 		"job run with job": {
 			mutate: func(s kernel.Scope) kernel.Scope { s.JobID = "job-1"; s.JobRunID = "run-1"; return s },
+		},
+		// A gated run whose identifiers are incomplete would be refused capacity on
+		// every claim without ever spending its retry budget — it would wait for
+		// ever. Catching it at Spawn makes that a readable error instead.
+		"slot gated without a job": {
+			mutate:  func(s kernel.Scope) kernel.Scope { s.SlotGated = true; return s },
+			wantErr: true,
+		},
+		"slot gated without a case": {
+			mutate: func(s kernel.Scope) kernel.Scope {
+				s.SlotGated = true
+				s.JobID = "job-1"
+				s.CaseID = 0
+				return s
+			},
+			wantErr: true,
+		},
+		"slot gated without a workspace": {
+			mutate: func(s kernel.Scope) kernel.Scope {
+				s.SlotGated = true
+				s.JobID = "job-1"
+				s.WorkspaceID = ""
+				s.CaseID = 0
+				return s
+			},
+			wantErr: true,
+		},
+		"slot gated fully identified": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.SlotGated = true; s.JobID = "job-1"; return s },
 		},
 	}
 

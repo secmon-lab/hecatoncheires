@@ -33,6 +33,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -534,6 +535,15 @@ func cmdServe() *cli.Command {
 			// client, for the same reason the Job runtime is: there is nothing
 			// for an agent to run.
 			var agentKernel *agentkit.Kernel
+			// durableJobs is the agent runtime the simple-strategy Jobs run on. It
+			// is declared out here because the Job runtime built further down needs
+			// it, while its registration has to happen inside the Kernel build.
+			var durableJobs *job.DurableRuntime
+			var durableDraft *proposal.Durable
+			// jobSlots is the deployment-wide concurrency gate. It is built inside the
+			// Kernel block because the Kernel is what enforces it, and declared out
+			// here because the Job runtime below must be given the SAME instance.
+			var jobSlots *job.ConcurrencyLimiter
 			if llmClient != nil {
 				agentProcessRepo, agentProcessCleanup, apErr := repoCfg.ConfigureAgentProcess(ctx)
 				if apErr != nil {
@@ -563,8 +573,54 @@ func cmdServe() *cli.Command {
 				// Kernel must be bound before the first Spawn — so the three
 				// steps run in this order and nowhere else.
 				agentRegistry := agentkit.NewRegistry()
-				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo); rErr != nil {
+				// The per-task sub-agent is registered once and shared: agentkit keys
+				// a Process on the agent name, so a second registration would fail.
+				taskAgent, tErr := agentkernel.RegisterTaskAgent(agentRegistry,
+					budgets.Task.Limiter(), processHistory)
+				if tErr != nil {
+					return goerr.Wrap(tErr, "failed to register the task sub-agent")
+				}
+				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo, taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
+				}
+				// One locator serves every host that needs to tell "already live" from
+				// "fresh": the Job runner drops a re-trigger with it, and the case-draft
+				// host tells a Slack re-delivery from a busy thread with it.
+				locator, lErr := agentkernel.NewLocator(agentProcessRepo)
+				if lErr != nil {
+					return goerr.Wrap(lErr, "failed to build the agent process locator")
+				}
+				durableJobs = &job.DurableRuntime{History: processHistory, Locator: locator}
+				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(), taskAgent); rErr != nil {
+					return goerr.Wrap(rErr, "failed to register the job agents")
+				}
+				// The case-draft agent is registered only when its usecase exists: it
+				// needs the persistent History/Trace archive, which a deployment without
+				// Cloud Storage does not have.
+				if uc.MentionProposal != nil {
+					d, dErr := proposal.NewDurable(repo, registry,
+						uc.MentionProposal.DurableDraftHost(), locator)
+					if dErr != nil {
+						return goerr.Wrap(dErr, "failed to build the case-draft agent")
+					}
+					if rErr := d.Register(agentRegistry, taskAgent, nil,
+						budgets.Root.Limiter(), processHistory); rErr != nil {
+						return goerr.Wrap(rErr, "failed to register the case-draft agent")
+					}
+					durableDraft = d
+				}
+
+				// The slot gate has to exist before the Kernel, because the Kernel is
+				// what enforces it: a durable Job run occupies a slot for as long as
+				// its claims run, not for the length of the call that spawned it. The
+				// same instance is handed to the Job runner below, so both sides count
+				// the same holds.
+				if jobCfg.Limit() > 0 {
+					l, sErr := buildJobSlotLimiter(repo, jobCfg.Limit())
+					if sErr != nil {
+						return sErr
+					}
+					jobSlots = l
 				}
 
 				k, kErr := agentkernel.Build(agentkernel.Deps{
@@ -574,6 +630,7 @@ func cmdServe() *cli.Command {
 					Trace:   kernelTrace,
 					Budgets: budgets,
 					Agents:  agentRegistry,
+					Slots:   jobSlots,
 					Tools: agentkernel.ToolDeps{
 						Repo:              repo,
 						Registry:          registry,
@@ -600,6 +657,11 @@ func cmdServe() *cli.Command {
 				}
 				agentKernel = k
 				uc.Agent.BindAgentKernel(agentKernel)
+				durableJobs.Bind(agentKernel)
+				if durableDraft != nil {
+					durableDraft.Bind(agentKernel)
+					uc.MentionProposal.BindDurableDraft(durableDraft)
+				}
 				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)
 			}
 
@@ -617,10 +679,17 @@ func cmdServe() *cli.Command {
 				HistoryRepo:    agentHistoryRepo,
 				TraceRepo:      agentTraceRepo,
 				SlotLimit:      jobCfg.Limit(),
+				// The Kernel's slot gate, so the runner's pre-spawn refusal and the
+				// claim-time hold that bounds execution count the same slots.
+				SlotLimiter: jobSlots,
+				Durable:     durableJobs,
 			})
 			if jobErr != nil {
 				return goerr.Wrap(jobErr, "failed to build job runtime")
 			}
+			// The last of the three wiring steps: a finished durable run closes
+			// itself out through the runner, which only exists now.
+			durableJobs.AttachRunner(jobRunner)
 			logging.Default().Info("Agent Job runtime configured", logAttrsToArgs(jobCfg.LogAttrs())...)
 			uc.Case.SetEventPublisher(jobUC)
 			// The web UI's manual Run button drives the same runner through
@@ -797,12 +866,11 @@ func cmdServe() *cli.Command {
 					defer close(agentServeDone)
 					logging.Default().Info("Starting agent runtime worker",
 						logAttrsToArgs(agentCfg.LogAttrs())...)
-					if err := agentKernel.Serve(c,
+					if err := agentkernel.Serve(c, agentKernel,
 						agentkit.WithLease(agentCfg.WorkerLease()),
 						agentkit.WithPollInterval(agentCfg.WorkerPollInterval()),
 						agentkit.WithPollConcurrency(agentCfg.WorkerPollConcurrency()),
 						agentkit.WithMaxConcurrent(agentCfg.WorkerConcurrency()),
-						agentkernel.NoDuplicateSideEffects(),
 					); err != nil && !errors.Is(err, context.Canceled) {
 						return goerr.Wrap(err, "agent runtime worker stopped")
 					}

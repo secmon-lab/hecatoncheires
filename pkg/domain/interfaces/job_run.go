@@ -153,6 +153,36 @@ type JobRunEventRepository interface {
 	// (not Set) so a duplicate EventID surfaces as ErrJobRunEventExists.
 	Append(ctx context.Context, ev *model.JobRunEvent) error
 
+	// AppendNext writes one event and allocates its Sequence itself, in the
+	// same atomic operation as the write. ev.Sequence is ignored on input
+	// and set on return, so a caller that needs to reference this event
+	// from a later one (ParentSequence) reads it back from ev.
+	//
+	// It exists because a durable agent run's transitions are spread
+	// across claims and instances, so no in-process counter can allocate
+	// for it: two instances appending to the same run would hand out the
+	// same number, and List — which orders by Sequence — would render the
+	// timeline in an order that never happened. Allocating inside the
+	// write is what makes concurrent appenders safe.
+	//
+	// Sequence values are strictly increasing but NOT guaranteed
+	// contiguous: an allocation whose write is rolled back leaves a gap.
+	// Ordering is the contract; density is not.
+	AppendNext(ctx context.Context, ev *model.JobRunEvent) error
+
+	// LatestLLMResponseSequence returns the Sequence of the run's most
+	// recent LLM_RESPONSE event, or 0 when it has none.
+	//
+	// A TOOL_CALL event must point at the LLM_RESPONSE whose tool_use it
+	// carries out (JobRunEvent.ParentSequence). A durable run's LLM call
+	// and the tool calls it asked for are separate checkpointed
+	// transitions, so they may be driven by different claims — and a
+	// claim that starts mid-sequence has no in-memory record of the
+	// response that preceded it. This is how it recovers the link.
+	//
+	// It is ordered on Sequence alone, so it needs no composite index.
+	LatestLLMResponseSequence(ctx context.Context, key model.JobRunKey, runID string) (int64, error)
+
 	// List returns events for (key, runID) in ascending Sequence order
 	// (not doc-ID order — doc IDs are UUIDv7 and may diverge under
 	// clock skew).

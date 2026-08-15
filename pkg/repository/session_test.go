@@ -2,7 +2,6 @@ package repository_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -211,27 +210,198 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Error(t, err)
 	})
 
-	// AcquireTurnLock persists the seeded Session on first acquisition, so the
-	// Kind set by the host must survive that path too — not just Put.
-	t.Run("AcquireTurnLock persists the seeded Kind", func(t *testing.T) {
+	// The cursor is what the next turn's delta scan starts after, and the call that
+	// advances it races the turn it just started — whose completion handler writes
+	// the same row. So it must move one field, monotonically, and never resurrect a
+	// Session that is gone.
+	t.Run("AdvanceLastMention moves the cursor forward only", func(t *testing.T) {
 		repo := newRepo(t)
-		ch, ts := makeKey("kind-seed")
-		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trigger-1", "owner-1", time.Hour, func() *model.Session {
-			return &model.Session{
-				ID:        uuid.Must(uuid.NewV7()).String(),
-				ChannelID: ch,
-				ThreadTS:  ts,
-				Kind:      model.SessionKindWorkspaceAgent,
-			}
-		})
-		gt.NoError(t, err).Required()
-		gt.Bool(t, res.Acquired).True().Required()
-		gt.Value(t, res.Session.Kind).Equal(model.SessionKindWorkspaceAgent)
+		ch, ts := makeKey("cursor")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000200",
+			LastAction:    model.SessionEndedWithQuestion,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
 
+		// Forward: applied.
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000300")).Required()
 		got, err := repo.Session().GetByThread(ctx, ch, ts)
 		gt.NoError(t, err).Required()
 		gt.Value(t, got).NotNil().Required()
-		gt.Value(t, got.Kind).Equal(model.SessionKindWorkspaceAgent)
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000300")
+		// Everything else survives: a full write from the spawning side would have
+		// dropped the pending outcome the completion handler recorded.
+		gt.Value(t, got.LastAction).Equal(model.SessionEndedWithQuestion)
+		gt.Value(t, got.ID).Equal(ssn.ID)
+
+		// Backward and equal: ignored, so two racing triggers leave the later cursor
+		// standing whichever write lands second.
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000100")).Required()
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000300")).Required()
+		got, err = repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000300")
+	})
+
+	t.Run("AdvanceLastMention on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("cursor-missing")
+		gt.NoError(t, repo.Session().AdvanceLastMention(ctx, ch, ts, "1700000000.000100")).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("AdvanceLastMention rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("cursor-invalid")
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, "", ts, "1700000000.000100"))
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, ch, "", "1700000000.000100"))
+		gt.Error(t, repo.Session().AdvanceLastMention(ctx, ch, ts, ""))
+	})
+
+	// The outcome stamp runs in a run's completion handler, which agentkit calls
+	// after the terminal transition released the thread's subject — so a later turn
+	// may already have advanced the cursor on the same row. Writing one field is
+	// what keeps this from restoring the finishing turn's stale copy.
+	t.Run("StampLastAction writes only the outcome", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000500",
+			ProposalID:    model.CaseProposalID("p-1"),
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		gt.NoError(t, repo.Session().StampLastAction(ctx, ch, ts, model.SessionEndedWithQuestion)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.Value(t, got.LastAction).Equal(model.SessionEndedWithQuestion)
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000500")
+		gt.Value(t, got.ProposalID).Equal(model.CaseProposalID("p-1"))
+		gt.Value(t, got.ID).Equal(ssn.ID)
+	})
+
+	t.Run("StampLastAction on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome-missing")
+		gt.NoError(t, repo.Session().StampLastAction(ctx, ch, ts, model.SessionEndedWithQuestion)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("StampLastAction rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("outcome-invalid")
+		gt.Error(t, repo.Session().StampLastAction(ctx, "", ts, model.SessionEndedWithQuestion))
+		gt.Error(t, repo.Session().StampLastAction(ctx, ch, "", model.SessionEndedWithQuestion))
+		gt.Error(t, repo.Session().StampLastAction(ctx, ch, ts, ""))
+	})
+
+	t.Run("SetPendingQuestion records the form and clears it", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:            uuid.Must(uuid.NewV7()).String(),
+			ChannelID:     ch,
+			ThreadTS:      ts,
+			LastMentionTS: "1700000000.000700",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		pq := &model.PendingQuestion{
+			PostedChannelID:  ch,
+			PostedMessageTS:  "1700000000.000800",
+			AskedByProcessID: "proc-1",
+		}
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, pq)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.PendingQuestion).NotNil().Required()
+		gt.String(t, got.PendingQuestion.PostedMessageTS).Equal("1700000000.000800")
+		gt.String(t, got.PendingQuestion.AskedByProcessID).Equal("proc-1")
+		// The rest of the row is untouched.
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000700")
+
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, nil)).Required()
+		got, err = repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.PendingQuestion).Nil()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000700")
+	})
+
+	t.Run("SetPendingQuestion on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending-missing")
+		gt.NoError(t, repo.Session().SetPendingQuestion(ctx, ch, ts, nil)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("SetPendingQuestion rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("pending-invalid")
+		gt.Error(t, repo.Session().SetPendingQuestion(ctx, "", ts, nil))
+		gt.Error(t, repo.Session().SetPendingQuestion(ctx, ch, "", nil))
+	})
+
+	t.Run("BindCase points the thread at its case and drops the form", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind")
+		now := time.Now().UTC()
+		ssn := &model.Session{
+			ID:              uuid.Must(uuid.NewV7()).String(),
+			ChannelID:       ch,
+			ThreadTS:        ts,
+			LastMentionTS:   "1700000000.000900",
+			PendingQuestion: &model.PendingQuestion{PostedChannelID: ch, PostedMessageTS: "1700000000.000901"},
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		gt.NoError(t, repo.Session().Put(ctx, ssn)).Required()
+
+		gt.NoError(t, repo.Session().BindCase(ctx, ch, ts, 42)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Number(t, got.CaseID).Equal(42)
+		gt.Value(t, got.PendingQuestion).Nil()
+		gt.String(t, got.LastMentionTS).Equal("1700000000.000900")
+		gt.Value(t, got.ID).Equal(ssn.ID)
+	})
+
+	t.Run("BindCase on a missing session is a no-op", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind-missing")
+		gt.NoError(t, repo.Session().BindCase(ctx, ch, ts, 42)).Required()
+		got, err := repo.Session().GetByThread(ctx, ch, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Nil()
+	})
+
+	t.Run("BindCase rejects missing keys", func(t *testing.T) {
+		repo := newRepo(t)
+		ch, ts := makeKey("bind-invalid")
+		gt.Error(t, repo.Session().BindCase(ctx, "", ts, 42))
+		gt.Error(t, repo.Session().BindCase(ctx, ch, "", 42))
+		gt.Error(t, repo.Session().BindCase(ctx, ch, ts, 0))
 	})
 
 	t.Run("rejects missing required fields on Put", func(t *testing.T) {
@@ -240,219 +410,6 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Error(t, repo.Session().Put(ctx, nil)).Is(model.ErrSessionValidation)
 		gt.Error(t, repo.Session().Put(ctx, &model.Session{ID: "s", ThreadTS: "1.1"})).Is(model.ErrSessionValidation)
 		gt.Error(t, repo.Session().Put(ctx, &model.Session{ID: "s", ChannelID: "C"})).Is(model.ErrSessionValidation)
-	})
-
-	t.Run("AcquireTurnLock creates new session on first call", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("acq-new")
-		seed := makeSeed(ch, ts)
-
-		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, res.Acquired).True()
-		gt.Bool(t, res.Reclaimed).False()
-		gt.Bool(t, res.IdempotentRetry).False()
-		gt.Value(t, res.Session).NotNil().Required()
-		gt.Value(t, res.Session.TurnState).Equal(model.SessionTurnRunning)
-		gt.Value(t, res.Session.TurnOwnerID).Equal("owner-1")
-		gt.Value(t, res.Session.TurnTriggerTS).Equal("trig-1")
-		gt.Bool(t, res.Session.TurnHeartbeatAt.IsZero()).False()
-		gt.Bool(t, res.Session.TurnStartedAt.IsZero()).False()
-
-		stored, err := repo.Session().GetByThread(ctx, ch, ts)
-		gt.NoError(t, err).Required()
-		gt.Value(t, stored).NotNil().Required()
-		gt.Value(t, stored.TurnOwnerID).Equal("owner-1")
-	})
-
-	t.Run("AcquireTurnLock returns busy when fresh owner exists", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("busy")
-		seed := makeSeed(ch, ts)
-
-		first, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, first.Acquired).True().Required()
-
-		second, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-2", "owner-2", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, second.Acquired).False()
-		gt.Bool(t, second.IdempotentRetry).False()
-		gt.Bool(t, second.Reclaimed).False()
-		gt.Value(t, second.Session).NotNil().Required()
-		gt.Value(t, second.Session.TurnOwnerID).Equal("owner-1")
-	})
-
-	t.Run("AcquireTurnLock returns IdempotentRetry on duplicate trigger", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("idem")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-dup", "owner-A", time.Minute, seed)
-		gt.NoError(t, err).Required()
-
-		// Same trigger from a different ownerID should still flag as idempotent retry.
-		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-dup", "owner-B", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, res.Acquired).False()
-		gt.Bool(t, res.IdempotentRetry).True()
-		gt.Value(t, res.Session).NotNil().Required()
-		gt.Value(t, res.Session.TurnOwnerID).Equal("owner-A")
-	})
-
-	t.Run("AcquireTurnLock reclaims after staleAfter elapses", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("stale")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Millisecond, seed)
-		gt.NoError(t, err).Required()
-
-		// Wait long enough to exceed staleAfter.
-		time.Sleep(20 * time.Millisecond)
-
-		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-2", "owner-2", time.Millisecond, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, res.Acquired).True()
-		gt.Bool(t, res.Reclaimed).True()
-		gt.Value(t, res.Session.TurnOwnerID).Equal("owner-2")
-		gt.Value(t, res.Session.TurnTriggerTS).Equal("trig-2")
-	})
-
-	t.Run("Heartbeat refreshes TurnHeartbeatAt for live owner", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("hb")
-		seed := makeSeed(ch, ts)
-
-		first, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		startHB := first.Session.TurnHeartbeatAt
-
-		time.Sleep(5 * time.Millisecond)
-
-		got, err := repo.Session().Heartbeat(ctx, ch, ts, "owner-1")
-		gt.NoError(t, err).Required()
-		gt.Value(t, got).NotNil().Required()
-		gt.Bool(t, got.TurnHeartbeatAt.After(startHB)).True()
-		gt.Value(t, got.TurnOwnerID).Equal("owner-1")
-	})
-
-	t.Run("Heartbeat returns ErrTurnOwnerMismatch on owner mismatch", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("hb-mismatch")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-
-		got, err := repo.Session().Heartbeat(ctx, ch, ts, "owner-other")
-		gt.Error(t, err).Required()
-		gt.Bool(t, errors.Is(err, interfaces.ErrTurnOwnerMismatch)).True()
-		gt.Value(t, got).Nil()
-	})
-
-	t.Run("Heartbeat returns ErrTurnOwnerMismatch when session does not exist", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("hb-missing")
-		_, err := repo.Session().Heartbeat(ctx, ch, ts, "owner-1")
-		gt.Error(t, err).Required()
-		gt.Bool(t, errors.Is(err, interfaces.ErrTurnOwnerMismatch)).True()
-	})
-
-	t.Run("ReleaseTurnLock idle's the session for the live owner", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("release")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-
-		gt.NoError(t, repo.Session().ReleaseTurnLock(ctx, ch, ts, "owner-1")).Required()
-
-		got, err := repo.Session().GetByThread(ctx, ch, ts)
-		gt.NoError(t, err).Required()
-		gt.Value(t, got).NotNil().Required()
-		gt.Value(t, got.TurnState).Equal(model.SessionTurnIdle)
-		gt.Value(t, got.TurnOwnerID).Equal("")
-		gt.Value(t, got.TurnTriggerTS).Equal("")
-	})
-
-	t.Run("ReleaseTurnLock is a no-op for mismatched owner", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("release-mismatch")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-
-		gt.NoError(t, repo.Session().ReleaseTurnLock(ctx, ch, ts, "owner-other")).Required()
-
-		got, err := repo.Session().GetByThread(ctx, ch, ts)
-		gt.NoError(t, err).Required()
-		gt.Value(t, got.TurnState).Equal(model.SessionTurnRunning)
-		gt.Value(t, got.TurnOwnerID).Equal("owner-1")
-	})
-
-	t.Run("ReleaseTurnLock on missing session is a no-op", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("release-missing")
-		gt.NoError(t, repo.Session().ReleaseTurnLock(ctx, ch, ts, "owner-1")).Required()
-	})
-
-	t.Run("Acquire after Release succeeds without staleness", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("re-acq")
-		seed := makeSeed(ch, ts)
-
-		_, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-1", "owner-1", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.NoError(t, repo.Session().ReleaseTurnLock(ctx, ch, ts, "owner-1")).Required()
-
-		res, err := repo.Session().AcquireTurnLock(ctx, ch, ts, "trig-2", "owner-2", time.Minute, seed)
-		gt.NoError(t, err).Required()
-		gt.Bool(t, res.Acquired).True()
-		gt.Bool(t, res.Reclaimed).False()
-		gt.Value(t, res.Session.TurnOwnerID).Equal("owner-2")
-	})
-
-	t.Run("parallel AcquireTurnLock yields exactly one Acquired", func(t *testing.T) {
-		repo := newRepo(t)
-		ch, ts := makeKey("parallel")
-		seed := makeSeed(ch, ts)
-
-		const N = 8
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		acquiredCount := 0
-		busyCount := 0
-		errs := []error{}
-
-		for i := range N {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				res, err := repo.Session().AcquireTurnLock(ctx, ch, ts,
-					fmt.Sprintf("trig-%d", i),
-					fmt.Sprintf("owner-%d", i),
-					time.Minute, seed)
-				mu.Lock()
-				defer mu.Unlock()
-				if err != nil {
-					errs = append(errs, err)
-					return
-				}
-				if res.Acquired {
-					acquiredCount++
-				} else {
-					busyCount++
-				}
-			}(i)
-		}
-		wg.Wait()
-
-		gt.Array(t, errs).Length(0)
-		gt.Number(t, acquiredCount).Equal(1)
-		gt.Number(t, busyCount).Equal(N - 1)
 	})
 }
 

@@ -157,4 +157,5 @@ const (
 	OutcomeSkippedLeaseForTest     = string(outcomeSkippedLease)
 	OutcomeSkippedSuspendedForTest = string(outcomeSkippedSuspended)
 	OutcomeSkippedSlotsFullForTest = string(outcomeSkippedSlotsFull)
+	OutcomeSkippedRunningForTest   = string(outcomeSkippedRunning)
 )

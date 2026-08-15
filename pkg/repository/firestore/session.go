@@ -2,7 +2,6 @@ package firestore
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -132,171 +131,156 @@ func (r *sessionRepository) Claim(ctx context.Context, channelID, threadTS strin
 	return claimed, nil
 }
 
-func (r *sessionRepository) AcquireTurnLock(
-	ctx context.Context,
-	channelID, threadTS, triggerTS, ownerID string,
-	staleAfter time.Duration,
-	newSessionFn func() *model.Session,
-) (interfaces.AcquireResult, error) {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return interfaces.AcquireResult{}, goerr.New("channelID, threadTS, ownerID are required",
+func (r *sessionRepository) AdvanceLastMention(ctx context.Context, channelID, threadTS, mentionTS string) error {
+	if channelID == "" || threadTS == "" || mentionTS == "" {
+		return goerr.New("channelID, threadTS and mentionTS are required",
 			goerr.V("channel_id", channelID),
 			goerr.V("thread_ts", threadTS),
-			goerr.V("owner_id", ownerID),
+			goerr.V("mention_ts", mentionTS),
 		)
 	}
-	if newSessionFn == nil {
-		return interfaces.AcquireResult{}, goerr.New("newSessionFn is required")
-	}
-
 	doc := r.docRef(channelID, threadTS)
-	var result interfaces.AcquireResult
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		snap, err := tx.Get(doc)
-		if err != nil && status.Code(err) != codes.NotFound {
-			return goerr.Wrap(err, "tx get session")
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return nil
+			}
+			return goerr.Wrap(err, "tx get session for cursor advance")
 		}
+		var cur model.Session
+		if err := snap.DataTo(&cur); err != nil {
+			return goerr.Wrap(err, "decode session")
+		}
+		// Slack timestamps are fixed-width "<seconds>.<microseconds>", so string
+		// ordering is chronological ordering.
+		if cur.LastMentionTS >= mentionTS {
+			return nil
+		}
+		// Update, not Set: the completion handler of the turn this cursor belongs to
+		// writes the same row, and a full replace from here would drop what it
+		// recorded.
+		if err := tx.Update(doc, []firestore.Update{
+			{Path: "LastMentionTS", Value: mentionTS},
+			{Path: "UpdatedAt", Value: r.now()},
+		}); err != nil {
+			return goerr.Wrap(err, "tx update the mention cursor")
+		}
+		return nil
+	})
+	if err != nil {
+		return goerr.Wrap(err, "advance the mention cursor",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("mention_ts", mentionTS),
+		)
+	}
+	return nil
+}
 
-		now := r.now()
-
+func (r *sessionRepository) AssociateProposal(ctx context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error {
+	if channelID == "" || threadTS == "" || proposalID == "" {
+		return goerr.New("channelID, threadTS and proposalID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
+	}
+	doc := r.docRef(channelID, threadTS)
+	// Update, not Set: the turn this draft belongs to is already running and its
+	// completion handler writes the same row.
+	_, err := doc.Update(ctx, []firestore.Update{
+		{Path: "ProposalID", Value: proposalID},
+		{Path: "UpdatedAt", Value: r.now()},
+	})
+	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			fresh := newSessionFn()
-			if fresh == nil {
-				return goerr.New("newSessionFn returned nil")
-			}
-			fresh.ChannelID = channelID
-			fresh.ThreadTS = threadTS
-			fresh.TurnState = model.SessionTurnRunning
-			fresh.TurnOwnerID = ownerID
-			fresh.TurnStartedAt = now
-			fresh.TurnHeartbeatAt = now
-			fresh.TurnTriggerTS = triggerTS
-			if fresh.CreatedAt.IsZero() {
-				fresh.CreatedAt = now
-			}
-			fresh.UpdatedAt = now
-			if err := fresh.Validate(); err != nil {
-				return goerr.Wrap(err, "session validation failed before acquire")
-			}
-			if err := tx.Set(doc, fresh); err != nil {
-				return goerr.Wrap(err, "tx set new session")
-			}
-			result = interfaces.AcquireResult{Acquired: true, Session: fresh}
 			return nil
 		}
+		return goerr.Wrap(err, "associate the draft with its thread",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
+	}
+	return nil
+}
 
-		var cur model.Session
-		if err := snap.DataTo(&cur); err != nil {
-			return goerr.Wrap(err, "decode session")
-		}
+func (r *sessionRepository) StampLastAction(ctx context.Context, channelID, threadTS string, ended model.SessionEndReason) error {
+	if channelID == "" || threadTS == "" || ended == "" {
+		return goerr.New("channelID, threadTS and ended are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
+	}
+	// Update, not Set: this runs in a completion handler, after the subject was
+	// released, so the next turn may already be writing the same row.
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "LastAction", Value: ended},
+	}); err != nil {
+		return goerr.Wrap(err, "stamp the session outcome",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
+	}
+	return nil
+}
 
-		// Idempotent retry: same Slack-side trigger key as the live owner.
-		// The key must be non-empty (synthetic events pass "").
-		if cur.TurnState == model.SessionTurnRunning && triggerTS != "" && cur.TurnTriggerTS == triggerTS {
-			result = interfaces.AcquireResult{IdempotentRetry: true, Session: &cur}
-			return nil
-		}
-
-		reclaimed := false
-		if cur.TurnState == model.SessionTurnRunning {
-			if staleAfter <= 0 || now.Sub(cur.TurnHeartbeatAt) <= staleAfter {
-				result = interfaces.AcquireResult{Session: &cur}
-				return nil
-			}
-			reclaimed = true
-		}
-
-		cur.TurnState = model.SessionTurnRunning
-		cur.TurnOwnerID = ownerID
-		cur.TurnStartedAt = now
-		cur.TurnHeartbeatAt = now
-		cur.TurnTriggerTS = triggerTS
-		cur.UpdatedAt = now
-		if err := tx.Set(doc, &cur); err != nil {
-			return goerr.Wrap(err, "tx set claimed session")
-		}
-		result = interfaces.AcquireResult{Acquired: true, Reclaimed: reclaimed, Session: &cur}
-		return nil
-	})
-	if err != nil {
-		return interfaces.AcquireResult{}, goerr.Wrap(err, "acquire turn lock",
+func (r *sessionRepository) SetPendingQuestion(ctx context.Context, channelID, threadTS string, q *model.PendingQuestion) error {
+	if channelID == "" || threadTS == "" {
+		return goerr.New("channelID and threadTS are required",
 			goerr.V("channel_id", channelID),
 			goerr.V("thread_ts", threadTS),
 		)
 	}
-	return result, nil
+	// nil clears the field rather than deleting it, so a reader always decodes a
+	// Session whose PendingQuestion is simply absent.
+	var value any
+	if q != nil {
+		value = q
+	}
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "PendingQuestion", Value: value},
+	}); err != nil {
+		return goerr.Wrap(err, "record the pending question",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	return nil
 }
 
-func (r *sessionRepository) Heartbeat(ctx context.Context, channelID, threadTS, ownerID string) (*model.Session, error) {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return nil, goerr.New("channelID, threadTS, ownerID are required")
+func (r *sessionRepository) BindCase(ctx context.Context, channelID, threadTS string, caseID int64) error {
+	if channelID == "" || threadTS == "" || caseID == 0 {
+		return goerr.New("channelID, threadTS and caseID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
 	}
-	doc := r.docRef(channelID, threadTS)
-	var out *model.Session
-	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		snap, err := tx.Get(doc)
-		if err != nil {
-			if status.Code(err) == codes.NotFound {
-				return errors.Join(interfaces.ErrTurnOwnerMismatch,
-					goerr.New("session not found",
-						goerr.V("channel_id", channelID),
-						goerr.V("thread_ts", threadTS)))
-			}
-			return goerr.Wrap(err, "tx get session for heartbeat")
-		}
-		var cur model.Session
-		if err := snap.DataTo(&cur); err != nil {
-			return goerr.Wrap(err, "decode session")
-		}
-		if cur.TurnOwnerID != ownerID {
-			return errors.Join(interfaces.ErrTurnOwnerMismatch,
-				goerr.New("owner mismatch",
-					goerr.V("expected", ownerID),
-					goerr.V("actual", cur.TurnOwnerID)))
-		}
-		now := r.now()
-		cur.TurnHeartbeatAt = now
-		cur.UpdatedAt = now
-		if err := tx.Set(doc, &cur); err != nil {
-			return goerr.Wrap(err, "tx set heartbeat")
-		}
-		out = &cur
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	if err := r.updateFields(ctx, channelID, threadTS, []firestore.Update{
+		{Path: "CaseID", Value: caseID},
+		{Path: "PendingQuestion", Value: nil},
+	}); err != nil {
+		return goerr.Wrap(err, "bind the thread to its case",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
 	}
-	return out, nil
+	return nil
 }
 
-func (r *sessionRepository) ReleaseTurnLock(ctx context.Context, channelID, threadTS, ownerID string) error {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return goerr.New("channelID, threadTS, ownerID are required")
-	}
+// updateFields applies a field-scoped update to one Session, stamping UpdatedAt
+// alongside. A missing document is not an error: the thread it named is gone, and
+// there is nothing left to record against it.
+func (r *sessionRepository) updateFields(ctx context.Context, channelID, threadTS string, updates []firestore.Update) error {
 	doc := r.docRef(channelID, threadTS)
-	return r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		snap, err := tx.Get(doc)
-		if err != nil {
-			if status.Code(err) == codes.NotFound {
-				return nil
-			}
-			return goerr.Wrap(err, "tx get session for release")
-		}
-		var cur model.Session
-		if err := snap.DataTo(&cur); err != nil {
-			return goerr.Wrap(err, "decode session")
-		}
-		if cur.TurnOwnerID != ownerID {
-			return nil
-		}
-		now := r.now()
-		cur.TurnState = model.SessionTurnIdle
-		cur.TurnOwnerID = ""
-		cur.TurnTriggerTS = ""
-		cur.UpdatedAt = now
-		if err := tx.Set(doc, &cur); err != nil {
-			return goerr.Wrap(err, "tx set released session")
-		}
-		return nil
-	})
+	_, err := doc.Update(ctx, append(updates, firestore.Update{Path: "UpdatedAt", Value: r.now()}))
+	if err != nil && status.Code(err) != codes.NotFound {
+		return err
+	}
+	return nil
 }

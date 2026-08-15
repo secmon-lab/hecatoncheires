@@ -11,10 +11,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
-	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
@@ -32,12 +35,11 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
-	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/evaltype"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/scenario"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/toolsim"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // seedReporterID is the synthesized reporter for injected prior cases.
@@ -75,6 +77,221 @@ type Env struct {
 	SeededCases    []*model.Case
 	MonitorChannel string
 	Language       string
+
+	// stopAgents shuts the agent worker down. Every agent is a durable Process
+	// driven by that worker, so a scenario that never starts it produces a run
+	// that is recorded and then never executed.
+	stopAgents func()
+}
+
+// Stop shuts the agent worker down. Callers must call it when the scenario ends;
+// leaving it running leaks a goroutine per scenario.
+//
+// It is deliberately not named Close: the project reserves that name for
+// io.Closer, which must go through safe.Close, and this ends a worker rather than
+// releasing a handle.
+func (e *Env) Stop() {
+	if e != nil && e.stopAgents != nil {
+		e.stopAgents()
+		e.stopAgents = nil
+	}
+}
+
+// awaitTurnTimeout bounds how long a driver waits for one agent turn. A live LLM
+// turn with several investigation rounds is slow; a hung one must still end the
+// scenario rather than the whole eval run.
+const awaitTurnTimeout = 10 * time.Minute
+
+// AwaitTurn blocks until the turn started on this thread has finished — the
+// agent either recorded how it ended on the Session, or committed the case.
+//
+// A driver needs it because a turn is a durable Process: the entry point returns
+// once the run is recorded, and everything the driver then inspects (the pending
+// question, the created case, the thread replies) is written afterwards by the
+// run's completion handler.
+func (e *Env) AwaitTurn(ctx context.Context, channelID, threadTS string, before model.SessionEndReason) error {
+	deadline := time.Now().Add(awaitTurnTimeout)
+	for {
+		ssn, err := e.Repo.Session().GetByThread(ctx, channelID, threadTS)
+		if err != nil {
+			return goerr.Wrap(err, "await turn: load session",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		if ssn != nil && ssn.LastAction != "" && ssn.LastAction != before {
+			return nil
+		}
+		// A create turn that committed its case is finished even if the outcome
+		// stamp lost a race with this read.
+		if c, err := e.Repo.Case().GetBySlackThread(ctx, e.Entry.Workspace.ID, channelID, threadTS); err == nil && c != nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return goerr.New("await turn: the agent turn did not finish",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		select {
+		case <-ctx.Done():
+			return goerr.Wrap(ctx.Err(), "await turn")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// AwaitJobRun blocks until the newest run recorded for this Job has left the
+// RUNNING stage, and returns that run's log.
+//
+// A driver needs it for the same reason AwaitTurn exists: a Job now runs as a
+// durable Process, so JobRunner.Run returns once the run is recorded and spawned.
+// Everything the driver inspects — the outcome, the per-call timeline, the case
+// and actions the run produced — is written afterwards, by the run's completion
+// handler.
+func (e *Env) AwaitJobRun(ctx context.Context, key model.JobRunKey) (*model.JobRunLog, error) {
+	deadline := time.Now().Add(awaitTurnTimeout)
+	for {
+		logs, err := e.Repo.JobRunLog().List(ctx, key, 0)
+		if err != nil {
+			return nil, goerr.Wrap(err, "await job run: list run logs",
+				goerr.V("job_id", key.JobID), goerr.V("case_id", key.CaseID))
+		}
+		if len(logs) > 0 && logs[0].Stage != model.JobRunStageRunning {
+			return logs[0], nil
+		}
+		if time.Now().After(deadline) {
+			return nil, goerr.New("await job run: the job run did not finish",
+				goerr.V("job_id", key.JobID), goerr.V("case_id", key.CaseID))
+		}
+		select {
+		case <-ctx.Done():
+			return nil, goerr.Wrap(ctx.Err(), "await job run")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// The scenario budgets are deliberately generous: a scenario is meant to fail on
+// the agent's judgement, not on a ceiling the harness imposed.
+//
+// They are two different ceilings on purpose. A finished sub-agent's whole
+// Metrics is folded into its parent (see `.claude/rules/architecture.md` §
+// Budget), so the ROOT ceiling has to cover the planner's own transitions PLUS
+// every sub-agent a turn spawns — up to 5 per round, over several rounds. Giving
+// both tiers the same number is what made live scenarios die of
+// "step budget exhausted (122/64)" with the planner barely started: one busy
+// sub-agent was enough to spend the whole root allowance.
+//
+// evalTaskBudget bounds one investigation; evalRootBudget bounds the turn, and is
+// sized for several rounds of them.
+var evalTaskBudget = budget.Config{
+	MaxSteps: 48, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000, NoticeRatio: 0.9,
+}
+
+var evalRootBudget = budget.Config{
+	MaxSteps: 480, MaxInputTokens: 5_000_000, MaxOutputTokens: 5_000_000, NoticeRatio: 0.9,
+}
+
+// agentRuntime is the started runtime plus the handles a scenario needs from it:
+// the Job runtime the JobRunner dispatches onto, and the stop function.
+type agentRuntime struct {
+	durable *job.DurableRuntime
+	stop    func()
+}
+
+// startAgentRuntime builds the agentkit runtime a scenario's agents run on and
+// starts its worker.
+//
+// It registers the SAME agents production does, the Job agents included, in the
+// order agentkit requires (register → build → bind). That is the point of the
+// harness: a scenario exercises the checkpointing, the per-Process budget, the
+// duplicate-side-effect bound and the claim middleware a deployed run gets, not a
+// second implementation of them.
+//
+// Everything is in-process and per-scenario: the Process store, the history and
+// the trace all live and die with the Env, which is what keeps two scenarios from
+// seeing each other's runs.
+func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegistry,
+	uc *usecase.UseCases, llm gollem.LLMClient,
+) (*agentRuntime, error) {
+	procRepo := agentprocmemory.New()
+	history := agentarchive.NewMemoryHistoryStore()
+
+	locator, err := agentkernel.NewLocator(procRepo)
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: build the agent process locator")
+	}
+
+	reg := agentkit.NewRegistry()
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalTaskBudget.Limiter(), history)
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: register the task sub-agent")
+	}
+	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(), history, procRepo, taskAgent); err != nil {
+		return nil, goerr.Wrap(err, "env: register the agents")
+	}
+	durable := &job.DurableRuntime{History: history, Locator: locator}
+	if err := durable.Register(reg, evalRootBudget.Limiter(), taskAgent); err != nil {
+		return nil, goerr.Wrap(err, "env: register the job agents")
+	}
+
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    procRepo,
+		History: history,
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: agentkernel.Budgets{Root: evalRootBudget, Task: evalTaskBudget},
+		Agents:  reg,
+		Tools: agentkernel.ToolDeps{
+			Repo:              repo,
+			Registry:          registry,
+			SlackBot:          uc.SlackService(),
+			SlackSearch:       uc.SlackSearchService(),
+			SlackRetriever:    uc.SlackMessageRetriever(),
+			NotionClient:      uc.NotionToolClient(),
+			GitHubClient:      uc.GitHubToolClient(),
+			WebFetchClient:    uc.WebFetchClient(),
+			ActionUC:          usecase.NewActionToolAdapter(uc.Action),
+			ActionStepUC:      usecase.NewActionStepToolAdapter(uc.ActionStep),
+			CaseUC:            usecase.NewCaseToolAdapter(uc.Case),
+			CaseRefUC:         uc.Case,
+			CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(uc.Case),
+			CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(uc.Action, uc.ActionStep),
+			MemoUC:            usecase.NewMemoToolAdapter(uc.Memo),
+			KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
+			KnowledgeMutator:  usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
+		},
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: build the agent runtime")
+	}
+	uc.Agent.BindAgentKernel(k)
+	durable.Bind(k)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	// Deliberately NOT async.Dispatch / DispatchCancelable, which every other
+	// background goroutine in this codebase uses. Those register on the package
+	// WaitGroup that async.Wait() drains, and this worker runs for the whole life
+	// of the Env — so a driver calling async.Wait() to flush a handler's async
+	// tail would block on the worker instead and the scenario would never finish.
+	// The panic recovery and error reporting those helpers provide is done inline
+	// here instead, so the reason for the deviation is the WaitGroup and nothing
+	// else.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errutil.Handle(ctx, goerr.New("panic in the eval agent worker",
+					goerr.V("panic", r)), "eval agent worker panicked")
+				done <- nil
+			}
+		}()
+		done <- agentkernel.Serve(ctx, k, agentkit.WithPollInterval(5*time.Millisecond))
+	}()
+	return &agentRuntime{
+		durable: durable,
+		stop: func() {
+			cancel()
+			<-done
+		},
+	}, nil
 }
 
 // Build assembles the environment for one scenario.
@@ -135,9 +352,17 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 		return nil, err
 	}
 
-	jobRunner := buildJobRunner(repo, registry, uc, opts.LLM, historyRepo, traceRepo)
+	// The runtime is built first: the Job agents must be registered before the
+	// Kernel exists, and the JobRunner needs the runtime to dispatch onto.
+	runtime, err := startAgentRuntime(repo, registry, uc, opts.LLM)
+	if err != nil {
+		return nil, err
+	}
+	jobRunner := buildJobRunner(repo, registry, uc, opts.LLM, runtime.durable)
+	runtime.durable.AttachRunner(jobRunner)
 
 	return &Env{
+		stopAgents:     runtime.stop,
 		AgentUC:        uc.Agent,
 		JobRunner:      jobRunner,
 		Repo:           repo,
@@ -236,17 +461,21 @@ func seedCases(ctx context.Context, repo interfaces.Repository, wsID string, sc 
 
 // buildJobRunner wires a JobRunner mirroring the production job runtime
 // (pkg/cli/job_runtime.go) with the in-memory env: read-only core tools plus
-// action writer tools, and both the simple and planexec executors. Sources
-// reach the job through the system prompt (resolveSources), not tools, so the
-// seeded sources are surfaced here. (casewriter / slackpost tools are omitted
-// in v1 — they require host adapters not exported from the usecase layer.)
+// action writer tools, dispatching every strategy onto the agent runtime exactly
+// as serve and tick do. Sources reach the job through the system prompt
+// (resolveSources), not tools, so the seeded sources are surfaced here.
+// (casewriter / slackpost tools are omitted in v1 — they require host adapters
+// not exported from the usecase layer.)
+//
+// No in-process executor is registered, for the same reason production registers
+// none when a runtime exists: every strategy the runtime handles must go through
+// it, or a scenario would pass against a second implementation.
 func buildJobRunner(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
 	uc *usecase.UseCases,
 	llm gollem.LLMClient,
-	historyRepo gollem.HistoryRepository,
-	traceRepo trace.Repository,
+	durable *job.DurableRuntime,
 ) *job.JobRunner {
 	actionAdapter := usecase.NewActionToolAdapter(uc.Action)
 	stepAdapter := usecase.NewActionStepToolAdapter(uc.ActionStep)
@@ -316,29 +545,12 @@ func buildJobRunner(
 		return out
 	})
 
-	executors := map[model.JobStrategy]jobagent.JobExecutor{
-		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
-	}
-	if planexecRunner, err := planexec.NewRunner(planexec.RunnerDeps{
-		LLMClient:   llm,
-		HistoryRepo: historyRepo,
-		TraceRepo:   traceRepo,
-		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:  8,
-			SubAgentLoopMax: 20,
-		},
-	}); err == nil {
-		if exec, peErr := jobagent.NewPlanexecJobExecutor(planexecRunner); peErr == nil {
-			executors[model.JobStrategyPlanexec] = exec
-		}
-	}
-
 	return job.NewJobRunner(job.RunnerDeps{
 		Repo:        repo,
 		Registry:    registry,
 		LLMClient:   llm,
-		Executors:   executors,
 		ToolBuilder: toolBuilder,
+		Durable:     durable,
 	})
 }
 

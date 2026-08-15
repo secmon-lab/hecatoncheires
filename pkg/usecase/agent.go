@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -22,7 +23,6 @@ import (
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
-	agentcommon "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
@@ -40,18 +40,14 @@ import (
 type AgentUseCase struct {
 	deps AgentDeps
 
-	// casebound runs the case-bound gollem ReAct loop. It is non-nil
-	// whenever the LLM client is configured.
+	// casebound runs the case-channel mention agent.
 	casebound *casebound.UseCase
 
-	// threadcase runs the thread-mode plan-and-execute agent (materialize on
-	// creation, investigate / respond / close on mention). Non-nil whenever
-	// the LLM client is configured.
-	threadcase *threadcase.UseCase
-
-	// workspaceAgent runs the workspace-channel cross-case agent (channel mode).
-	// Non-nil whenever the LLM client is configured.
-	workspaceAgent *wsagent.UseCase
+	// durableWorkspaceAgent runs the workspace-channel cross-case agent and
+	// durableThreadcase the thread-mode create / mention agents. Both are filled by
+	// RegisterAgents, which runs only when a Kernel is being built.
+	durableWorkspaceAgent *wsagent.Durable
+	durableThreadcase     *threadcase.Durable
 }
 
 // AgentDeps groups the dependencies AgentUseCase needs. Required fields are
@@ -96,10 +92,6 @@ type AgentDeps struct {
 	// mutation funnels through the single CaseUseCase entry point.
 	CaseUC *CaseUseCase
 
-	// ThreadcaseBudget overrides the planexec budget for the thread-mode
-	// agent. Zero values fall back to DefaultThreadcaseBudget.
-	ThreadcaseBudget planexec.BudgetConfig
-
 	// Optional Slack tool clients. SlackService is the Bot-token client;
 	// SlackSearch and SlackRetriever sit on the User OAuth Token.
 	SlackService   slack.Service
@@ -120,78 +112,13 @@ type AgentDeps struct {
 }
 
 // NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.
+//
+// No agent is built here. Every one of them runs on the agentkit runtime, and
+// wiring that needs the process store and the Kernel — both assembled after the
+// usecases. RegisterAgents and BindAgentKernel do it in the order agentkit
+// requires; until they run, the mention handlers stand down.
 func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
-	uc := &AgentUseCase{deps: deps}
-	if deps.LLM != nil {
-		commonDeps := &agentcommon.CommonDeps{
-			Repo:                deps.Repo,
-			Registry:            deps.Registry,
-			LLMClient:           deps.LLM,
-			HistoryRepo:         deps.HistoryRepo,
-			TraceRepo:           deps.TraceRepo,
-			SlackBot:            deps.SlackService,
-			SlackSearch:         deps.SlackSearch,
-			SlackRetriever:      deps.SlackRetriever,
-			NotionClient:        deps.NotionTool,
-			GitHubClient:        deps.GitHubClient,
-			WebFetchClient:      deps.WebFetchClient,
-			JiraTools:           deps.JiraTools,
-			ActionUC:            NewActionToolAdapter(deps.ActionUC),
-			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
-			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
-			CaseRefUC:           deps.CaseUC,
-			CaseMultiUC:         NewCaseMultiCaseAdapter(deps.CaseUC),
-			CaseMultiActionUC:   NewCaseMultiActionAdapter(deps.ActionUC, deps.ActionStepUC),
-			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
-			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC, deps.TagUC),
-			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC, deps.TagUC),
-			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
-			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
-		}
-		// The case-channel agent is NOT built here. It runs on the agentkit
-		// runtime, and wiring it needs the process store and the kernel — both
-		// of which are assembled after the usecases. RegisterAgents /
-		// BindAgentKernel below do it in the order agentkit requires.
-
-		// Build the thread-mode agent. It reuses the same backend deps and a
-		// dedicated planexec runner.
-		budget := deps.ThreadcaseBudget
-		if budget.PlannerLoopMax <= 0 || budget.SubAgentLoopMax <= 0 {
-			budget = DefaultThreadcaseBudget
-		}
-		runner, runnerErr := planexec.NewRunner(planexec.RunnerDeps{
-			LLMClient:   deps.LLM,
-			HistoryRepo: deps.HistoryRepo,
-			TraceRepo:   deps.TraceRepo,
-			Budget:      budget,
-		})
-		if runnerErr != nil {
-			errutil.Handle(context.Background(), goerr.Wrap(runnerErr, "failed to build threadcase planexec runner"), "failed to build threadcase planexec runner")
-		} else if tc, tcErr := threadcase.New(commonDeps, runner); tcErr != nil {
-			errutil.Handle(context.Background(), goerr.Wrap(tcErr, "failed to build threadcase usecase"), "failed to build threadcase usecase")
-		} else {
-			uc.threadcase = tc
-		}
-
-		// The workspace-channel agent reuses the same backend deps + runner as
-		// threadcase; it only differs in tool set (cross-case) and access actor.
-		if runnerErr == nil {
-			if wa, waErr := wsagent.New(commonDeps, runner); waErr != nil {
-				errutil.Handle(context.Background(), goerr.Wrap(waErr, "failed to build workspace agent usecase"), "failed to build workspace agent usecase")
-			} else {
-				uc.workspaceAgent = wa
-			}
-		}
-	}
-	return uc
-}
-
-// DefaultThreadcaseBudget is the planexec budget used for thread-mode agent
-// turns when AgentDeps.ThreadcaseBudget is unset. Conservative bounds keep a
-// mention turn responsive while allowing a couple of investigation rounds.
-var DefaultThreadcaseBudget = planexec.BudgetConfig{
-	PlannerLoopMax:  8,
-	SubAgentLoopMax: 20,
+	return &AgentUseCase{deps: deps}
 }
 
 // RegisterAgents builds the agents that run on the agentkit runtime and
@@ -202,11 +129,14 @@ var DefaultThreadcaseBudget = planexec.BudgetConfig{
 // It is a separate step from NewAgentUseCase because both halves of the wiring
 // depend on the other: registering needs this usecase as the completion handler,
 // and building the Kernel needs the filled registry.
+// taskAgent is the shared per-task sub-agent (agentkernel.RegisterTaskAgent),
+// registered by the caller so the Job runtime can be handed the same handle.
 func (uc *AgentUseCase) RegisterAgents(
 	reg *agentkit.Registry,
 	limiter agentkit.Limiter,
 	store agentkit.HistoryStore,
 	procRepo agentkit.Repository,
+	taskAgent agentkit.Agent[react.Input],
 ) error {
 	locator, err := agentkernel.NewLocator(procRepo)
 	if err != nil {
@@ -220,6 +150,30 @@ func (uc *AgentUseCase) RegisterAgents(
 		return goerr.Wrap(err, "register the case-channel agent")
 	}
 	uc.casebound = cb
+
+	if taskAgent.Name() == "" {
+		return goerr.New("the task sub-agent must be registered before the plan-execute agents")
+	}
+
+	progress := agentProgress{uc: uc}
+
+	wa, err := wsagent.NewDurable(wsagentHost{uc: uc}, locator)
+	if err != nil {
+		return goerr.Wrap(err, "build the workspace agent")
+	}
+	if err := wa.Register(reg, taskAgent, progress, limiter, store); err != nil {
+		return goerr.Wrap(err, "register the workspace agent")
+	}
+	uc.durableWorkspaceAgent = wa
+
+	tc, err := threadcase.NewDurable(uc.deps.Repo, uc.deps.Registry, threadcaseHost{uc: uc}, locator)
+	if err != nil {
+		return goerr.Wrap(err, "build the thread-mode agents")
+	}
+	if err := tc.Register(reg, taskAgent, progress, limiter, store); err != nil {
+		return goerr.Wrap(err, "register the thread-mode agents")
+	}
+	uc.durableThreadcase = tc
 	return nil
 }
 
@@ -229,6 +183,8 @@ func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel) {
 	if uc.casebound != nil {
 		uc.casebound.Bind(k)
 	}
+	uc.durableWorkspaceAgent.Bind(k)
+	uc.durableThreadcase.Bind(k)
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
@@ -399,6 +355,64 @@ func (h caseboundHost) Reply(ctx context.Context, channelID, threadTS, text stri
 func (h caseboundHost) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
 	h.uc.replyUserError(ctx, fallbackReasonError(reason), "casebound agent turn", channelID, threadTS)
 	return nil
+}
+
+// wsagentHost is the Slack side of a finished workspace-agent turn. It mirrors
+// caseboundHost; the two are separate types because each host package declares
+// its own Host interface, and one adapter satisfying both would tie their
+// contracts together.
+type wsagentHost struct {
+	uc *AgentUseCase
+}
+
+// Reply posts the agent's answer as a thread reply.
+func (h wsagentHost) Reply(ctx context.Context, channelID, threadTS, text string) error {
+	if text == "" {
+		return nil
+	}
+	if _, err := h.uc.deps.SlackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
+		return goerr.Wrap(err, "post the workspace-agent reply",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	return nil
+}
+
+// ReportFailure tells the user the turn could not finish.
+func (h wsagentHost) ReportFailure(ctx context.Context, channelID, threadTS, reason string) error {
+	h.uc.replyUserError(ctx, fallbackReasonError(reason), "workspace agent turn", channelID, threadTS)
+	return nil
+}
+
+// agentProgress draws a durable run's milestone lines into a single Slack
+// message.
+//
+// Unlike traceMessage it holds no state: the message id and the lines so far
+// live in the run's checkpointed state, because a run's transitions can be
+// claimed by a different instance and an in-process accumulator there would
+// start a second message instead of updating the first.
+type agentProgress struct {
+	uc *AgentUseCase
+}
+
+// Render posts the lines as one message, or updates the message already posted.
+func (p agentProgress) Render(ctx context.Context, target planexec.ProgressTarget,
+	messageTS string, lines []string,
+) (string, error) {
+	blocks := buildTraceContextBlocks(lines)
+	fallback := traceFallbackText(lines)
+	if messageTS == "" {
+		ts, err := p.uc.deps.SlackService.PostThreadMessage(ctx, target.ChannelID, target.ThreadTS, blocks, fallback)
+		if err != nil {
+			return "", goerr.Wrap(err, "post the agent progress message",
+				goerr.V("channel_id", target.ChannelID), goerr.V("thread_ts", target.ThreadTS))
+		}
+		return ts, nil
+	}
+	if err := p.uc.deps.SlackService.UpdateMessage(ctx, target.ChannelID, messageTS, blocks, fallback); err != nil {
+		return messageTS, goerr.Wrap(err, "update the agent progress message",
+			goerr.V("channel_id", target.ChannelID), goerr.V("message_ts", messageTS))
+	}
+	return messageTS, nil
 }
 
 // toCaseboundMessages converts the Slack-service ConversationMessage shape
@@ -721,6 +735,18 @@ func buildTraceContextBlocks(lines []string) []goslack.Block {
 	return blocks
 }
 
+// traceFallbackText renders the plain-text notification fallback for a milestone
+// history, windowed to the same most-recent maxTraceBlocks lines
+// buildTraceContextBlocks renders. Keeping the two in step is what stops an
+// unbounded history from blowing past Slack's 4000-char text-field limit
+// (msg_too_long) while the blocks themselves stay within their own cap.
+func traceFallbackText(lines []string) string {
+	if len(lines) > maxTraceBlocks {
+		lines = lines[len(lines)-maxTraceBlocks:]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // buildContextBlocks renders the milestone history followed by the transient
 // live line. When a live line is present, one block slot is reserved for it so
 // a long milestone history never pushes the in-place line out of the message.
@@ -746,10 +772,7 @@ func (tm *traceMessage) buildContextBlocks() []goslack.Block {
 func (tm *traceMessage) fallbackText() string {
 	lines := tm.lines
 	if tm.liveLine == "" {
-		if len(lines) > maxTraceBlocks {
-			lines = lines[len(lines)-maxTraceBlocks:]
-		}
-		return strings.Join(lines, "\n")
+		return traceFallbackText(lines)
 	}
 	if len(lines) > maxTraceBlocks-1 {
 		lines = lines[len(lines)-(maxTraceBlocks-1):]

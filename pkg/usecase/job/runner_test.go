@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
+	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
@@ -18,7 +20,9 @@ import (
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -26,8 +30,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
@@ -474,6 +478,611 @@ func TestJobRunner_SuccessClearsLease(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
 	gt.Bool(t, run.LeaseUntil.IsZero()).True()
+}
+
+// wireDurableJobRuntime reproduces the CLI's wiring order — register, build,
+// bind — and starts the worker for the duration of the test.
+func wireDurableJobRuntime(
+	t *testing.T, runner *job.JobRunner, durable *job.DurableRuntime,
+	repo interfaces.Repository, registry *model.WorkspaceRegistry, llm gollem.LLMClient,
+	serveOpts ...agentkit.ServeOption,
+) {
+	t.Helper()
+
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	opts := append([]agentkit.ServeOption{agentkit.WithPollInterval(5 * time.Millisecond)}, serveOpts...)
+	go func() { served <- agentkernel.Serve(ctx, k, opts...) }()
+	t.Cleanup(func() {
+		cancel()
+		<-served
+	})
+}
+
+// bindDurableJobRuntime wires the runtime but never claims anything, so a spawned
+// run stays exactly where Run left it. Use it to assert what the TRIGGER did — the
+// run record it opened, the Slack marker it posted — with a run still live and no
+// worker racing to finish it.
+func bindDurableJobRuntime(
+	t *testing.T, runner *job.JobRunner, durable *job.DurableRuntime,
+	repo interfaces.Repository, registry *model.WorkspaceRegistry, llm gollem.LLMClient,
+	slots ...agentkernel.SlotGate,
+) *agentkit.Kernel {
+	t.Helper()
+
+	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	reg := agentkit.NewRegistry()
+	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(), durable.History)
+	gt.NoError(t, tErr).Required()
+	gt.NoError(t, durable.Register(reg, cfg.Limiter(), taskAgent)).Required()
+
+	procRepo := agentprocmemory.New()
+	locator, lErr := agentkernel.NewLocator(procRepo)
+	gt.NoError(t, lErr).Required()
+	durable.Locator = locator
+
+	var gate agentkernel.SlotGate
+	if len(slots) > 0 {
+		gate = slots[0]
+	}
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    procRepo,
+		History: durable.History,
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: agentkernel.Budgets{Root: cfg, Task: cfg},
+		Agents:  reg,
+		Slots:   gate,
+		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry},
+	})
+	gt.NoError(t, err).Required()
+	durable.Bind(k)
+	durable.AttachRunner(runner)
+	return k
+}
+
+// A simple-strategy Job on the durable runtime must record the same run the
+// in-process executor did: Run returns as soon as the run exists, and the run's
+// own completion handler closes the log with the usage agentkit metered.
+func TestJobRunner_DurableSimpleRunRecordsItsOutcome(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-summarize",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		// No executor for the simple strategy: the durable path must be the one
+		// that runs, not a fallback into an in-process executor.
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	// Run returned before the agent answered, so the outcome arrives later.
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).NotEqual("")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	log := logs[0]
+	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindSingleLoop)
+	// The usage comes off the Process, which is the only place a durable run's
+	// total survives — its transitions span claims and possibly instances.
+	gt.Value(t, log.InputTokens).Equal(int64(120))
+	gt.Value(t, log.OutputTokens).Equal(int64(34))
+	gt.Value(t, log.LLMCallCount).Equal(int64(1))
+
+	// And the per-call timeline the run-detail page reads.
+	events, err := repo.JobRunEvent().List(ctx, key, log.RunID)
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
+	gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+}
+
+// The deployment-wide concurrency limit must bound how many scheduled Job runs
+// EXECUTE, not how many are spawned.
+//
+// This is a composition test on purpose. Each half was already covered alone —
+// `pkg/agent/kernel` proves `slotGuard` bounds concurrent claims, and the runner
+// proves its pre-spawn gate refuses when slots are full — and the bug was that
+// nothing joined them: the Kernel was built without a slot gate, so the only hold
+// left was the runner's, which is released as soon as `Run` returns after the
+// Spawn. The limit then bounded concurrent spawns and nothing else. So this drives
+// the real chain: ConcurrencyLimiter → Deps.Slots → slotGuard → Scope.SlotGated.
+func TestJobRunner_DurableRunsAreBoundedByTheConcurrencyLimit(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+
+	// Two DIFFERENT Jobs on the same case, so nothing but the slot gate can
+	// serialise them (the subject is per (workspace, case, job)).
+	jobs := make([]*model.Job, 0, 2)
+	for i := range 2 {
+		j := &model.Job{
+			ID:     fmt.Sprintf("durable-slotted-%d", i),
+			Prompt: "summarise the case",
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+			},
+		}
+		jobs = append(jobs, j)
+	}
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: jobs})
+
+	// A gate of exactly one, over the same JobSlot repository production uses.
+	limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
+		Repo:          repo.JobSlot(),
+		Limit:         1,
+		TTL:           30 * time.Second,
+		RenewInterval: 10 * time.Second,
+		MaxHold:       time.Hour,
+	})
+	gt.NoError(t, err).Required()
+
+	// The LLM blocks until released, so a run that is admitted stays in flight and
+	// a second admission would be observable as two concurrent calls.
+	var inFlight, maxInFlight atomic.Int32
+	release := make(chan struct{})
+	llm := blockingReplyLLM(&inFlight, &maxInFlight, release)
+
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		SlotLimiter: limiter,
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm, limiter)
+
+	// Spawn both before the worker starts, so the gate — not arrival order — is
+	// what decides how many execute at once.
+	for _, j := range jobs {
+		gt.NoError(t, runner.Run(ctx, j, job.Event{
+			Domain: model.JobEventDomainScheduled, WorkspaceID: "ws", CaseID: c.ID,
+			Timestamp: time.Now().UTC(),
+		})).Required()
+	}
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		served <- agentkernel.Serve(serveCtx, k,
+			agentkit.WithPollInterval(5*time.Millisecond),
+			// Enough capacity that only the gate can hold the second run back.
+			agentkit.WithMaxConcurrent(4), agentkit.WithPollConcurrency(2))
+	}()
+
+	// Let the first admitted run reach the model, then confirm the second is still
+	// held out before releasing either.
+	waitForInFlight(t, &inFlight, 1)
+	gt.Number(t, int(maxInFlight.Load())).Equal(1)
+
+	close(release)
+	for _, j := range jobs {
+		key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+		awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	}
+	cancel()
+	<-served
+
+	// Both ran, but never at the same time.
+	gt.Number(t, int(maxInFlight.Load())).Equal(1)
+}
+
+// A trigger arriving while a durable run of the same Job is still live must leave
+// no trace at all.
+//
+// This is the shape the lease used to guarantee: Run held it for the whole
+// execution, so a second tick was a silent skip. A durable run releases the lease
+// as soon as the Process is recorded, so without an explicit check every tick of a
+// long-running Job would open a run log, post a "starting" marker, and only then
+// discover the subject was busy — recording that as a FAILED run and stamping
+// LastRunAt. Asserting on counts alone is not enough here: the point is that the
+// SECOND attempt adds nothing, so each surface is compared against its post-first
+// -attempt value.
+func TestJobRunner_DurableSkipsATriggerWhileARunIsLive(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-long",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	notifier := &fakeNotifier{}
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		SlackNotifier: notifier,
+		Executors:     map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	// No worker: the first run stays live for the whole test, which is exactly the
+	// state a long-running Job is in when the next tick arrives.
+	bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	ev := job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	}
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+
+	gt.NoError(t, runner.Run(ctx, j, ev)).Required()
+
+	logsAfterFirst, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logsAfterFirst).Length(1).Required()
+	gt.Value(t, logsAfterFirst[0].Stage).Equal(model.JobRunStageRunning)
+	postsAfterFirst := len(notifier.snapshot())
+	runAfterFirst, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, runAfterFirst).NotNil().Required()
+
+	// Second trigger, first run still live.
+	gt.NoError(t, runner.Run(ctx, j, ev)).Required()
+
+	// No second run log — in particular no FAILED one.
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].RunID).Equal(logsAfterFirst[0].RunID)
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageRunning)
+
+	// No second "starting" marker and no failure notice.
+	gt.Number(t, len(notifier.snapshot())).Equal(postsAfterFirst)
+
+	// And the schedule is untouched, so the next tick still finds the Job due
+	// rather than believing a run just happened.
+	runNow, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, runNow.LastStatus).Equal(runAfterFirst.LastStatus)
+	gt.Bool(t, runNow.LastRunAt.Equal(runAfterFirst.LastRunAt)).True()
+}
+
+// A durable run whose agent fails must record the failure, not leave a RUNNING
+// log that nothing ever finishes.
+func TestJobRunner_DurableSimpleRunRecordsAFailure(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:     "durable-failing",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := failingLLM("the model is unreachable")
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	// One attempt: the point is the terminal failure, not agentkit's retry
+	// schedule (pkg/agent covers that).
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm, agentkit.WithMaxStepAttempts(1))
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusFailed)
+	gt.String(t, run.LastError).Contains("the model is unreachable")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)
+}
+
+// A planexec-strategy Job runs on the durable runtime too: the planner rounds and
+// the per-task sub-agents are all Processes, and the run's outcome arrives from
+// the completion handler.
+func TestJobRunner_DurablePlanexecRunRecordsItsOutcome(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:       "durable-planexec",
+		Prompt:   "summarise the case",
+		Strategy: model.JobStrategyPlanexec,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := scriptedReplyLLM(
+		// plan: one task
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"the case is read","tools":["core_job"]}]}`,
+		// the child task's answer
+		`the case is a stalled deploy`,
+		// replan: finalize
+		`{"finalize":{"reason":"enough is known"}}`,
+		// final: prose
+		`The deploy has been stalled since Tuesday.`,
+	)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		// No executor for the planexec strategy: the durable path must be the one
+		// that runs, not a fallback into an in-process executor.
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).NotEqual("")
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, logs[0].ExecutorKind).Equal(model.ExecutorKindPlanexec)
+	// Four LLM calls (plan, child, replan, final) across four Processes; only the
+	// Process metrics see them all.
+	gt.Value(t, logs[0].LLMCallCount).Equal(int64(4))
+}
+
+// An interactive Job asks the user mid-run: the run parks on a question await
+// recorded against the run log, and the same run — one Process, one run id —
+// continues when the answer is delivered.
+func TestJobRunner_InteractiveJobSuspendsAndResumes(t *testing.T) {
+	ctx := context.Background()
+	j := &model.Job{
+		ID:          "interactive",
+		Prompt:      "find out which environment broke",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	// The question is posted into the case thread, so an interactive Job needs one.
+	repo, c := setupCaseWithSlack(t, "ws", "C-CASE", "1700000000.000100")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	llm := scriptedReplyLLM(
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"read","tools":["core_job"]}]}`,
+		`the case does not say which environment`,
+		// The replan round asks rather than finalising.
+		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
+		// After the answer arrives the run replans and finalises.
+		`{"finalize":{"reason":"the environment is known"}}`,
+		`Production broke at 14:00.`,
+	)
+	poster := &recordingQuestionPoster{}
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		InteractionPoster: poster,
+		Executors:         map[model.JobStrategy]jobagent.JobExecutor{},
+	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	// The run parks on its question, recording the Process and await the answer
+	// must reach.
+	suspended := awaitJobRunLogStage(t, repo, key, model.JobRunStageAwaitingInput)
+	gt.Value(t, suspended.PendingInteraction).NotNil().Required()
+	gt.String(t, suspended.PendingInteraction.Reason).Equal("which environment?")
+	gt.String(t, suspended.AgentProcessID).NotEqual("")
+	gt.String(t, suspended.AgentAwaitKey).NotEqual("")
+	gt.Number(t, poster.posts()).Equal(1)
+
+	// Answering continues the SAME run — same run id, no second log.
+	gt.NoError(t, runner.Resume(ctx, key, suspended.RunID, []interaction.Answer{
+		{ID: "env", Choice: "production"},
+	})).Required()
+
+	run := awaitJobRunStatus(t, repo, key, model.JobRunStatusSuccess)
+	gt.String(t, run.LastRunID).Equal(suspended.RunID)
+
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
+	// The await pair is cleared, so a second submit of the same form finds nothing
+	// to answer.
+	gt.String(t, logs[0].AgentAwaitKey).Equal("")
+}
+
+// recordingQuestionPoster stands in for Slack: it records the question form and
+// hands back a message ts, which is what the pending interaction is keyed on.
+type recordingQuestionPoster struct {
+	n atomic.Int32
+}
+
+func (p *recordingQuestionPoster) PostThreadMessage(_ context.Context, _, _ string,
+	_ []goslack.Block, _ string, _ ...slacksvc.PostThreadOption,
+) (string, error) {
+	p.n.Add(1)
+	return "1700000000.000300", nil
+}
+
+func (p *recordingQuestionPoster) UpdateMessage(_ context.Context, _, _ string,
+	_ []goslack.Block, _ string,
+) error {
+	return nil
+}
+
+func (p *recordingQuestionPoster) posts() int { return int(p.n.Load()) }
+
+// awaitJobRunLogStage waits for the run's log to reach want and returns it.
+func awaitJobRunLogStage(t *testing.T, repo interfaces.Repository, key model.JobRunKey,
+	want model.JobRunStage,
+) *model.JobRunLog {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for {
+		logs, err := repo.JobRunLog().List(ctx, key, 10)
+		if err == nil && len(logs) == 1 && logs[0].Stage == want {
+			return logs[0]
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return nil
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// scriptedReplyLLM answers with replies[i] on the i-th Generate. An extra call
+// fails rather than repeating the last answer.
+func scriptedReplyLLM(replies ...string) gollem.LLMClient {
+	var n atomic.Int32
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					i := int(n.Add(1)) - 1
+					if i >= len(replies) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return &gollem.Response{Texts: []string{replies[i]}, InputToken: 5, OutputToken: 3}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// awaitJobRunStatus waits for the run summary to reach want.
+func awaitJobRunStatus(t *testing.T, repo interfaces.Repository, key model.JobRunKey, want model.JobRunStatus) *model.JobRun {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		run, err := repo.JobRun().Get(ctx, key)
+		if err == nil && run != nil && run.LastStatus == want {
+			return run
+		}
+		select {
+		case <-ctx.Done():
+			gt.NoError(t, ctx.Err()).Required()
+			return nil
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// singleReplyLLM answers every turn with one text and the given token usage.
+func singleReplyLLM(text string, input, output int) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return &gollem.Response{Texts: []string{text}, InputToken: input, OutputToken: output}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// blockingReplyLLM parks every Generate until release is closed, recording how
+// many calls are in flight at once. It is how a concurrency bound is observed
+// rather than inferred: a gate that admitted two runs shows up as maxInFlight 2.
+func blockingReplyLLM(inFlight, maxInFlight *atomic.Int32, release <-chan struct{}) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(ctx context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					n := inFlight.Add(1)
+					for {
+						cur := maxInFlight.Load()
+						if n <= cur || maxInFlight.CompareAndSwap(cur, n) {
+							break
+						}
+					}
+					defer inFlight.Add(-1)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return &gollem.Response{Texts: []string{"done"}, InputToken: 10, OutputToken: 5}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// waitForInFlight blocks until want calls are concurrently inside the model.
+func waitForInFlight(t *testing.T, inFlight *atomic.Int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for inFlight.Load() < want {
+		if time.Now().After(deadline) {
+			gt.Number(t, int(inFlight.Load())).Equal(int(want)).Required()
+			return
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// failingLLM refuses every turn, which is how a durable run reaches a failure.
+func failingLLM(msg string) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return nil, goerr.New(msg)
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
 }
 
 func TestJobRunner_InvalidJob(t *testing.T) {
@@ -1634,6 +2243,16 @@ type inputCapturingLLM struct {
 	inputs    []string
 }
 
+// captured returns a copy of the recorded inputs. It is a copy because the
+// worker goroutine keeps appending while the test reads.
+func (l *inputCapturingLLM) captured() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, len(l.inputs))
+	copy(out, l.inputs)
+	return out
+}
+
 func (l *inputCapturingLLM) client() gollem.LLMClient {
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
@@ -1654,7 +2273,13 @@ func (l *inputCapturingLLM) client() gollem.LLMClient {
 					}
 					next := l.responses[l.idx]
 					l.idx++
-					return &gollem.Response{Texts: []string{next}}, nil
+					return &gollem.Response{Texts: []string{next}, InputToken: 5, OutputToken: 3}, nil
+				},
+				// Required: the durable runtime commits the conversation after
+				// every transition, so a session that cannot hand its History back
+				// fails the transition and the run retries from the checkpoint.
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
 				},
 			}, nil
 		},
@@ -1678,7 +2303,7 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 
 	llm := &inputCapturingLLM{responses: []string{
 		// Turn 1, round 1: plan one task.
-		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["default"]}]}`,
+		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["core_job"]}]}`,
 		// Turn 1: sub-agent observation (carries the marker we assert on later).
 		observationMarker + " was found in the prod logs.",
 		// Turn 1, replan: ask the user which environment.
@@ -1688,12 +2313,6 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		// Turn 2: final response.
 		"Concluded: the prod environment was affected.",
 	}}
-
-	historyRepo := agentarchive.NewMemoryHistoryRepository()
-	peRunner, err := planexecRunnerForTest(llm.client(), historyRepo)
-	gt.NoError(t, err).Required()
-	planexecExec, err := jobagent.NewPlanexecJobExecutor(peRunner)
-	gt.NoError(t, err).Required()
 
 	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
 	registry := model.NewWorkspaceRegistry()
@@ -1719,19 +2338,20 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	})
 
 	poster := &fakeQuestionPoster{returnTS: "FORM-TS-1"}
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
 	runner := job.NewJobRunner(job.RunnerDeps{
 		Repo:              repo,
 		Registry:          registry,
 		LLMClient:         llm.client(),
-		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: planexecExec},
-		HistoryRepo:       historyRepo,
+		Durable:           durable,
 		InteractionPoster: poster,
 		NewRunID:          func() string { return "RUN-1" },
 		NewTraceID:        func() string { return "TRACE-1" },
 		Clock:             func() time.Time { return now },
 	})
+	wireDurableJobRuntime(t, runner, durable, repo, registry, llm.client())
 
-	// --- Turn 1: Run suspends at the question ----------------------------
+	// --- Turn 1: the run suspends at the question ------------------------
 	gt.NoError(t, runner.Run(ctx, j, job.Event{
 		Domain:        model.JobEventDomainCase,
 		WorkspaceID:   wsID,
@@ -1741,11 +2361,15 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		CaseLifecycle: model.CaseLifecycleCreated,
 	})).Required()
 
+	// Run returns once the run is recorded and spawned; the worker takes it from
+	// there, so the suspend is waited for rather than assumed.
 	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
-	suspendedLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
-	gt.NoError(t, err).Required()
-	gt.Value(t, suspendedLog.Stage).Equal(model.JobRunStageAwaitingInput)
+	suspendedLog := awaitRunStage(t, repo, key, "RUN-1", model.JobRunStageAwaitingInput)
 	gt.Value(t, suspendedLog.PendingInteraction).NotNil().Required()
+	// The run parks on an await of the SAME Process, which is what makes the
+	// resume continue one conversation instead of starting a second run.
+	gt.String(t, suspendedLog.AgentProcessID).NotEqual("")
+	gt.String(t, suspendedLog.AgentAwaitKey).NotEqual("")
 	gt.Array(t, poster.posts).Length(1).Required()
 
 	runDoc, err := repo.JobRun().Get(ctx, key)
@@ -1772,10 +2396,12 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	gt.NoError(t, runner.HandleQuestionSubmit(ctx, callback, action)).Required()
 
 	// The run completed under the SAME RunID (no fresh run minted).
-	finalLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
-	gt.NoError(t, err).Required()
-	gt.Value(t, finalLog.Stage).Equal(model.JobRunStageSuccess)
+	finalLog := awaitRunStage(t, repo, key, "RUN-1", model.JobRunStageSuccess)
 	gt.Value(t, finalLog.PendingInteraction).Nil()
+	// The await pointer is dropped when the answer is delivered, so a second
+	// submit of the same form finds nothing to answer instead of responding twice.
+	gt.String(t, finalLog.AgentProcessID).Equal("")
+	gt.String(t, finalLog.AgentAwaitKey).Equal("")
 
 	finalRun, err := repo.JobRun().Get(ctx, key)
 	gt.NoError(t, err).Required()
@@ -1788,38 +2414,59 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 	gt.Number(t, len(poster.updates)).GreaterOrEqual(1)
 
 	// --- The decisive assertions: history continuity --------------------
-	// gollem persists the conversation under HistoryKey, and the JobRunner
-	// sets HistoryKey == RunID for BOTH the initial run and the resume (the
-	// run completed under the same "RUN-1" asserted above), so the resumed
-	// planner loads the same conversation. We verify the Job-level halves of
-	// that contract on the captured planner inputs:
-	//   1. the pre-question sub-agent observation entered the conversation
-	//      (turn-1 replan input), and
-	//   2. the post-question answer is folded into the resumed planner input
-	//      under the same run — proving resume continued the dialogue rather
-	//      than restarting from a blank round-0 plan.
-	gt.Number(t, len(llm.inputs)).GreaterOrEqual(4)
-	gt.Bool(t, strings.Contains(llm.inputs[2], observationMarker)).True()
-	gt.Bool(t, strings.Contains(llm.inputs[3], "User answers")).True()
-	gt.Bool(t, strings.Contains(llm.inputs[3], "prod")).True()
-	// The marker is NOT re-stated in the resumed input — it lives in the
-	// loaded gollem history, not the fresh turn input — confirming the resume
-	// relies on the persisted conversation rather than re-sending observations.
-	gt.Bool(t, strings.Contains(llm.inputs[3], observationMarker)).False()
+	// The answer resumes the SAME Process, so the conversation it continues is
+	// the one the pre-question rounds built. The Job-level halves of that:
+	//   1. the sub-agent's observation reached the planner before the question,
+	//      and
+	//   2. the answer is folded into the resumed planner call, WITHOUT the
+	//      observation being re-sent — it is in the Process's history, not in
+	//      the turn input, which is what distinguishes a resume from a restart.
+	inputs := llm.captured()
+	resumed := -1
+	for i, in := range inputs {
+		if strings.Contains(in, "# User answers") {
+			resumed = i
+			break
+		}
+	}
+	gt.Number(t, resumed).GreaterOrEqual(1).Required()
+	gt.Bool(t, strings.Contains(inputs[resumed], "Answer (select): prod")).True()
+	gt.Bool(t, strings.Contains(inputs[resumed], observationMarker)).False()
+
+	sawMarker := false
+	for _, in := range inputs[:resumed] {
+		if strings.Contains(in, observationMarker) {
+			sawMarker = true
+		}
+	}
+	gt.Bool(t, sawMarker).True()
 }
 
-// planexecRunnerForTest builds a planexec.Runner sharing the given history
-// repository (so the JobRunner and the planner persist into the same store).
-func planexecRunnerForTest(llm gollem.LLMClient, historyRepo gollem.HistoryRepository) (*planexec.Runner, error) {
-	return planexec.NewRunner(planexec.RunnerDeps{
-		LLMClient:   llm,
-		HistoryRepo: historyRepo,
-		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
-		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:  8,
-			SubAgentLoopMax: 20,
-		},
-	})
+// awaitRunStage polls the run log until it reaches want, and returns it. A
+// durable run executes on the worker after Run returns, so a test asserting on
+// its outcome has to wait for it rather than read straight through.
+func awaitRunStage(t *testing.T, repo interfaces.Repository, key model.JobRunKey,
+	runID string, want model.JobRunStage,
+) *model.JobRunLog {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := repo.JobRunLog().Get(ctx, key, runID)
+		gt.NoError(t, err).Required()
+		if got != nil && got.Stage == want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			stage := model.JobRunStage("")
+			if got != nil {
+				stage = got.Stage
+			}
+			gt.Value(t, stage).Equal(want).Required()
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // submitValueFromBlocks pulls the Submit button's value out of a posted

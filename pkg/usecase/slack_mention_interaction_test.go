@@ -38,7 +38,7 @@ func TestHandleCancel_DeletesDraftAndEphemeral(t *testing.T) {
 	repo := memory.New()
 	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 
 	d := model.NewCaseProposal(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-1"
@@ -84,10 +84,9 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	})
 
 	slackMock := newCollectorOnlyMockSlack()
-	// stubPlannerLLM is keyed off the workspace_id baked into the JSON, so
-	// the test fixture must materialize for ws-B (the destination of the
-	// switch).
-	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-B"))))
+	// The scripted turn drafts for ws-B — the destination of the switch.
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
+	bindDraftRuntime(t, uc, repo, registry, newScriptedClient(stubDraftScript("ws-B")), slackMock)
 
 	const channelID = "C-WS"
 	const threadTS = "1700000010.000000"
@@ -132,16 +131,14 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 
 	// One response_url POST for the lock-state UI.
 	gt.Number(t, len(*captured)).GreaterOrEqual(1)
-	// The post-planner preview is rendered via slackService.UpdateMessage
-	// (chat.update against the ephemeral message TS).
-	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
 
-	got, err := repo.CaseProposal().Get(context.Background(), d.ID)
-	gt.NoError(t, err).Required()
-	gt.Value(t, got.SelectedWorkspaceID).Equal("ws-B")
+	got := waitForDraftMaterialization(t, repo, d.ID, "ws-B")
 	gt.Bool(t, got.InferenceInProgress).False()
 	gt.Value(t, got.Materialization).NotNil().Required()
 	gt.Value(t, got.Materialization.Title).Equal("AI suggested title")
+	// The post-turn preview is rendered via slackService.UpdateMessage
+	// (chat.update against the ephemeral message TS).
+	gt.Number(t, len(slackMock.updates())).GreaterOrEqual(1)
 }
 
 // TestHandleEdit_OpensModalWithTriggerID locks the contract that the Edit
@@ -157,7 +154,7 @@ func TestHandleEdit_OpensModalWithTriggerID(t *testing.T) {
 	}}
 	registry := newRegistryWithSchema("ws-edit", "WS Edit", schema)
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit"))))
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 
 	d := model.NewCaseProposal(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-edit"
@@ -200,7 +197,7 @@ func TestHandleSubmit_RecordsReporter(t *testing.T) {
 	seedSlackUsers(t, repo, reporterID)
 	registry := newRegistryWithSchema("ws-submit", "WS Submit", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-submit"))))
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
@@ -246,7 +243,7 @@ func TestHandleEditSubmit_RecordsReporter(t *testing.T) {
 	seedSlackUsers(t, repo, reporterID)
 	registry := newRegistryWithSchema("ws-edit-submit", "WS Edit Submit", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit-submit"))))
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
@@ -303,7 +300,7 @@ func TestHandleSubmit_CarriesIsTest(t *testing.T) {
 	seedSlackUsers(t, repo, reporterID)
 	registry := newRegistryWithSchema("ws-istest", "WS IsTest", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-istest"))))
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
@@ -352,7 +349,7 @@ func TestHandleEditSubmit_TogglesIsTest(t *testing.T) {
 		wsID := "ws-edit-istest"
 		registry := newRegistryWithSchema(wsID, "WS Edit IsTest", &config.FieldSchema{})
 		slackMock := newCollectorOnlyMockSlack()
-		mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON(wsID))))
+		mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		d := model.NewCaseProposal(time.Now().UTC(), reporterID)

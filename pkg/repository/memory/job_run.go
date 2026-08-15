@@ -333,15 +333,29 @@ type jobRunEventKey struct {
 	EventID string
 }
 
+// jobRunSeqKey identifies one run's Sequence counter. It mirrors the Firestore
+// counter document's placement — one per (Run, RunID) — so both backends hand
+// out numbers over the same scope.
+type jobRunSeqKey struct {
+	K     model.JobRunKey
+	RunID string
+}
+
 type jobRunEventRepository struct {
 	mu     sync.Mutex
 	events map[jobRunEventKey]*model.JobRunEvent
+	// eventSeq holds the highest Sequence handed out per run, so AppendNext can
+	// allocate under the same lock that writes the event.
+	eventSeq map[jobRunSeqKey]int64
 }
 
 var _ interfaces.JobRunEventRepository = &jobRunEventRepository{}
 
 func newJobRunEventRepository() *jobRunEventRepository {
-	return &jobRunEventRepository{events: make(map[jobRunEventKey]*model.JobRunEvent)}
+	return &jobRunEventRepository{
+		events:   make(map[jobRunEventKey]*model.JobRunEvent),
+		eventSeq: make(map[jobRunSeqKey]int64),
+	}
 }
 
 func copyJobRunEvent(e *model.JobRunEvent) *model.JobRunEvent {
@@ -402,7 +416,69 @@ func (r *jobRunEventRepository) Append(ctx context.Context, ev *model.JobRunEven
 			goerr.V("event_id", ev.EventID))
 	}
 	r.events[key] = copyJobRunEvent(ev)
+	// A caller-assigned Sequence still moves the allocator's high-water mark, so a
+	// later AppendNext on the same run cannot re-issue a number already used. The
+	// Firestore backend gets the same property by seeding its counter from the
+	// highest stored Sequence.
+	seqKey := jobRunSeqKey{K: key.K, RunID: ev.RunID}
+	if ev.Sequence > r.eventSeq[seqKey] {
+		r.eventSeq[seqKey] = ev.Sequence
+	}
 	return nil
+}
+
+// AppendNext allocates the Sequence under the same lock that writes the event,
+// which is this backend's equivalent of the Firestore transaction: no other
+// appender can observe or reuse the number in between.
+func (r *jobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRunEvent) error {
+	if ev == nil {
+		return goerr.New("job run event is nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	seqKey := jobRunSeqKey{
+		K:     model.JobRunKey{WorkspaceID: ev.WorkspaceID, CaseID: ev.CaseID, JobID: ev.JobID},
+		RunID: ev.RunID,
+	}
+	next := r.eventSeq[seqKey] + 1
+	ev.Sequence = next
+
+	if err := ev.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run event")
+	}
+	key := jobRunEventKey{K: seqKey.K, RunID: ev.RunID, EventID: ev.EventID}
+	if _, ok := r.events[key]; ok {
+		return goerr.Wrap(interfaces.ErrJobRunEventExists, "job run event already exists",
+			goerr.V("run_id", ev.RunID),
+			goerr.V("event_id", ev.EventID))
+	}
+	r.events[key] = copyJobRunEvent(ev)
+	r.eventSeq[seqKey] = next
+	return nil
+}
+
+// LatestLLMResponseSequence returns the highest Sequence among the run's
+// LLM_RESPONSE events, or 0 when it has none.
+func (r *jobRunEventRepository) LatestLLMResponseSequence(_ context.Context, key model.JobRunKey, runID string) (int64, error) {
+	if err := key.Validate(); err != nil {
+		return 0, goerr.Wrap(err, "invalid job run key")
+	}
+	if runID == "" {
+		return 0, goerr.New("run id is empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest int64
+	for k, v := range r.events {
+		if k.K != key || k.RunID != runID {
+			continue
+		}
+		if v.Kind == model.JobRunEventKindLLMResponse && v.Sequence > latest {
+			latest = v.Sequence
+		}
+	}
+	return latest, nil
 }
 
 func (r *jobRunEventRepository) List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error) {

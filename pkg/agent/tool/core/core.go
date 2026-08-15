@@ -116,7 +116,7 @@ func New(deps Deps) []gollem.Tool {
 
 	tools := []gollem.Tool{
 		&listActionsTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
-		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
+		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
 		&createActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, statusSet: statusSet},
 		&updateActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
 		&updateActionStatusTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, statusSet: statusSet},
@@ -150,7 +150,7 @@ func NewForAssist(deps Deps) []gollem.Tool {
 func NewReadOnly(deps Deps) []gollem.Tool {
 	tools := []gollem.Tool{
 		&listActionsTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
-		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
+		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
 	}
 	if deps.ActionStepUC != nil {
 		tools = append(tools, &listActionStepsTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID})

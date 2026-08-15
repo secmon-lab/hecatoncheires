@@ -111,7 +111,7 @@ func (uc *SlackUseCases) handleReactionEvent(ctx context.Context, event *slackev
 // path. Idempotency comes from the existing turn lock plus GetBySlackThread, so
 // no ReactionClaim is needed here.
 func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *model.WorkspaceEntry, reporter, channelID, srcTS string) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -130,9 +130,8 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 		return nil
 	}
 
-	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadRoot, reporter,
+	return uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadRoot, reporter,
 		msgs, nil, "", "", threadRoot, renderReactionCreateInstruction(ctx, anchorTS, permalink)))
-	return err
 }
 
 // reactionCreateCrossChannel handles a reaction placed on a message outside the
@@ -141,7 +140,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 // case summary on completion), and runs the creation dialog in the reactor's
 // source thread while binding the Case to the placeholder thread.
 func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *model.WorkspaceEntry, reporter, srcChannel, srcTS string) error {
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || uc.deps.SlackService == nil || entry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || uc.deps.SlackService == nil || entry == nil {
 		return nil
 	}
 	wsID := entry.Workspace.ID
@@ -178,7 +177,12 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 		return nil
 	}
 
-	st, _ := uc.runThreadCaseCreation(ctx, caseCreateReq{
+	// The run outlives this call. Releasing the reaction claim on a failed
+	// creation — so a future reaction can retry — and replacing the lingering
+	// "Creating a case…" placeholder are the completion handler's job now
+	// (threadcaseHost.ReportFallback), because that is where a failure surfaces.
+	// The Session it reads them from was persisted before the spawn.
+	_ = uc.runThreadCaseCreation(ctx, caseCreateReq{
 		entry:             entry,
 		caseChannel:       dest,
 		caseTS:            rootTS,
@@ -191,15 +195,6 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 		sourceChannel:     srcChannel,
 		sourceTS:          srcTS,
 	})
-	// Release the claim only on a hard failure with no pending question, so a
-	// future reaction can retry. A pending question (StatusQuestion) or a
-	// committed case (StatusCompleted) keeps the claim. On hard failure also
-	// replace the lingering "Creating a case…" placeholder with an honest failure
-	// note so the monitored channel does not imply work is still ongoing.
-	if st == threadcase.StatusFallback {
-		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
-		failMonitoredThreadAnchor(ctx, uc.deps.SlackService, entry, rootTS)
-	}
 	return nil
 }
 

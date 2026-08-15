@@ -214,6 +214,8 @@ func runOne(ctx context.Context, sc *scenario.Scenario, registry *driver.Registr
 	if err != nil {
 		return errorResult(res, err)
 	}
+	// The env owns a running agent worker; without this every scenario leaks one.
+	defer e.Stop()
 
 	d, ok := registry.Lookup(sc.Meta.Workflow)
 	if !ok {

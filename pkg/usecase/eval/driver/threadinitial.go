@@ -60,6 +60,11 @@ func (*ThreadInitial) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario
 		return nil, goerr.Wrap(err, "thread case creation")
 	}
 	async.Wait()
+	// The turn is a durable run: the entry point returned once it was recorded,
+	// and everything inspected below is written by its completion handler.
+	if err := e.AwaitTurn(ctx, channel, runThreadTS, ""); err != nil {
+		return nil, err
+	}
 
 	transcript := []evaltype.TurnRecord{{Turn: 1, Mode: "create", Input: sc.Input.Text}}
 
@@ -93,6 +98,11 @@ func (*ThreadInitial) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario
 			return nil, goerr.Wrap(err, "resume thread case creation")
 		}
 		async.Wait()
+		// Wait for the resumed run to reach its own outcome, not the question this
+		// turn is answering.
+		if err := e.AwaitTurn(ctx, channel, runThreadTS, model.SessionEndedWithQuestion); err != nil {
+			return nil, err
+		}
 
 		transcript = append(transcript, evaltype.TurnRecord{
 			Turn:     turn,

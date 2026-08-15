@@ -6,7 +6,9 @@ import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 )
 
 // TestRequiresActor pins which agents may only run with an identified person
@@ -19,12 +21,20 @@ func TestRequiresActor(t *testing.T) {
 		for _, name := range []agentkit.AgentName{
 			kernel.AgentCaseChannel,
 			kernel.AgentCaseThread,
-			kernel.AgentCaseThreadCreate,
 			kernel.AgentWorkspace,
 			kernel.AgentProposal,
 		} {
 			gt.Bool(t, kernel.RequiresActor(name)).True()
 		}
+	})
+
+	// The thread-mode CREATE turn is the scoped exception: a thread-mode case may
+	// be raised by an integration bot's intake post that names no human, so
+	// demanding an actor would refuse a legitimate creation. It is safe because a
+	// create turn's palette carries no case-reading tool — there is no private case
+	// for the missing actor to widen access to.
+	t.Run("the thread-mode create turn does not", func(t *testing.T) {
+		gt.Bool(t, kernel.RequiresActor(kernel.AgentCaseThreadCreate)).False()
 	})
 
 	// A Job and the assist batch run on a schedule with nobody behind them, so
@@ -74,4 +84,23 @@ func TestValidateSpawn(t *testing.T) {
 		sc.ToolSets = nil
 		gt.Value(t, kernel.ValidateSpawn(kernel.AgentJob, sc)).NotNil()
 	})
+}
+
+// The per-task sub-agent is registered ONCE and shared by every plan-execute
+// host, because agentkit keys a Process on the agent name: a second registration
+// under the same name is an error, and giving each host its own name would mean
+// maintaining a separate tool palette for sub-agents that do the same thing.
+func TestRegisterTaskAgentIsRegisteredOnce(t *testing.T) {
+	reg := agentkit.NewRegistry()
+	cfg := budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8}
+	store := agentarchive.NewMemoryHistoryStore()
+
+	handle, err := kernel.RegisterTaskAgent(reg, cfg.Limiter(), store)
+	gt.NoError(t, err).Required()
+	gt.Value(t, handle.Name()).Equal(kernel.AgentTask)
+
+	// A second registration under the same name is refused rather than silently
+	// replacing the first.
+	_, err = kernel.RegisterTaskAgent(reg, cfg.Limiter(), store)
+	gt.Error(t, err).Required()
 }

@@ -45,7 +45,7 @@ func newTestSlackHandler(
 		Registry: registry,
 		ActionUC: actionUC,
 	})
-	mentionProposalUC := usecase.NewMentionProposalUseCase(repo, registry, slackStub, nil)
+	mentionProposalUC := usecase.NewMentionProposalUseCase(repo, registry, slackStub)
 	if caseUC == nil {
 		caseUC = usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 	}

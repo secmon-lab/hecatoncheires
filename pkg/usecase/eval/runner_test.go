@@ -67,12 +67,13 @@ func materializeLLM() *mock.LLMClientMock {
 			return materializeJSON
 		case strings.Contains(text, "Observations from prior"):
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }
@@ -219,12 +220,13 @@ func questionLLM() *mock.LLMClientMock {
 				return `{"question":{"reason":"What is the severity?","items":[{"id":"q-1","text":"severity?","type":"select","options":["high","low"]}]}}`
 			}
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }
@@ -272,12 +274,13 @@ func badJudgeLLM() *mock.LLMClientMock {
 			return materializeJSON
 		case strings.Contains(text, "Observations from prior"):
 			return replanDoneJSON
-		case strings.Contains(text, "[budget]"):
+		case text == "investigate\n":
+			// The sub-agent task: its user turn is the task description the plan
+			// above set, which is the one input that is exactly that string.
+			return subAgentSummary
+		default:
 			// planner round 1 (creation or mention turn) — emit the plan.
 			return planJSON
-		default:
-			// sub-agent task execution.
-			return subAgentSummary
 		}
 	})
 }
@@ -306,9 +309,13 @@ func TestRun_ScenarioError_ExitsNonZero(t *testing.T) {
 // the judge. Per-session counter sequences the job's two calls; the judge call
 // is routed by the "Artifact snapshot" marker.
 func jobScriptLLM() *mock.LLMClientMock {
+	// Counted across sessions, not per session: the run is a durable Process whose
+	// every transition opens its own gollem session, so a per-session counter would
+	// restart at 1 each time and the model would ask for the same tool for as long
+	// as the step budget allowed.
+	var calls atomic.Int32
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-			var calls atomic.Int32
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					var sb strings.Builder

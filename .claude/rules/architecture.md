@@ -277,53 +277,69 @@ format, so additions there must remain serialisable.
 
 These terms are easy to conflate; they have precise meanings across the
 plan-and-execute agent runtime (`pkg/usecase/agent/...`). Use them
-consistently in code, comments, specs, and reviews. There are three
+consistently in code, comments, specs, and reviews. There are four
 nested levels:
 
-- **Round** — ONE iteration of the planner loop: a single planner /
-  replan LLM call plus the work that round dispatches (the `investigate`
-  phase's sub-agents, a validation/commit re-emit, etc.). This is one
-  iteration of the `for {}` in `planexec.Runner.Run`.
-- **Turn** — ONE `runner.Run` / `RunTurn` invocation: from agent start
-  until it stops to wait for user input or otherwise completes. A turn
-  runs *many rounds*. A turn ends on a terminal outcome:
-  - the planner asks the user (`question` / `OnQuestion` →
-    `QuestionResult{Terminate:true}`) — the turn closes and waits; the
-    user's reply / form-submit starts the **next** turn;
-  - a terminal action commits (e.g. case create / materialize);
-  - fallback (loop budget exhausted, internal error).
-  A turn is NOT a single loop iteration; it spans many rounds.
+- **Transition** — ONE `Strategy.Step` call: exactly one LLM call or one tool
+  call, committed to storage before the next begins. It is the unit the
+  runtime's step budget counts and the unit a claim can die between.
+- **Round** — ONE planner / replan LLM call plus the work it dispatches (the
+  plan's sub-agent tasks, a re-emit after a validation failure). A round spans
+  several transitions.
+- **Turn** — ONE `Spawn` and the Process it creates, from start until the
+  Process reaches a terminal state. A turn runs *many rounds*. It ends on:
+  - the planner asking the user (`question` → `Done(OutputQuestion)`) — the
+    Process closes and the user's reply / form-submit starts the **next** turn;
+  - a terminal output the host applies (e.g. case create / materialize);
+  - failure (budget exhausted, internal error), which the host reports as a
+    fallback.
 - **Task** — the whole effort (e.g. creating one case), possibly spanning
   **multiple turns** separated by `question`s. (No stricter name yet;
   "task" is fine.)
 
-**Why `question` ends the turn (not `Terminate:false`):** holding the
-per-thread turn-lock open while waiting minutes/hours for a Slack submit
-is not viable under horizontal scaling; the pending question is persisted
-(`Session.PendingQuestion`, shared backend) and the answer arrives on a
-fresh dispatched event that starts a **new turn**.
+**Why `question` ends the turn (not `Terminate:false`):** keeping a run live
+while waiting minutes/hours for a Slack submit is not viable under horizontal
+scaling — the thread's subject would stay held, refusing every other trigger.
+The pending question is persisted (`Session.PendingQuestion`, shared backend)
+and the answer arrives on a fresh dispatched event that starts a **new turn**.
+
+**A resumed turn must inherit the asking run's conversation.** Because the answer
+runs as a NEW Process, it starts from an empty history unless the Spawn says
+otherwise — `WithSubject` serialises Processes, it does not link them. So the run
+that asked is recorded on `PendingQuestion.AskedByProcessID`, and the answering
+Spawn passes `WithInheritedHistory`. Without it the agent sees only the answer
+text, with no record of the request it came from, the investigation behind the
+question, or the question itself — which is exactly what the pre-agentkit runtime
+gave it for free, by keying gollem history on the Session.
+
+Pass the option through the host's `inheritOpts` helper, not directly: agentkit
+**refuses** a Spawn naming an issuer that committed no conversation, so passing it
+blindly turns "the asking run recorded nothing" into "the answer fails outright".
+Starting fresh is the correct degradation.
 
 **Entry points & final output.** planexec is a generic plan-execute
 framework — it knows nothing about `case` and performs no side effects
-itself. It exposes three package-level entry functions (NOT `Runner`
-methods, since Go methods cannot be generic):
+itself. It exists ONLY as an agentkit Strategy (`planexec.Register`): the
+in-process `Runner` and its `Run` / `RunText` / `ResumeText` entry functions are
+gone, and every host — `serve`, `tick`, the eval harness — spawns onto the
+runtime.
 
-- `Run[T Validatable](ctx, runner, req)` — structured turn. After the planner
-  finalizes, planexec generates the terminal JSON, decodes it into `T`, calls
-  `T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`;
-  gollem's schema check verifies shape only, so `Validate()` is where domain
-  invariants live). Returns `*RunResult[T]` with the validated value in `.Data`.
-- `RunText(ctx, runner, req)` / `ResumeText(ctx, runner, req)` — plain-text
-  turn / resume. The reply is in `RunResult.Text`.
+The host's terminal-output type is declared as `Config[T]` (`T` constrained by
+`Validatable`), and the reply comes back as `Output[T]` through the completion
+handler. planexec generates the terminal JSON, decodes it into `T`, calls
+`T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`;
+gollem's schema check verifies shape only, so `Validate()` is where domain
+invariants live). Plain-text hosts set `Config[T]{TextOnly: true}` with
+`T = TextResult`.
 
 Side effects (closing a case, posting a message, persisting the entity, …) are
 performed either by the **sub-agents' tools inside the loop** or by the host
-**after** the turn from the returned `*T` — never by planexec itself, and never
-inside the loop as a commit hook. The old `RunRequest.OnFinalize` /
-`FinalOutputSchema` commit hooks are gone.
+**after** the turn, from `onFinish` — never by planexec itself, and never inside
+the loop as a commit hook. That rule is now enforced by the fact that the loop
+and the handler are different processes.
 
-`Run[T]` does accept optional `finalizers ...func(*T) error` that run after
-`T.Validate()` inside the final-output regeneration loop, but they are
+`Config[T].Finalizers` run after `T.Validate()` inside the final-output
+regeneration loop, but they are
 **validation-only and side-effect-free**: they let a host enforce an invariant
 that needs context `T.Validate()` cannot see (e.g. a workspace field schema), and
 a returned error is fed back to the model and the output regenerated. This is how
@@ -341,14 +357,13 @@ replan round (the old "empty tasks = done" implicit termination is gone, so a
 planner that merely forgot to emit tasks can no longer silently terminate).
 
 **Direct mode (round-1 fast path).** When the host sets
-`RunRequest.AllowDirect`, the planner may answer a *genuinely trivial*
+`Input.AllowDirect`, the planner may answer a *genuinely trivial*
 request on round 1 without any investigation: instead of `tasks` it emits a
-`direct` payload (an optional tool-id subset), and the runtime replies in a
-single tool-enabled ReAct loop, returning plain text in `RunResult.Text`
-with `RunResult.Direct == true`. It is strictly a fast path for
-respond-style replies: even a `Run[T]` turn returns `.Text` (not `.Data`) on
-the direct path, because side-effecting terminal actions are by definition not
-"trivial" and must go through the normal `tasks` → replan → `finalize` loop.
+`direct` payload (an optional tool-id subset), and the runtime replies through a
+single ReAct child, returning plain text. It is strictly a fast path for
+respond-style replies: even a structured host's turn returns text (not a decoded
+`T`) on the direct path, because side-effecting terminal actions are by definition
+not "trivial" and must go through the normal `tasks` → replan → `finalize` loop.
 Hosts opt in (`threadcase` enables it for mention mode but disables it for
 `ModeCreate`; `job` enables it; structured-only hosts leave it off). The
 planner prompt guards it hard: "when in any doubt, investigate."
@@ -394,21 +409,34 @@ The same "wire it into every agent" discipline applies to the host's
 per-event trace handler, not just tools. The shared handler lives in
 `pkg/agent/runtrace` (`runtrace.Handler`), which turns gollem LLM / tool
 call boundaries into the `JobRunEvent` records the run-detail UI reads.
-A host that wants a per-call timeline supplies it via
-`planexec.RunRequest.TraceHandler`. planexec combines it (`combineTrace`
-→ `trace.Multi`) with each agent's own trace sink and wires the result
-into **every** agent the run drives — the planner, each parallel
-sub-agent, the direct reply, and the final synthesis. Wiring it into only
-some agents silently drops the rest from the timeline.
 
-This is exactly how the `planexec`-Job empty-timeline bug happened: the
-handler was built by `JobRunner.Run` and handed to the executor, but the
-planexec executor never forwarded it, and planexec drove its agents with
-only the separate archive recorder. The run succeeded, the system prompt
-showed (it is stored on `JobRunLog` before execution), and the timeline
-stayed empty. `simple` Jobs were unaffected because the single-loop
-executor wires the handler directly via `gollem.WithTrace`. When you add
-a new agent execution to planexec, wire the host handler into it too.
+On the durable runtime no host wires it per agent: the **claim middleware**
+(`runTimeline` in `pkg/agent/kernel/middleware.go`) installs one for every claim
+of every Process, parent and child alike, alongside the Cloud Storage archive
+sink (combined via `trace.Multi`). That is what makes coverage automatic — a new
+agent, or a new kind of transition, lands on the timeline without anyone
+remembering to pass a handler down.
+
+Two properties this relies on, which a change here must preserve:
+
+- **The timeline is keyed on the Scope, not the handler.** A run gets one only
+  when its Scope names workspace, case, job and job-run id. A run that keeps no
+  run record leaves the archive as its only trace — the intended outcome, not a
+  gap.
+- **`Sequence` is allocated by the repository inside each write**
+  (`JobRunEventRepository.AppendNext`), so the several Handlers a run accumulates
+  — this claim's, a later claim's on another instance, the run owner's
+  `RUN_ERROR` — append into one ordered timeline with nothing shared between
+  them. Never reintroduce an in-process counter; it would hand the same number
+  out twice.
+
+Every production path now goes through the middleware — `tick` included, since it
+spawns onto the same runtime and drives the worker itself. The in-process Job
+executor still wires the handler directly via `gollem.WithTrace`, but nothing in
+production reaches it any more (only the eval harness and tests). The bug that
+produced this rule was a `planexec` Job whose executor never forwarded the handler
+it was given, so the run succeeded with an empty timeline. Under the middleware that
+failure mode no longer has a place to hide.
 
 ### Mention-triggered runs on the case agent page
 
@@ -449,17 +477,11 @@ Rules for this path:
   row), and the usage totals come from the Process, because the run's
   transitions span claims and possibly instances and no single in-process
   handler sees them all.
-- Keep the existing durable trace sink. `casebound` no longer wires one itself:
-  the agentkit claim middleware opens a Cloud Storage trace per **claim**
-  (`pkg/agent/kernel/middleware.go`), keyed on the Process id rather than the
-  Slack session id. `threadcase` still passes its handler via
-  `planexec.RunRequest.TraceHandler`. Do not replace the archive trace.
-- **The per-call `JobRunEvent` timeline is NOT yet wired for agentkit-hosted
-  runs.** It needs one sequence allocator per run that survives a run moving
-  between instances, which an in-process `runtrace.Sequencer` cannot be. Until
-  that lands, an agentkit-hosted mention run records its `JobRunLog` totals but
-  no per-call events. Do not wire a per-claim Sequencer as a stopgap — it would
-  issue the same sequence number twice.
+- Keep the existing durable trace sink. No durable host wires one itself: the
+  claim middleware (`pkg/agent/kernel/middleware.go`) opens a Cloud Storage trace
+  per **claim**, keyed on the Process id rather than the Slack session id, and
+  installs the `JobRunEvent` timeline beside it. See § "Trace handler wiring"
+  above for what that guarantees. Do not replace the archive trace.
 - `ModeCreate` (creation-time materialize) is excluded — the requirement is
   post-creation mentions.
 - Trace recording is observability: `Open`/`Finish`/event failures are
@@ -487,31 +509,186 @@ contract, not a Serve-option tweak.
 The same reasoning is why a new side-effecting tool must not be written assuming
 "it runs at most once".
 
+## Agent runtime: the completion handler is best-effort (KNOWN GAP)
+
+agentkit calls `WithOnFinish` once, after the terminal transition has committed,
+and does not retry it (ADR-0014). A process that dies between the commit and the
+call loses whatever the handler was going to do. Every durable host's outward
+work is in that handler: the Slack reply, the case creation, the run-log close.
+
+For a REPLY this is parity, not a regression — the pre-agentkit runtime posted
+in-process, so the same crash lost the same reply.
+
+For a JOB it is a real, if narrow, widening. `runtrace.FinishRun` is what calls
+`JobRun.RecordRun`, which advances `LastRunAt` and materialises the summary the
+case agent page lists. Lose the handler and the run log stays RUNNING, the
+summary keeps its previous timestamp, and the scheduler treats the Job as still
+due — so a run whose work actually completed can be run again. The pre-agentkit
+path had the same outcome for a crash DURING the run; what is new is the sliver
+between "the agent finished" and "the record says so".
+
+Closing it needs the terminal transition and the record of what to do next to
+commit together — an outbox row written in the same commit, drained by a worker,
+keyed on `(ProcessID, operation)` so a redelivery is a no-op. That is the
+"outbox-backed delivery" item, and it is NOT done. Until it is:
+
+- **Do not add a new side effect to a completion handler and call it durable.**
+  It is best-effort, exactly like the reply beside it.
+- **Do not treat `NoDuplicateSideEffects()` as covering this.** That option bounds
+  unclean reclaims of a transition; it says nothing about the handler that runs
+  after the transition committed.
+
+## Agent runtime: the subject is free before the handler finishes (KNOWN GAP)
+
+A Process holds its subject only while it is open. agentkit releases it at the
+terminal commit and calls the completion handler *after*
+(`fireFinish`, worker.go) — and `FindOpenProcessBySubject`, which is what makes a
+second `Spawn` report busy, matches pending/running/waiting only.
+
+So "one live run per thread" is exact for the RUN, and not exact for the run's
+outward work: from the terminal commit until the handler returns, a new trigger on
+the same thread can Spawn successfully while the previous turn is still applying
+its case update, its Slack post, and its Session write. Two consequences:
+
+- The new turn may read a Case or Session the previous handler has not written yet.
+
+This is NOT the best-effort-handler gap above: no crash is involved.
+
+The **clobbering** half of it is closed: no path that runs before or after a turn
+writes the whole Session document any more. Two things follow for anyone changing
+this area:
+
+- **Every Session write around a turn is field-scoped, never a `Session.Put`.**
+  That covers both sides — the spawning call and the completion handler — because
+  either can be running while the other writes the same row. The repository
+  operations are `AdvanceLastMention` (monotonic), `AssociateProposal`,
+  `StampLastAction`, `SetPendingQuestion` and `BindCase`; add another one rather
+  than reaching for `Put`. A full write there is a bug even though it looks like it
+  happens "before" or "after" the run.
+  The single exception is `persistCreateSession`, the create flow's FIRST write:
+  the row may not exist yet, so a field-scoped update has nothing to update. Its
+  residual risk is recorded at the function.
+- **Nothing a completion handler needs may be read back from mutable shared
+  state.** The handler runs after the turn, and by then the thread may point
+  somewhere else. Anything that identifies what THIS run was working on travels on
+  the run, in `Scope` — `Scope.ProposalID` is the worked example: reading the
+  Session's `ProposalID` instead let one turn's draft receive another turn's
+  result. Corollary: a value that identifies the run's target must be written to
+  shared state only AFTER the Spawn is accepted, or a refused turn leaves the
+  thread pointing at work nobody is doing.
+- **Closing the REST of the gap means the outward work runs under the subject** — as
+  a final durable transition, or as a child Process the subject still covers — not
+  by adding locks around the handler. Narrow writes stop one turn from erasing
+  another's record; they do not stop a new turn from reading state the previous
+  handler has not written yet. Until that is done, do not describe the thread as
+  serialised end to end.
+
+## Agent runtime: a parallel tool-call turn is answered in ONE call (NON-NEGOTIABLE)
+
+A model turn holding N function calls must be answered by a SINGLE turn holding N
+function responses. Gemini rejects the request outright otherwise — "Please ensure
+that the number of function response parts is equal to the number of function call
+parts of the function call turn" — and once the conversation holds the wrong shape
+every later call in the run is rejected, so the turn dies with no answer.
+
+The obvious implementation violates this. `agentkit.Session().CallTool` appends
+each result to the conversation as its own message (`session.go`), and gollem's
+Gemini adapter maps one message to one turn (`llm/gemini/convert_message.go`,
+`convertMessagesToGemini` — it does not coalesce consecutive tool messages). So a
+Strategy that answers a parallel call turn one result at a time splits the one
+required turn into N. The pre-agentkit loop never hit this because it passed all
+results into one `Generate`, which gollem packs into one turn.
+
+Both Strategies therefore do the same thing, and a new one must too:
+
+- Run each call through the **primitive** `Syscalls.CallTool`, which executes the
+  tool (Limit, Metrics and trace unchanged — the session's CallTool calls it
+  internally) without touching the conversation.
+- Hold the results on the checkpointed state as `toolcall.Response`
+  (`pkg/agent/toolcall`), which survives the JSON round trip a checkpoint makes.
+  A FAILED tool is held too: the call still has to be answered, and the failure is
+  what the model reacts to.
+- Report all of them as the inputs of the next `Generate`, then clear them —
+  **after** that call succeeded, since a failed transition is retried from the
+  checkpoint and dropping them earlier leaves its calls unanswered forever.
+
+This does not change the transition split: one transition is still one LLM call or
+one tool call. What changes is only where the result is kept until it is reported.
+
+Pinned by `TestParallelToolResultsAreReportedInOneTurn` (react) and
+`TestParallelPlannerToolCallsAreAnsweredInOneTurn` (planexec).
+
+**Two consequences, both learnt from live rejections.** Both surface as the same
+unhelpful message — "Requests ending with a model turn are not supported" — and
+both repeat on every retry, so a run that hits either produces nothing.
+
+1. **A turn carrying function responses carries NOTHING ELSE.** Mixing text into it
+   makes the provider stop recognising it as the answer to the model's call, so it
+   reports the request as ending on the model turn. Whatever text was waiting keeps
+   waiting; an instruction that must reach the model NOW goes in the system prompt
+   for that call, which is rebuilt per call from the state. That is where planexec's
+   tool-allowance notice and react's budget notice live — the notices fire exactly
+   when a turn is likely to be reporting results, which is why they cannot be
+   inputs.
+2. **A call must never send an empty input.** gollem appends no user content for
+   one (`llm/gemini/client.go`, `len(parts) > 0`), so the request ends on the
+   previous model turn. "Send nothing and continue from the conversation" was safe
+   while results lived in the conversation and is not any more: planexec's
+   `plannerInput` and react's `stepGenerate` send a short continuation instead.
+
+Pinned by `TestAPlanningCallSendsOneWellFormedTurn`,
+`TestTheToolAllowanceIsToldInTheSystemPrompt` (planexec) and
+`TestBudgetNoticeReachesTheModel` (react).
+
 ## Budget
 
-The budget model is the combination of **two** controls — there is NO
-running "total sub-agent task count" across a turn:
+The budget is **per Process**, enforced by the runtime rather than counted by
+each host. `budget.Config` (`pkg/agent/budget`) declares four numbers and turns
+them into an `agentkit.Limiter` the Kernel consults before every transition:
 
-1. **Round-count limit** — `PlannerLoopMax` bounds the **number of rounds
-   in a turn** (`budget.canPlannerCall()`). Planner / replan output that fails
-   validation is retried within this same pool. (Final-output regeneration in
-   `Run[T]` — decode/`Validate()` retries — is bounded separately by
-   `finalOutputMaxRetry` and does NOT consume planner rounds.) This is the main
-   loop guard.
-2. **Per-sub-agent budget** — `SubAgentLoopMax` is the inner gollem loop
-   limit granted **fresh to every sub-agent** (so the sub-agent budget
-   naturally recovers per round).
+- `MaxSteps` — committed transitions. It is the successor of the old
+  `PlannerLoopMax`, but it counts transitions, not planner rounds: one LLM call
+  or one tool call is one step.
+- `MaxInputTokens` / `MaxOutputTokens` — the two token counts read off
+  `Process.Metrics`, so they accumulate across claims and instances.
+- `NoticeRatio` — the fraction of any ceiling at which the Strategy is *told* it
+  is close, so it can wrap up instead of being cut off.
 
-Per-round fan-out is already bounded by plan validation (≤ 5 tasks per
-phase), so total sub-agent work is naturally bounded by
-`PlannerLoopMax × (≤5) × SubAgentLoopMax` without a separate total cap.
+Three consequences to keep in mind:
 
-- **Do NOT reintroduce a per-turn total sub-agent count.** The legacy
-  `SubAgentMaxPerTurn` / `subAgentUsed` accumulator is being retired —
-  the round-count limit plus the per-sub-agent budget are the only knobs.
-- `PlannerLoopMax` is a loop bound, NOT "the budget". When someone says
-  "the budget" in this runtime they mean the sub-agent (investigation)
-  budget, which recovers per round.
+- **A ceiling produces `LimitKindStop`, the notice threshold produces
+  `LimitKindNotice`, and Stop wins when both apply.** A Strategy that observes a
+  notice is expected to skip further fan-out and head for its terminal output;
+  planexec does exactly that. The notice reaches the model through the SYSTEM
+  prompt, never as an input — see § "a parallel tool-call turn is answered in ONE
+  call" for why a turn reporting tool results can carry nothing else.
+- **A sub-agent's spend is charged to its parent as well as to itself.** A child
+  gets its own Process and its own ceiling (the Task tier of
+  `agentkernel.Budgets`), AND agentkit folds the finished child's whole `Metrics`
+  into the parent at the child's terminal commit (`worker.go`, `reportToParent`:
+  `pClone.Metrics = pClone.Metrics.add(child.Metrics)`). So the ROOT ceiling bounds
+  the **entire subtree**, not the planner's own transitions.
 
-`newBudget(BudgetConfig)` is constructed once per `runner.Run` (per
-turn); crossing a `question` boundary starts a fresh turn.
+  Two things follow, and both have already bitten:
+
+  - **A root ceiling must be sized to cover every child a turn can spawn.** Plan
+    validation allows up to 5 tasks per round and a turn may run several rounds,
+    so a root ceiling near a single task's ceiling means the run dies of its
+    children's spend with the planner barely started.
+  - **The ceiling is crossed in jumps, not one step at a time.** The fold lands in
+    a single write when the child finishes, so the parent can go from well under
+    the ceiling to far past it between two of its own transitions. The
+    per-transition `Limit` check (`worker.go`, `driveClaim` → `callLimit`) cannot
+    prevent that; it only reports it afterwards. A "step budget exhausted (122/64)"
+    is not a bug in the accounting — it is this fold.
+
+  Pinned by `TestAChildsStepsAreChargedToItsParent` and
+  `TestAParentIsStoppedByItsChildrensSpend` in
+  `pkg/usecase/agent/planexec/strategy_test.go`. There is no per-turn total
+  sub-agent count and none should be reintroduced: the root ceiling IS that bound.
+- **The budget spans the whole task, not one turn.** Because the counters live on
+  the Process, a run resumed after a question continues against the same
+  ceilings; a fresh trigger spawns a fresh Process with fresh ones.
+
+Per-round fan-out is separately bounded by plan validation (≤ 5 tasks per
+phase).

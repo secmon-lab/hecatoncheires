@@ -61,13 +61,17 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 		registry := workspaceChannelRegistry()
 		slackMock := &agentTestSlackService{}
 
+		llm := wsMentionScript("Here is the direct reply.")
 		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 			Repo:         repo,
 			Registry:     registry,
-			LLM:          wsMentionScript("Here is the direct reply."),
+			LLM:          llm,
 			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
 			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 			SlackService: slackMock,
+		})
+		startAgentRuntime(t, agentRuntimeDeps{
+			UC: agentUC, Repo: repo, Registry: registry, LLM: llm,
 		})
 
 		entry, err := registry.Get("ws-1")
@@ -90,16 +94,19 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 
 		gt.NoError(t, agentUC.HandleWorkspaceAgentMention(ctx, msg, entry)).Required()
 
-		// Two Slack posts: the trace banner (planner round announced via
-		// Sink.PlanProposed → Handler.TraceAppend) and the final reply.
-		gt.Array(t, slackMock.postedMessages).Length(2).Required()
-		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C-WORKSPACE")
-		gt.Value(t, slackMock.postedMessages[0].ThreadTS).Equal(mentionTS)
-		gt.String(t, slackMock.postedMessages[0].Text).Contains("answering directly")
+		// Two NEW Slack messages: the run's progress message, then the answer. The
+		// answer arrives from the worker, so it is waited for — HandleWorkspaceAgentMention
+		// returns as soon as the run is recorded. Later progress milestones update
+		// the first message in place rather than posting again.
+		posts := waitForPosts(t, slackMock, 2)
+		gt.Array(t, posts).Length(2).Required()
+		gt.Value(t, posts[0].ChannelID).Equal("C-WORKSPACE")
+		gt.Value(t, posts[0].ThreadTS).Equal(mentionTS)
+		gt.String(t, posts[0].Text).Contains("Planning")
 
-		gt.Value(t, slackMock.postedMessages[1].ChannelID).Equal("C-WORKSPACE")
-		gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal(mentionTS)
-		gt.Value(t, slackMock.postedMessages[1].Text).Equal("Here is the direct reply.")
+		gt.Value(t, posts[1].ChannelID).Equal("C-WORKSPACE")
+		gt.Value(t, posts[1].ThreadTS).Equal(mentionTS)
+		gt.Value(t, posts[1].Text).Equal("Here is the direct reply.")
 	})
 
 	t.Run("threaded mention replies in the same thread", func(t *testing.T) {
@@ -108,13 +115,17 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 		registry := workspaceChannelRegistry()
 		slackMock := &agentTestSlackService{}
 
+		llm := wsMentionScript("Reply in thread.")
 		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 			Repo:         repo,
 			Registry:     registry,
-			LLM:          wsMentionScript("Reply in thread."),
+			LLM:          llm,
 			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
 			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 			SlackService: slackMock,
+		})
+		startAgentRuntime(t, agentRuntimeDeps{
+			UC: agentUC, Repo: repo, Registry: registry, LLM: llm,
 		})
 
 		entry, err := registry.Get("ws-1")
@@ -136,10 +147,11 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 
 		gt.NoError(t, agentUC.HandleWorkspaceAgentMention(ctx, msg, entry)).Required()
 
-		gt.Array(t, slackMock.postedMessages).Length(2).Required()
-		gt.Value(t, slackMock.postedMessages[0].ThreadTS).Equal(threadTS)
-		gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal(threadTS)
-		gt.Value(t, slackMock.postedMessages[1].Text).Equal("Reply in thread.")
+		posts := waitForPosts(t, slackMock, 2)
+		gt.Array(t, posts).Length(2).Required()
+		gt.Value(t, posts[0].ThreadTS).Equal(threadTS)
+		gt.Value(t, posts[1].ThreadTS).Equal(threadTS)
+		gt.Value(t, posts[1].Text).Equal("Reply in thread.")
 
 		// The case-less session is bound to the thread, not to any case.
 		ssn, err := repo.Session().GetByThread(ctx, "C-WORKSPACE", threadTS)
@@ -161,13 +173,17 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 		registry := threadWorkspaceAgentRegistry()
 		slackMock := &agentTestSlackService{}
 
+		llm := wsMentionScript("Nothing is on fire.")
 		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 			Repo:         repo,
 			Registry:     registry,
-			LLM:          wsMentionScript("Nothing is on fire."),
+			LLM:          llm,
 			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
 			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 			SlackService: slackMock,
+		})
+		startAgentRuntime(t, agentRuntimeDeps{
+			UC: agentUC, Repo: repo, Registry: registry, LLM: llm,
 		})
 
 		entry, err := registry.Get("ws-1")
@@ -181,10 +197,11 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 
 		gt.NoError(t, agentUC.HandleWorkspaceAgentMention(ctx, msg, entry)).Required()
 
-		gt.Array(t, slackMock.postedMessages).Length(2).Required()
-		gt.Value(t, slackMock.postedMessages[1].ChannelID).Equal("C-CASES")
-		gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal(mentionTS)
-		gt.Value(t, slackMock.postedMessages[1].Text).Equal("Nothing is on fire.")
+		posts := waitForPosts(t, slackMock, 2)
+		gt.Array(t, posts).Length(2).Required()
+		gt.Value(t, posts[1].ChannelID).Equal("C-CASES")
+		gt.Value(t, posts[1].ThreadTS).Equal(mentionTS)
+		gt.Value(t, posts[1].Text).Equal("Nothing is on fire.")
 
 		ssn, err := repo.Session().GetByThread(ctx, "C-CASES", mentionTS)
 		gt.NoError(t, err).Required()
@@ -253,52 +270,48 @@ func TestAgentUseCase_HandleWorkspaceAgentMention(t *testing.T) {
 		gt.Value(t, ssn.Kind).Equal(model.SessionKindCase)
 	})
 
-	// The claim has to land before the agent does any work, so a mention arriving
-	// in the same thread a moment later already sees an owned thread. Asserting
-	// it only after RunTurn would pass even if the Session were written last.
-	t.Run("thread is claimed before the agent posts anything", func(t *testing.T) {
+	// The claim has to land before the run exists, so a mention arriving in the
+	// same thread a moment later already sees an owned thread.
+	//
+	// The worker is deliberately NOT started here: with nothing to claim the run,
+	// the only thing that can have written the Session by the time the handler
+	// returns is the handler itself. That makes the assertion exact rather than a
+	// race against the agent.
+	t.Run("thread is claimed before the run is spawned", func(t *testing.T) {
 		repo := memory.New()
 		ctx := context.Background()
 		registry := threadWorkspaceAgentRegistry()
-
-		const mentionTS = "1700300060.000001"
-		var kindAtFirstPost model.SessionKind
-		var sessionExistedAtFirstPost bool
-		firstPostSeen := false
 		slackMock := &agentTestSlackService{}
-		// The first thread post is the progress trace, which the handler emits
-		// after the claim. Sample the stored Session exactly then.
-		slackMock.postThreadReplyFn = func(_ context.Context, channelID, threadTS, _ string) (string, error) {
-			if !firstPostSeen {
-				firstPostSeen = true
-				if ssn, err := repo.Session().GetByThread(ctx, channelID, threadTS); err == nil && ssn != nil {
-					sessionExistedAtFirstPost = true
-					kindAtFirstPost = ssn.Kind
-				}
-			}
-			return "1700300060.trace01", nil
-		}
 
+		llm := wsMentionScript("Claimed already.")
 		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 			Repo:         repo,
 			Registry:     registry,
-			LLM:          wsMentionScript("Claimed already."),
+			LLM:          llm,
 			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
 			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
 			SlackService: slackMock,
+		})
+		_ = bindAgentRuntimeWithoutWorker(t, agentRuntimeDeps{
+			UC: agentUC, Repo: repo, Registry: registry, LLM: llm,
 		})
 
 		entry, err := registry.Get("ws-1")
 		gt.NoError(t, err).Required()
 
+		const mentionTS = "1700300060.000001"
 		msg := slackmodel.NewMessageFromData(
 			mentionTS, "C-CASES", "", "T1", "U-ASKER", "alice",
 			"@bot anything on fire?", mentionTS, time.Now(), nil,
 		)
 		gt.NoError(t, agentUC.HandleWorkspaceAgentMention(ctx, msg, entry)).Required()
 
-		gt.Bool(t, sessionExistedAtFirstPost).True().Required()
-		gt.Value(t, kindAtFirstPost).Equal(model.SessionKindWorkspaceAgent)
+		ssn, err := repo.Session().GetByThread(ctx, "C-CASES", mentionTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.Kind).Equal(model.SessionKindWorkspaceAgent)
+		// And nothing was said to the user before the thread was owned.
+		gt.Array(t, slackMock.postedMessages).Length(0)
 	})
 
 	t.Run("bot's own mention is skipped: no LLM call, no Slack post", func(t *testing.T) {

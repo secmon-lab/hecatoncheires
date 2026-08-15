@@ -170,7 +170,7 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
-	if uc.threadcase == nil || uc.deps.CaseUC == nil || uc.deps.Registry == nil {
+	if !uc.threadCaseReady() || uc.deps.CaseUC == nil || uc.deps.Registry == nil {
 		return nil
 	}
 	ctx = contextWithSlackUserLang(ctx, uc.deps.SlackService, callback.User.ID)
@@ -237,19 +237,24 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 
 	// Clear the pending question before resuming so a duplicate submit lands on
-	// the stale path instead of re-running the agent.
+	// the stale path instead of re-running the agent. The run that asked is read out
+	// first: the resume inherits its conversation, and clearing drops the record.
 	answerText := formatDraftQuestionAnswers(pq, answers)
+	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
-	if err := uc.deps.Repo.Session().Put(ctx, session); err != nil {
+	// One field, not a Put: this is the spawning side of the resumed turn, and the
+	// previous turn's completion handler may still be writing the same row.
+	if err := uc.deps.Repo.Session().SetPendingQuestion(ctx,
+		session.ChannelID, session.ThreadTS, nil); err != nil {
 		errutil.Handle(ctx, err, "clear thread PendingQuestion before resuming")
 	}
 
 	// Resume the create agent with the structured answers as the latest input.
 	// The dialog (trace / any follow-up question / completion link) surfaces in
 	// the UI thread; the Case stays bound to the case thread. createInstruction
-	// is empty on resume — the seed context already lives in the gollem history
-	// keyed on the session.
-	_, err = uc.runThreadCaseCreation(ctx, caseCreateReq{
+	// is empty on resume: the seed context comes from the asking run's conversation,
+	// which inheritFrom carries into this turn.
+	return uc.runThreadCaseCreation(ctx, caseCreateReq{
 		entry:       entry,
 		caseChannel: caseChannel,
 		caseTS:      caseTS,
@@ -259,8 +264,8 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 		mentionText: answerText,
 		mentionTS:   messageTS,
 		triggerTS:   messageTS,
+		inheritFrom: askedBy,
 	})
-	return err
 }
 
 // repostThreadQuestionWithError re-renders the form with a banner listing the

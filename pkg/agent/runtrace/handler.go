@@ -29,40 +29,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-// Sequencer hands out monotonically increasing JobRunEvent.Sequence values
-// for a single run. The run's owner shares the SAME pointer with the Handler
-// so that RUN_ERROR appends emitted by the owner and per-call appends emitted
-// by the handler never collide on Sequence.
-type Sequencer struct {
-	mu   sync.Mutex
-	next int64
-}
-
-// NewSequencer returns a sequencer whose first Next() returns 1.
-func NewSequencer() *Sequencer {
-	return &Sequencer{next: 1}
-}
-
-// NewSequencerStartingAt returns a sequencer whose first Next() returns start.
-// Used when resuming a suspended run so the resumed turn's events continue
-// past the suspended turn's events (which share the same RunID event space)
-// instead of colliding on Sequence.
-func NewSequencerStartingAt(start int64) *Sequencer {
-	if start < 1 {
-		start = 1
-	}
-	return &Sequencer{next: start}
-}
-
-// Next returns the next Sequence and advances the counter.
-func (s *Sequencer) Next() int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v := s.next
-	s.next++
-	return v
-}
-
 // Routing carries the immutable identifiers stamped on every JobRunEvent
 // emitted by a Handler instance. Captured at construction time so individual
 // hook calls do not need to thread them through.
@@ -92,13 +58,15 @@ type handlerSpan struct {
 
 // Handler is a gollem trace.Handler that appends one JobRunEvent per LLM call
 // (LLM_REQUEST + LLM_RESPONSE) and one per tool execution (TOOL_CALL). It is
-// wired once per run via gollem.WithTrace(handler) (or planexec's
-// RunRequest.TraceHandler) and shares its Sequence allocator with the run's
-// owner so that RUN_ERROR emits ordering-consistent with the per-call events.
+// wired once per run via gollem.WithTrace(handler).
+//
+// Sequence numbers are allocated by the repository inside each write, not by the
+// Handler. That is what lets several Handlers — a resumed turn's, another
+// instance's claim of the same durable run, and the run owner's own RUN_ERROR —
+// append to one timeline without agreeing on a counter first.
 type Handler struct {
 	eventRepo interfaces.JobRunEventRepository
 	routing   Routing
-	seq       *Sequencer
 	clock     func() time.Time
 	truncator payloadTruncator
 
@@ -183,14 +151,10 @@ var _ trace.Handler = (*Handler)(nil)
 func NewHandler(
 	eventRepo interfaces.JobRunEventRepository,
 	routing Routing,
-	seq *Sequencer,
 	clock func() time.Time,
 ) *Handler {
 	if eventRepo == nil {
 		panic("runtrace.Handler: eventRepo is nil")
-	}
-	if seq == nil {
-		panic("runtrace.Handler: seq is nil")
 	}
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
@@ -198,7 +162,6 @@ func NewHandler(
 	return &Handler{
 		eventRepo: eventRepo,
 		routing:   routing,
-		seq:       seq,
 		clock:     clock,
 		truncator: defaultPayloadTruncator{},
 		phase:     phaseExecute,
@@ -364,7 +327,7 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 
 	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
 	h.mu.Lock()
-	ev.ParentSequence = h.lastLLMResponseSeq
+	ev.ParentSequence = h.parentSequenceLocked(ctx)
 	// Counted here rather than at Start so a tool that never returned (the
 	// process died mid-execution) is not billed as a completed step.
 	h.totals.ToolCalls++
@@ -374,6 +337,49 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 
 	ev.ToolCall = h.truncator.ToolCallFromTrace(toolName, args, result, err, startedAt, endedAt)
 	h.append(ctx, ev)
+}
+
+// parentSequenceLocked returns the Sequence of the LLM_RESPONSE this tool call
+// carries out. The caller MUST hold h.mu.
+//
+// A durable run's LLM call and the tool calls it asked for are separate
+// checkpointed transitions, so a claim can start between them — and this Handler,
+// built for that claim, never saw the response. Reading it back from the run is
+// what keeps the parent link intact across that boundary; without it the event
+// would carry ParentSequence 0, which JobRunEvent.Validate rejects, and the tool
+// call would be dropped from the timeline instead of merely being unlinked.
+//
+// The lookup happens at most once per claim, because the answer is then cached in
+// lastLLMResponseSeq and every later response overwrites it locally.
+//
+// Under a gollem mock LLM it returns 0 and the TOOL_CALL append is then rejected
+// by JobRunEvent.Validate, which shows up in test output as a non-fatal
+// "ToolCall must reference a parent LLMResponse" report. That is a property of the
+// mock, not a defect: gollem emits its LLM-call trace hooks from the provider
+// client packages only, so no LLM_RESPONSE is ever recorded for a mocked call and
+// there is nothing for the tool call to point at. It cannot happen against a real
+// provider.
+func (h *Handler) parentSequenceLocked(ctx context.Context) int64 {
+	if h.lastLLMResponseSeq != 0 {
+		return h.lastLLMResponseSeq
+	}
+	seq, err := h.eventRepo.LatestLLMResponseSequence(ctx,
+		model.JobRunKey{
+			WorkspaceID: h.routing.WorkspaceID,
+			CaseID:      h.routing.CaseID,
+			JobID:       h.routing.JobID,
+		}, h.routing.RunID)
+	if err != nil {
+		// Non-fatal, like every other trace failure: report it and leave the
+		// parent unset. The append that follows will be rejected and reported in
+		// turn, which is the honest outcome — a tool call whose parent cannot be
+		// established is not something to invent a link for.
+		errutil.Handle(ctx, goerr.Wrap(err, "look up the parent llm response",
+			goerr.V("run_id", h.routing.RunID)), "runtrace: resolve tool call parent")
+		return 0
+	}
+	h.lastLLMResponseSeq = seq
+	return seq
 }
 
 // addToolStatsLocked folds one execution into the per-tool tally. The caller
@@ -474,26 +480,32 @@ func (h *Handler) EnterReflectionPhase() {
 	h.mu.Unlock()
 }
 
-// EmitRunError appends a RUN_ERROR event using the shared sequencer. Called by
-// the run's owner on lifecycle failures (prepare / execute / finish stages).
+// EmitRunError appends a RUN_ERROR event. Called by the run's owner on lifecycle
+// failures (prepare / execute / finish stages).
+//
+// It orders correctly against the per-call events without sharing anything with
+// them: the Sequence is allocated by the repository, so the owner and the handler
+// cannot pick the same number even when they append at the same moment.
 func (h *Handler) EmitRunError(ctx context.Context, stage, message string) error {
 	ev := h.baseEvent(model.JobRunEventKindRunError, h.clock())
 	ev.RunError = &model.RunErrorPayload{
 		Stage:   stage,
 		Message: Truncate(message, model.MaxInlineBytes),
 	}
-	if err := h.eventRepo.Append(ctx, ev); err != nil {
+	if err := h.eventRepo.AppendNext(ctx, ev); err != nil {
 		return goerr.Wrap(err, "append run_error event",
 			goerr.V("run_id", h.routing.RunID))
 	}
 	return nil
 }
 
-// baseEvent stamps the common identifier / phase / sequence / occurred-at
-// fields onto a fresh event. The caller fills in the kind-specific payload.
-// EventID is a freshly minted UUIDv7 (timestamp-prefixed for Firestore-console
-// readability); the authoritative monotonic order is the Sequence field, not
-// the doc ID.
+// baseEvent stamps the common identifier / phase / occurred-at fields onto a
+// fresh event. The caller fills in the kind-specific payload. EventID is a
+// freshly minted UUIDv7 (timestamp-prefixed for Firestore-console readability);
+// the authoritative monotonic order is the Sequence field, not the doc ID.
+//
+// Sequence is deliberately left unset: the repository allocates it inside the
+// write (AppendNext), so the number cannot be handed out twice.
 func (h *Handler) baseEvent(kind model.JobRunEventKind, at time.Time) *model.JobRunEvent {
 	h.mu.Lock()
 	phase := h.phase
@@ -506,7 +518,6 @@ func (h *Handler) baseEvent(kind model.JobRunEventKind, at time.Time) *model.Job
 		RunID:       h.routing.RunID,
 		TraceID:     h.routing.TraceID,
 		EventID:     uuid.Must(uuid.NewV7()).String(),
-		Sequence:    h.seq.Next(),
 		OccurredAt:  at,
 		Kind:        kind,
 		Phase:       phase,
@@ -518,7 +529,11 @@ func (h *Handler) baseEvent(kind model.JobRunEventKind, at time.Time) *model.Job
 // errutil.Handle so a single bad event does not drop the rest of the run's
 // trail.
 func (h *Handler) append(ctx context.Context, ev *model.JobRunEvent) {
-	if err := h.eventRepo.Append(ctx, ev); err != nil {
+	// AppendNext, so the Sequence is allocated inside the write. Two appenders on
+	// the same run — a durable run reclaimed by another instance, or the run
+	// owner's RUN_ERROR racing a per-call event — would otherwise pick the same
+	// number and List would order the timeline arbitrarily between them.
+	if err := h.eventRepo.AppendNext(ctx, ev); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "append job run event",
 			goerr.V("run_id", h.routing.RunID),
 			goerr.V("sequence", ev.Sequence),

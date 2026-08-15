@@ -1,12 +1,10 @@
 package usecase
 
 import (
-	"context"
 	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
-	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -15,9 +13,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 type UseCases struct {
@@ -313,36 +308,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		})
 
 		// MentionProposal is wired only when the persistent History/Trace archive
-		// is configured — the planner runtime depends on both. Without them,
-		// the open-mode path is simply not constructed (the dispatcher will
-		// no-op for app_mention in unbound channels).
+		// is configured — the agent runtime that takes its turns depends on both.
+		// Without them, the open-mode path is simply not constructed (the
+		// dispatcher will no-op for app_mention in unbound channels).
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			deps := &agent.CommonDeps{
-				Repo:                repo,
-				Registry:            registry,
-				LLMClient:           uc.llmClient,
-				HistoryRepo:         uc.historyRepo,
-				TraceRepo:           uc.traceRepo,
-				SlackBot:            uc.slackService,
-				SlackSearch:         uc.slackSearch,
-				SlackRetriever:      uc.slackRetriever,
-				NotionClient:        uc.notionTool,
-				GitHubClient:        uc.githubClient,
-				WebFetchClient:      uc.webfetchClient,
-				JiraTools:           uc.jiraTools,
-				ActionUC:            NewActionToolAdapter(uc.Action),
-				ActionStepUC:        NewActionStepToolAdapter(uc.ActionStep),
-				KnowledgeAccessor:   NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
-				KnowledgeMutator:    NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
-				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
-				HeartbeatStaleAfter: agent.DefaultHeartbeatStaleAfter,
-			}
-			draftUC, err := proposal.New(deps, 0, 0)
-			if err != nil {
-				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build draft usecase"), "failed to build draft usecase")
-			} else {
-				uc.MentionProposal = NewMentionProposalUseCase(repo, registry, uc.slackService, draftUC)
-			}
+			uc.MentionProposal = NewMentionProposalUseCase(repo, registry, uc.slackService)
 		}
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionProposal, uc.slackService)

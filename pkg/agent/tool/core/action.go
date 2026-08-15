@@ -91,10 +91,21 @@ func (t *listActionsTool) Run(ctx context.Context, args map[string]any) (map[str
 	return map[string]any{"actions": items}, nil
 }
 
-// getActionTool retrieves action details by ID
+// getActionTool retrieves action details by ID, within the case the run is
+// pinned to.
 type getActionTool struct {
 	repo        interfaces.Repository
 	workspaceID string
+	// caseID is the case this run may read. An Action belonging to any other
+	// case is reported as not found: an action id is a small integer an LLM can
+	// arrive at by guessing or by being told to in injected text, and without
+	// this check a run on one case could read another case's work — including a
+	// private case the actor is not a member of, because the read goes straight
+	// to the repository and never passes an access gate.
+	//
+	// Zero means "no case pinned", which only a run with no case at all has; such
+	// a run gets no core toolset in the first place, so the tool never exists.
+	caseID int64
 }
 
 func (t *getActionTool) Spec() gollem.ToolSpec {
@@ -126,6 +137,12 @@ func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[strin
 		)
 	}
 	if a == nil {
+		return nil, fmt.Errorf("action not found: id=%d", actionID)
+	}
+	// Same message as a genuinely missing action, deliberately: telling the model
+	// that the id exists but belongs elsewhere would confirm the existence of a
+	// case it may not read.
+	if t.caseID != 0 && a.CaseID != t.caseID {
 		return nil, fmt.Errorf("action not found: id=%d", actionID)
 	}
 	return actionToMap(a), nil

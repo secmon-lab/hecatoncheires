@@ -8,11 +8,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/gollem-dev/agentkit"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/urfave/cli/v3"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
@@ -26,11 +28,9 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	modelconfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
@@ -62,6 +62,14 @@ type tickRuntime struct {
 	repo     interfaces.Repository
 	registry *model.WorkspaceRegistry
 	scanner  *job.ScheduledScanner
+	// durable is the agent runtime the dispatched runs execute on. The sweep owns
+	// its worker: it spawns the runs and then drains them in the foreground, so a
+	// scheduled sweep does not depend on a serve instance being up to execute what
+	// it dispatched.
+	durable *job.DurableRuntime
+	// cleanup releases what the runtime opened (the agent process repository, the
+	// Cloud Storage client). Always non-nil.
+	cleanup func()
 }
 
 // buildTickRuntime wires the minimal dependency graph for a scheduled-Job
@@ -74,6 +82,8 @@ func buildTickRuntime(
 	repoCfg *config.Repository,
 	llmCfg *config.LLM,
 	jobCfg *config.JobConcurrency,
+	agentCfg *config.Agent,
+	storageCfg *config.Storage,
 	c *cli.Command,
 ) (*tickRuntime, error) {
 	_, registry, err := appCfg.Configure(c)
@@ -92,7 +102,20 @@ func buildTickRuntime(
 
 	uc := usecase.New(repo, registry)
 
-	jobUC, _, err := buildJobRuntime(jobRuntimeDeps{
+	// The sweep runs its Jobs on the same agent runtime serve does, so a scheduled
+	// run gets the same step / token budget and the same one-transition-at-a-time
+	// checkpointing. It differs only in who drives the worker: serve runs one
+	// continuously, a sweep drains its own runs and exits.
+	durable, cleanup, err := buildTickAgentRuntime(ctx, tickAgentDeps{
+		repo: repo, registry: registry, llm: llmClient, uc: uc,
+		agentCfg: agentCfg, storageCfg: storageCfg, repoCfg: repoCfg,
+		slotLimit: jobCfg.Limit(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	jobUC, jobRunner, err := buildJobRuntime(jobRuntimeDeps{
 		Repo:      repo,
 		Registry:  registry,
 		LLMClient: llmClient,
@@ -101,7 +124,8 @@ func buildTickRuntime(
 		// The tick CLI dispatches Job runs itself, so it must enforce the same
 		// deployment-wide limit as serve — a sweep that skipped the gate would
 		// defeat it entirely.
-		SlotLimit: jobCfg.Limit(),
+		SlotLimit:   jobCfg.Limit(),
+		SlotLimiter: durable.SlotLimiter,
 		// Mirror the read-tool wiring done in serve.go so every Job host
 		// resolves the same tool set. The tick CLI builds `uc` without the
 		// Slack / Notion options, so these accessors return nil today and the
@@ -111,10 +135,13 @@ func buildTickRuntime(
 		SlackSearch:    uc.SlackSearchService(),
 		SlackRetriever: uc.SlackMessageRetriever(),
 		NotionTool:     uc.NotionToolClient(),
+		Durable:        durable.Runtime,
 	})
 	if err != nil {
+		cleanup()
 		return nil, goerr.Wrap(err, "build job runtime")
 	}
+	durable.Runtime.AttachRunner(jobRunner)
 	uc.Case.SetEventPublisher(jobUC)
 
 	scanner := job.NewScheduledScanner(job.ScannerDeps{
@@ -127,7 +154,136 @@ func buildTickRuntime(
 		repo:     repo,
 		registry: registry,
 		scanner:  scanner,
+		durable:  durable.Runtime,
+		cleanup:  cleanup,
 	}, nil
+}
+
+// tickAgentDeps is what building the sweep's agent runtime needs.
+type tickAgentDeps struct {
+	repo       interfaces.Repository
+	registry   *model.WorkspaceRegistry
+	llm        gollem.LLMClient
+	uc         *usecase.UseCases
+	agentCfg   *config.Agent
+	storageCfg *config.Storage
+	repoCfg    *config.Repository
+	slotLimit  int
+}
+
+// tickAgentRuntime is the sweep's agent runtime plus the slot gate the Job runner
+// must share with it.
+type tickAgentRuntime struct {
+	Runtime     *job.DurableRuntime
+	SlotLimiter *job.ConcurrencyLimiter
+}
+
+// buildTickAgentRuntime builds the Kernel a sweep's Job runs execute on, in the
+// order agentkit requires: register, build, bind.
+//
+// Without an LLM client there is nothing for an agent to run, so it returns a
+// runtime the Job runner will find unusable (`handles` reports false) and the sweep
+// dispatches nothing — the same shape serve has.
+func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRuntime, func(), error) {
+	noop := func() {}
+	if d.llm == nil {
+		return &tickAgentRuntime{Runtime: &job.DurableRuntime{}}, noop, nil
+	}
+
+	archive, err := d.storageCfg.Configure(ctx)
+	if err != nil {
+		return nil, noop, goerr.Wrap(err, "configure the agent session archive")
+	}
+	// Archive.Close is a plain cleanup func, not an io.Closer, so it is called
+	// through a variable rather than as a method on the struct.
+	closeArchive := archive.Close
+
+	procRepo, procCleanup, err := d.repoCfg.ConfigureAgentProcess(ctx)
+	if err != nil {
+		closeArchive()
+		return nil, noop, goerr.Wrap(err, "configure the agent process repository")
+	}
+	cleanup := func() {
+		procCleanup()
+		closeArchive()
+	}
+
+	budgets, err := d.agentCfg.Budgets()
+	if err != nil {
+		cleanup()
+		return nil, noop, err
+	}
+
+	locator, err := agentkernel.NewLocator(procRepo)
+	if err != nil {
+		cleanup()
+		return nil, noop, goerr.Wrap(err, "build the agent process locator")
+	}
+
+	var slots *job.ConcurrencyLimiter
+	if d.slotLimit > 0 {
+		slots, err = buildJobSlotLimiter(d.repo, d.slotLimit)
+		if err != nil {
+			cleanup()
+			return nil, noop, err
+		}
+	}
+
+	reg := agentkit.NewRegistry()
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, budgets.Task.Limiter(), archive.ProcessHistory)
+	if err != nil {
+		cleanup()
+		return nil, noop, goerr.Wrap(err, "register the task sub-agent")
+	}
+	durable := &job.DurableRuntime{History: archive.ProcessHistory, Locator: locator}
+	if err := durable.Register(reg, budgets.Root.Limiter(), taskAgent); err != nil {
+		cleanup()
+		return nil, noop, goerr.Wrap(err, "register the job agents")
+	}
+
+	k, err := agentkernel.Build(agentkernel.Deps{
+		Repo:    procRepo,
+		History: archive.ProcessHistory,
+		LLM:     d.llm,
+		Trace:   archive.Trace,
+		Budgets: budgets,
+		Agents:  reg,
+		Slots:   slots,
+		// The same tool palette serve gives a Job run, so a scheduled run behaves
+		// identically wherever it is dispatched from. The Slack / Notion / GitHub
+		// clients are nil in a sweep (its usecase set is built without them) and each
+		// tool's constructor degrades to no tool, which is the pre-existing shape of
+		// the tick path.
+		Tools: agentkernel.ToolDeps{
+			Repo:              d.repo,
+			Registry:          d.registry,
+			SlackSearch:       d.uc.SlackSearchService(),
+			SlackRetriever:    d.uc.SlackMessageRetriever(),
+			NotionClient:      d.uc.NotionToolClient(),
+			GitHubClient:      d.uc.GitHubToolClient(),
+			WebFetchClient:    d.uc.WebFetchClient(),
+			ActionUC:          usecase.NewActionToolAdapter(d.uc.Action),
+			ActionStepUC:      usecase.NewActionStepToolAdapter(d.uc.ActionStep),
+			CaseUC:            usecase.NewCaseToolAdapter(d.uc.Case),
+			CaseRefUC:         d.uc.Case,
+			CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(d.uc.Case),
+			CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(d.uc.Action, d.uc.ActionStep),
+			MemoUC:            usecase.NewMemoToolAdapter(d.uc.Memo),
+			KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(d.uc.Knowledge, d.uc.Tag),
+			KnowledgeMutator:  usecase.NewKnowledgeToolMutator(d.uc.Knowledge, d.uc.Tag),
+		},
+	})
+	if err != nil {
+		cleanup()
+		return nil, noop, goerr.Wrap(err, "build the agent runtime")
+	}
+	durable.Bind(k)
+	// The sweep waits for exactly the runs it dispatched, so it must remember them.
+	durable.TrackSpawns()
+
+	logging.Default().Info("Agent runtime configured for the sweep",
+		logAttrsToArgs(d.agentCfg.LogAttrs())...)
+	return &tickAgentRuntime{Runtime: durable, SlotLimiter: slots}, cleanup, nil
 }
 
 // jobRuntimeDeps groups everything the JobUseCase / JobRunner need at
@@ -162,6 +318,13 @@ type jobRuntimeDeps struct {
 	// builds no limiter at all.
 	SlotLimit int
 
+	// SlotLimiter, when non-nil, is the limiter to use instead of building one.
+	// `serve` must pass the same instance it gave the Kernel as its slot gate:
+	// with a durable Job the claim is what occupies a slot for the length of the
+	// run, so a second limiter here would count a different set of holds and the
+	// deployment-wide limit would bound neither side correctly.
+	SlotLimiter *job.ConcurrencyLimiter
+
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
 	// reasoning). Nil falls back to in-memory implementations so the
@@ -169,6 +332,12 @@ type jobRuntimeDeps struct {
 	// still gets a fully wired runtime.
 	HistoryRepo gollem.HistoryRepository
 	TraceRepo   trace.Repository
+
+	// Durable, when non-nil, is the agent runtime the simple-strategy Jobs run
+	// on. The caller creates it, hands it here, then registers and binds it
+	// around the Kernel build — the order agentkit requires. Nil keeps every
+	// strategy on the in-process executors.
+	Durable *job.DurableRuntime
 }
 
 // registryHasInteractiveJob reports whether any enabled Job in any workspace
@@ -214,48 +383,23 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		return buildJobTools(deps, adapters, c, ws)
 	})
 
-	executors := map[model.JobStrategy]jobagent.JobExecutor{
-		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
-	}
+	// Every strategy runs on the durable runtime whenever one exists — `serve` keeps
+	// a worker running, and the `tick` CLI drains its own runs before it exits — so
+	// no executor is registered for it.
+	//
+	// A deployment with no LLM configured builds no Kernel at all, and there the
+	// in-process executor is still what makes a run RECORDED: it fails on the absent
+	// model, but `Run` reaches the finish stage and writes the run log and the
+	// FAILED outcome an operator reads. Without it such a run would abort in the
+	// prepare stage, leaving nothing in the run history to explain itself.
+	executors := inProcessExecutors(deps.Durable)
 
-	// Shared history repository: the JobRunner persists each run's conversation
-	// under the RunID and the reflection pass loads it back. The SAME instance
-	// is handed to the planexec runner so planexec runs are reflectable too.
-	historyRepo := deps.HistoryRepo
-	if historyRepo == nil {
-		historyRepo = agentarchive.NewMemoryHistoryRepository()
-	}
-
-	// Wire the planexec executor and the reflection agent when an LLM client is
-	// available. We only need planexec for workspaces that declared
-	// `strategy = "planexec"`; constructing it unconditionally is safe because
-	// the map lookup at Run time picks the right one. Falls back to in-memory
-	// trace repo when the caller did not pre-configure one (e.g. the `tick` CLI).
+	// Reflection agent: knowledge/tag tools only, sharing the same knowledge use
+	// cases as the Job tools. Disabled (nil reflector) if knowledge is not
+	// configured. It reads a finished run's transcript from the agent history store,
+	// by the ref recorded on the Process.
 	var reflector jobagent.Reflector
 	if deps.LLMClient != nil {
-		traceRepo := deps.TraceRepo
-		if traceRepo == nil {
-			traceRepo = agentarchive.NewMemoryTraceRepository()
-		}
-		planexecRunner, err := planexec.NewRunner(planexec.RunnerDeps{
-			LLMClient:   deps.LLMClient,
-			HistoryRepo: historyRepo,
-			TraceRepo:   traceRepo,
-			Budget: planexec.BudgetConfig{
-				PlannerLoopMax:  8,
-				SubAgentLoopMax: 20,
-			},
-		})
-		if err == nil {
-			planexecExec, peErr := jobagent.NewPlanexecJobExecutor(planexecRunner)
-			if peErr == nil {
-				executors[model.JobStrategyPlanexec] = planexecExec
-			}
-		}
-
-		// Reflection agent: knowledge/tag tools only, sharing the same knowledge
-		// use cases as the Job tools. Disabled (nil reflector) if knowledge is
-		// not configured.
 		if refl, rErr := jobagent.NewLLMReflector(jobagent.ReflectorDeps{
 			LLMClient:         deps.LLMClient,
 			KnowledgeAccessor: adapters.knowledgeAccessor,
@@ -282,7 +426,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		ToolBuilder:   toolBuilder,
 		SlackNotifier: slackNotifier,
 		Reflector:     reflector,
-		HistoryRepo:   historyRepo,
+		Durable:       deps.Durable,
 	}
 	// The interactive-Job question form is Block Kit posted/updated directly
 	// via the Slack service (the narrow SlackNotifier cannot carry blocks).
@@ -291,37 +435,71 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 	if deps.SlackService != nil {
 		deps2.InteractionPoster = deps.SlackService
 	}
-	// Deployment-wide concurrency gate on scheduled runs. Built only when an
-	// operator asked for a limit; 0 leaves SlotLimiter nil (ungated).
-	if deps.SlotLimit > 0 {
-		limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
-			Repo:          deps.Repo.JobSlot(),
-			Limit:         deps.SlotLimit,
-			TTL:           jobSlotTTL,
-			RenewInterval: jobSlotRenewInterval,
-			MaxHold:       jobSlotMaxHold,
-		})
+	// Deployment-wide concurrency gate on scheduled runs. `serve` builds it before
+	// the Kernel (it is also the Kernel's slot gate) and hands the same instance
+	// here; `tick` has no Kernel, so it builds one now.
+	if deps.SlotLimiter != nil {
+		deps2.SlotLimiter = deps.SlotLimiter
+	} else if deps.SlotLimit > 0 {
+		limiter, err := buildJobSlotLimiter(deps.Repo, deps.SlotLimit)
 		if err != nil {
-			return nil, nil, goerr.Wrap(err, "build job concurrency limiter",
-				goerr.V("job_max_concurrency", deps.SlotLimit))
+			return nil, nil, err
 		}
 		deps2.SlotLimiter = limiter
-		// The slot timings are compiled-in, so this is the only place they are
-		// visible; without them a slot_hold_ms cannot be read against the TTL
-		// that would have expired it. Emitted by both serve and tick, which
-		// share this constructor.
-		logging.Default().Info("job concurrency limiter enabled",
-			"job_max_concurrency", deps.SlotLimit,
-			"slot_ttl", jobSlotTTL.String(),
-			"slot_renew_interval", jobSlotRenewInterval.String(),
-			"slot_max_hold", jobSlotMaxHold.String())
-	} else {
-		logging.Default().Info("job concurrency limiter disabled",
-			"job_max_concurrency", deps.SlotLimit)
 	}
 	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner, nil
+}
+
+// inProcessExecutors returns the in-process executors a deployment still needs.
+//
+// With an agent runtime there are none: every strategy is Spawned onto it, in both
+// entry points (`serve` keeps a worker running, `tick` drains its own runs).
+//
+// Without one — a deployment with no LLM configured builds no Kernel at all — the
+// single-loop executor is what keeps a run RECORDED. It fails on the absent model,
+// but `Run` reaches its finish stage and writes the run log and the FAILED outcome
+// an operator reads in the run history. Returning nothing here instead would abort
+// such a run in the prepare stage, leaving no row to explain itself.
+func inProcessExecutors(durable *job.DurableRuntime) map[model.JobStrategy]jobagent.JobExecutor {
+	if durable != nil {
+		return map[model.JobStrategy]jobagent.JobExecutor{}
+	}
+	return map[model.JobStrategy]jobagent.JobExecutor{
+		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
+	}
+}
+
+// buildJobSlotLimiter builds the deployment-wide concurrency gate for scheduled
+// Job runs. limit must be positive; 0 means ungated and the caller skips this.
+//
+// It is a standalone constructor because `serve` needs the limiter BEFORE the
+// Kernel exists — the Kernel takes it as its claim-time slot gate, which is what
+// bounds concurrent execution now that a durable run outlives the call that
+// started it. Building a second one for the Runner would leave each counting only
+// its own holds.
+func buildJobSlotLimiter(repo interfaces.Repository, limit int) (*job.ConcurrencyLimiter, error) {
+	limiter, err := job.NewConcurrencyLimiter(job.ConcurrencyLimiterDeps{
+		Repo:          repo.JobSlot(),
+		Limit:         limit,
+		TTL:           jobSlotTTL,
+		RenewInterval: jobSlotRenewInterval,
+		MaxHold:       jobSlotMaxHold,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "build job concurrency limiter",
+			goerr.V("job_max_concurrency", limit))
+	}
+	// The slot timings are compiled-in, so this is the only place they are
+	// visible; without them a slot_hold_ms cannot be read against the TTL that
+	// would have expired it.
+	logging.Default().Info("job concurrency limiter enabled",
+		"job_max_concurrency", limit,
+		"slot_ttl", jobSlotTTL.String(),
+		"slot_renew_interval", jobSlotRenewInterval.String(),
+		"slot_max_hold", jobSlotMaxHold.String())
+	return limiter, nil
 }
 
 // jobToolAdapters groups the usecase-to-tool adapters once so buildJobTools

@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -96,89 +95,40 @@ func (r *sessionRepository) Claim(_ context.Context, channelID, threadTS string,
 	return fresh, nil
 }
 
-func (r *sessionRepository) AcquireTurnLock(
-	_ context.Context,
-	channelID, threadTS, triggerTS, ownerID string,
-	staleAfter time.Duration,
-	newSessionFn func() *model.Session,
-) (interfaces.AcquireResult, error) {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return interfaces.AcquireResult{}, goerr.New("channelID, threadTS, ownerID are required",
+func (r *sessionRepository) AdvanceLastMention(_ context.Context, channelID, threadTS, mentionTS string) error {
+	if channelID == "" || threadTS == "" || mentionTS == "" {
+		return goerr.New("channelID, threadTS and mentionTS are required",
 			goerr.V("channel_id", channelID),
 			goerr.V("thread_ts", threadTS),
-			goerr.V("owner_id", ownerID),
+			goerr.V("mention_ts", mentionTS),
 		)
 	}
-	if newSessionFn == nil {
-		return interfaces.AcquireResult{}, goerr.New("newSessionFn is required")
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := r.now()
 	key := sessionKey(channelID, threadTS)
-	cur, exists := r.sessions[key]
-
-	// New session — create and claim in one go.
-	if !exists {
-		fresh := newSessionFn()
-		if fresh == nil {
-			return interfaces.AcquireResult{}, goerr.New("newSessionFn returned nil")
-		}
-		fresh.ChannelID = channelID
-		fresh.ThreadTS = threadTS
-		fresh.TurnState = model.SessionTurnRunning
-		fresh.TurnOwnerID = ownerID
-		fresh.TurnStartedAt = now
-		fresh.TurnHeartbeatAt = now
-		fresh.TurnTriggerTS = triggerTS
-		if fresh.CreatedAt.IsZero() {
-			fresh.CreatedAt = now
-		}
-		fresh.UpdatedAt = now
-		if err := fresh.Validate(); err != nil {
-			return interfaces.AcquireResult{}, goerr.Wrap(err, "session validation failed before acquire")
-		}
-		r.sessions[key] = *fresh
-		copied := *fresh
-		return interfaces.AcquireResult{Acquired: true, Session: &copied}, nil
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
 	}
-
-	// Idempotent retry: same Slack-side trigger key as the live owner —
-	// typically Slack re-delivering the same event. The trigger key must be
-	// non-empty (synthetic events like ws-switch pass "" so they always
-	// proceed instead of being absorbed by an unrelated prior turn).
-	if cur.TurnState == model.SessionTurnRunning && triggerTS != "" && cur.TurnTriggerTS == triggerTS {
-		copied := cur
-		return interfaces.AcquireResult{IdempotentRetry: true, Session: &copied}, nil
+	// Slack timestamps are fixed-width "<seconds>.<microseconds>", so string
+	// ordering is chronological ordering.
+	if cur.LastMentionTS >= mentionTS {
+		return nil
 	}
-
-	// Reclaim a stale running lock.
-	reclaimed := false
-	if cur.TurnState == model.SessionTurnRunning {
-		if staleAfter <= 0 || now.Sub(cur.TurnHeartbeatAt) <= staleAfter {
-			// busy
-			copied := cur
-			return interfaces.AcquireResult{Session: &copied}, nil
-		}
-		reclaimed = true
-	}
-
-	cur.TurnState = model.SessionTurnRunning
-	cur.TurnOwnerID = ownerID
-	cur.TurnStartedAt = now
-	cur.TurnHeartbeatAt = now
-	cur.TurnTriggerTS = triggerTS
-	cur.UpdatedAt = now
+	cur.LastMentionTS = mentionTS
+	cur.UpdatedAt = r.now()
 	r.sessions[key] = cur
-	copied := cur
-	return interfaces.AcquireResult{Acquired: true, Reclaimed: reclaimed, Session: &copied}, nil
+	return nil
 }
 
-func (r *sessionRepository) Heartbeat(_ context.Context, channelID, threadTS, ownerID string) (*model.Session, error) {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return nil, goerr.New("channelID, threadTS, ownerID are required")
+func (r *sessionRepository) AssociateProposal(_ context.Context, channelID, threadTS string, proposalID model.CaseProposalID) error {
+	if channelID == "" || threadTS == "" || proposalID == "" {
+		return goerr.New("channelID, threadTS and proposalID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("proposal_id", string(proposalID)),
+		)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -186,45 +136,83 @@ func (r *sessionRepository) Heartbeat(_ context.Context, channelID, threadTS, ow
 	key := sessionKey(channelID, threadTS)
 	cur, ok := r.sessions[key]
 	if !ok {
-		return nil, errors.Join(interfaces.ErrTurnOwnerMismatch,
-			goerr.New("session does not exist",
-				goerr.V("channel_id", channelID),
-				goerr.V("thread_ts", threadTS)))
+		return nil
 	}
-	if cur.TurnOwnerID != ownerID {
-		return nil, errors.Join(interfaces.ErrTurnOwnerMismatch,
-			goerr.New("owner mismatch",
-				goerr.V("expected", ownerID),
-				goerr.V("actual", cur.TurnOwnerID)))
-	}
-	now := r.now()
-	cur.TurnHeartbeatAt = now
-	cur.UpdatedAt = now
+	cur.ProposalID = proposalID
+	cur.UpdatedAt = r.now()
 	r.sessions[key] = cur
-	copied := cur
-	return &copied, nil
+	return nil
 }
 
-func (r *sessionRepository) ReleaseTurnLock(_ context.Context, channelID, threadTS, ownerID string) error {
-	if channelID == "" || threadTS == "" || ownerID == "" {
-		return goerr.New("channelID, threadTS, ownerID are required")
+func (r *sessionRepository) StampLastAction(_ context.Context, channelID, threadTS string, ended model.SessionEndReason) error {
+	if channelID == "" || threadTS == "" || ended == "" {
+		return goerr.New("channelID, threadTS and ended are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("ended", string(ended)),
+		)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	key := sessionKey(channelID, threadTS)
 	cur, ok := r.sessions[key]
 	if !ok {
 		return nil
 	}
-	if cur.TurnOwnerID != ownerID {
-		// Silently ignore — caller's lock was already taken / released.
+	cur.LastAction = ended
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}
+
+func (r *sessionRepository) BindCase(_ context.Context, channelID, threadTS string, caseID int64) error {
+	if channelID == "" || threadTS == "" || caseID == 0 {
+		return goerr.New("channelID, threadTS and caseID are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("case_id", caseID),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
 		return nil
 	}
-	now := r.now()
-	cur.TurnState = model.SessionTurnIdle
-	cur.TurnOwnerID = ""
-	cur.TurnTriggerTS = ""
-	cur.UpdatedAt = now
+	cur.CaseID = caseID
+	cur.PendingQuestion = nil
+	cur.UpdatedAt = r.now()
+	r.sessions[key] = cur
+	return nil
+}
+
+func (r *sessionRepository) SetPendingQuestion(_ context.Context, channelID, threadTS string, q *model.PendingQuestion) error {
+	if channelID == "" || threadTS == "" {
+		return goerr.New("channelID and threadTS are required",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := sessionKey(channelID, threadTS)
+	cur, ok := r.sessions[key]
+	if !ok {
+		return nil
+	}
+	// Copied, not aliased: the caller keeps its own pointer and the stored map
+	// value must not change under it (the same reason Put and Claim copy).
+	if q == nil {
+		cur.PendingQuestion = nil
+	} else {
+		pq := *q
+		cur.PendingQuestion = &pq
+	}
+	cur.UpdatedAt = r.now()
 	r.sessions[key] = cur
 	return nil
 }

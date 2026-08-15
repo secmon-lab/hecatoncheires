@@ -107,6 +107,33 @@ exempt_name := {
 	"RegisterAgents",
 	"Bind",
 	"BindAgentKernel",
+	"BindDurableDraft",
+	"AttachRunner",
+	# TrackSpawns is the same kind of startup switch: it initialises an in-memory
+	# slice so a batch command can later wait for its own runs. No I/O.
+	"TrackSpawns",
+	# returns the usecase's own completion-handler adapter; a struct literal.
+	"DurableDraftHost",
+	# agentkit Strategy methods. Their signatures are fixed by the library, and
+	# every one of them is pure: Version reports a constant, Init builds the
+	# initial state (agentkit gives it no ctx and no Syscalls precisely so a
+	# strategy author cannot perform effects there), and the four codecs only
+	# marshal. The transition method that DOES take a ctx is Step, which is not
+	# exempted here because it has one.
+	#
+	# The proper fix is relocating the plan-execute Strategy to pkg/agent/, next to
+	# the ReAct one, which is where runtime machinery with library-fixed method
+	# sets already lives. It shares unexported schema and prompt helpers with the
+	# runtime it is replacing, so the move happens when that runtime is deleted.
+	"Version",
+	"Init",
+	"EncodeState",
+	"DecodeState",
+	"EncodeOutput",
+	"DecodeOutput",
+	# renders a question and its answers into the user turn a suspended run
+	# continues from. A pure string transform, moved with the Strategy above.
+	"RenderAnswers",
 }
 
 is_exempt if {

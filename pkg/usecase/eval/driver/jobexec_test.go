@@ -19,9 +19,13 @@ import (
 // once, then return a final summary. The created action is an observable,
 // trace-independent side effect we can assert on via the repository.
 func actionCreatingJobLLM(actionTitle, summary string) *mock.LLMClientMock {
+	// Counted across sessions, not per session: the run is a durable Process whose
+	// every transition opens its own gollem session, so a per-session counter would
+	// restart at 1 each time and the model would ask for the same tool for as long
+	// as the step budget allowed.
+	var calls atomic.Int32
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-			var calls atomic.Int32
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					if calls.Add(1) == 1 {

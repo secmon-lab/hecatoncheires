@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/agenttrace"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -70,13 +71,18 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 				trace.WithTraceID(claimTraceID(proc)),
 				trace.WithMetadata(claimTraceMetadata(proc, sc)),
 			)
-			// The per-run JobRunEvent timeline is NOT wired here. Its contract
-			// requires one sequence allocator per run
-			// (interfaces.JobRunEventRepository), and a durable run's claims are
-			// spread across instances, so any in-process allocator would issue
-			// the same number twice. It is wired with the Job host, together with
-			// an allocator that survives that.
+			// Two sinks: the Cloud Storage archive (full fidelity, one object per
+			// claim) and the JobRunEvent timeline the run-detail page reads.
+			//
+			// A fresh timeline Handler per claim is correct BECAUSE the Sequence is
+			// allocated by the repository inside each write. Several Handlers on one
+			// run — this claim's, a later claim's on another instance, and the run
+			// owner's RUN_ERROR — therefore append into a single ordered timeline
+			// with nothing shared between them.
 			handler := trace.Handler(recorder)
+			if timeline := runTimeline(d, sc); timeline != nil {
+				handler = trace.Multi(recorder, timeline)
+			}
 			ctx = withTraceHandler(ctx, handler)
 
 			// The root span has to be opened here, and it has to bracket the
@@ -98,6 +104,27 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 			return outcome, err
 		}
 	}
+}
+
+// runTimeline builds the JobRunEvent sink for a run that keeps a run record, or
+// nil for one that does not.
+//
+// Every identifier is required: an event without them cannot be attributed to a
+// run, and the repository would reject it on every append. Returning nil instead
+// leaves the archive as the run's only trace, which is the right outcome for a
+// run that was never meant to appear on the case agent page.
+func runTimeline(d Deps, sc Scope) *runtrace.Handler {
+	if d.Tools.Repo == nil || sc.WorkspaceID == "" || sc.CaseID == 0 ||
+		sc.JobID == "" || sc.JobRunID == "" {
+		return nil
+	}
+	return runtrace.NewHandler(d.Tools.Repo.JobRunEvent(), runtrace.Routing{
+		WorkspaceID: sc.WorkspaceID,
+		CaseID:      sc.CaseID,
+		JobID:       sc.JobID,
+		RunID:       sc.JobRunID,
+		TraceID:     sc.JobRunID,
+	}, nil)
 }
 
 // claimTraceID names one claim's archive object. A Process runs over many

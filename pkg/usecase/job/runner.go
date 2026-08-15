@@ -229,6 +229,16 @@ type RunnerDeps struct {
 	// DefaultUnansweredTimeout. The scheduled sweep uses the same bound.
 	UnansweredTimeout time.Duration
 
+	// Durable, when set, is the agent runtime a Job runs on. A strategy with a
+	// registered agent there is Spawned instead of executed in-process: Run
+	// returns as soon as the run is recorded, and the run's own completion
+	// handler finishes it.
+	//
+	// Nil, or a strategy with no agent registered, keeps the in-process
+	// executor path. That is what lets the two runtimes coexist while the
+	// remaining strategies move over.
+	Durable *DurableRuntime
+
 	// NewRunID generates a fresh RunID for each Run. nil → UUIDv7.
 	NewRunID func() string
 	// NewTraceID generates a fresh TraceID for each Run. nil → UUIDv7.
@@ -389,6 +399,16 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		r.finalizeOrphanedSuspension(ctx, existing)
 	}
 
+	// Do not start a fresh run while a durable run of this Job is still live. The
+	// subject already refuses the second Spawn, but that refusal lands AFTER the run
+	// log and the "starting" marker below, so a long run would collect one spurious
+	// failed run and one starting/failed Slack pair per tick. Checked here, the
+	// trigger is dropped with no outward trace — the same shape as the lease skip.
+	if r.deps.Durable.alreadyLive(ctx, key) {
+		sum.outcome = outcomeSkippedRunning
+		return nil
+	}
+
 	// Admission gate for the deployment-wide concurrency limit. Only the
 	// scheduled domain is gated: one tick can make hundreds of (job, case)
 	// pairs due at once, and a skipped scheduled run costs nothing because
@@ -524,11 +544,21 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
 	sum.strategy = string(strategy)
-	executor, execLookupErr := r.deps.executorFor(strategy)
-	if execLookupErr != nil {
-		return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
-			goerr.V("job_id", j.ID),
-			goerr.V("strategy", string(strategy))))
+
+	// A strategy that runs on the durable runtime needs no in-process executor,
+	// and demanding one would make the migration's intermediate state
+	// unrunnable: the wiring stops registering an executor for a strategy the
+	// moment its agent exists.
+	onDurableRuntime := r.deps.Durable.handles(strategy, j.Interactive)
+	var executor job.JobExecutor
+	if !onDurableRuntime {
+		found, execLookupErr := r.deps.executorFor(strategy)
+		if execLookupErr != nil {
+			return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
+				goerr.V("job_id", j.ID),
+				goerr.V("strategy", string(strategy))))
+		}
+		executor = found
 	}
 
 	logRec := &model.JobRunLog{
@@ -553,7 +583,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// The run log exists, so the attempt counts as started from here on.
 	sum.runID = runID
 
-	seq := runtrace.NewSequencer()
 	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
 		runtrace.Routing{
@@ -563,7 +592,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			RunID:       runID,
 			TraceID:     traceID,
 		},
-		seq,
 		r.clock,
 	)
 
@@ -589,6 +617,50 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// exactly this run's history. Always set (the planexec executor requires a
 	// non-empty HistoryKey); HistoryRepository may be nil for the single-loop
 	// path, which then simply does not persist.
+	// A strategy with an agent on the durable runtime is Spawned instead of run
+	// here: the LLM calls, the tool calls and the completion marker all happen
+	// afterwards on the agent worker, one checkpointed transition at a time.
+	//
+	// The prompts, the run log and the Slack starting marker above are shared with
+	// the in-process path, so the two differ only in who drives the loop.
+	if onDurableRuntime {
+		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		pid, spawnErr := r.deps.Durable.spawn(ctx, strategy, spawnParams{
+			job:          j,
+			event:        ev,
+			key:          key,
+			runID:        runID,
+			systemPrompt: systemPrompt,
+			userPrompt:   userPrompt,
+			interactive:  j.Interactive,
+			// The thread the "starting" marker just opened, so the completion marker
+			// lands under it rather than nowhere.
+			channelID:       channelID,
+			sessionThreadTS: sessionThreadTS,
+		})
+		if spawnErr != nil {
+			// A busy subject cannot reach here: the caller holds the (workspace, case,
+			// job) lease across both the alreadyLive check above and this Spawn, so no
+			// other attempt can start a run in between. That is why busy is handled
+			// there — before the run log and the Slack marker exist — and treated as a
+			// genuine failure if it somehow surfaces here.
+			//
+			// Nothing is running, so this is the run's outcome: record it rather
+			// than leaving a RUNNING log nobody will finish.
+			stageAt = r.clock()
+			finishErr := r.finishRun(ctx, j, c, key, logRec, handler,
+				channelID, sessionThreadTS, runID, traceID, spawnErr, sum)
+			sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+			sum.outcome = outcomeFailed
+			return finishErr
+		}
+		sum.outcome = outcomeSpawned
+		logging.From(ctx).Debug("job run spawned on the agent runtime",
+			slog.String("job_id", j.ID), slog.String("run_id", runID),
+			slog.String("process_id", string(pid)))
+		return nil
+	}
+
 	execReq := job.ExecuteRequest{
 		JobID:             j.ID,
 		SystemPrompt:      systemPrompt,
@@ -1014,6 +1086,41 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 
 	strategy := model.NormaliseJobStrategy(j.Strategy)
 	sum.strategy = string(strategy)
+
+	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
+	ctx = withQuiet(ctx, j.Quiet)
+
+	// A run on the durable runtime is still the SAME Process, parked on the
+	// question it asked. Answering it is the whole resume: its budget, its history
+	// and its run id all carried across the wait, so there is nothing to rebuild
+	// and nothing to re-enter.
+	if logRec.AgentProcessID != "" {
+		sum.prepareMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+		// Back to RUNNING first, clearing the question and the await it named, so a
+		// crash between here and the Respond leaves a RUNNING log rather than one
+		// stuck at AWAITING_INPUT — and a second submit of the same form finds
+		// nothing to answer instead of responding twice.
+		logRec.Stage = model.JobRunStageRunning
+		logRec.PendingInteraction = nil
+		logRec.EndedAt = time.Time{}
+		awaitKey, processID := logRec.AgentAwaitKey, logRec.AgentProcessID
+		logRec.AgentAwaitKey = ""
+		logRec.AgentProcessID = ""
+		if resumeErr := r.deps.Repo.JobRunLog().Resume(ctx, logRec); resumeErr != nil {
+			return goerr.Wrap(resumeErr, "transition run log to running for resume",
+				goerr.V("run_id", runID))
+		}
+		if err := r.resumeDurable(ctx, processID, awaitKey, logRec, pending, answers); err != nil {
+			stageAt = r.clock()
+			finishErr := r.finishRun(ctx, j, nil, key, logRec, nil, "", "", runID, logRec.TraceID, err, sum)
+			sum.finishMs = max(r.clock().Sub(stageAt).Milliseconds(), 0)
+			sum.outcome = outcomeFailed
+			return finishErr
+		}
+		sum.outcome = outcomeSpawned
+		return nil
+	}
+
 	executor, execLookupErr := r.deps.executorFor(strategy)
 	if execLookupErr != nil {
 		return goerr.Wrap(execLookupErr, "select executor for resume",
@@ -1024,9 +1131,6 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		return goerr.New("executor does not support resume",
 			goerr.V("job_id", j.ID), goerr.V("strategy", string(strategy)))
 	}
-
-	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
-	ctx = withQuiet(ctx, j.Quiet)
 
 	// Reconstruct the triggering Event from the run log's provenance so the
 	// prompts render with the same framing as the original turn.
@@ -1051,16 +1155,11 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		return finishErr
 	}
 
-	// Continue the run's event Sequence past the suspended turn's events so
-	// the resumed turn's events do not collide on Sequence (same RunID space).
-	startSeq := int64(1)
-	if existing, listErr := r.deps.Repo.JobRunEvent().List(ctx, key, runID); listErr == nil {
-		for _, e := range existing {
-			if e.Sequence >= startSeq {
-				startSeq = e.Sequence + 1
-			}
-		}
-	}
+	// The resumed turn's events continue past the suspended turn's without any
+	// bookkeeping here: the Sequence counter is durable and per-run, so it picks
+	// up where the earlier turn left it. Scanning the existing events to find the
+	// high-water mark — which is what this used to do — is no longer needed, and
+	// was never safe against a concurrent appender anyway.
 	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
 		runtrace.Routing{
@@ -1070,7 +1169,6 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 			RunID:       runID,
 			TraceID:     logRec.TraceID,
 		},
-		runtrace.NewSequencerStartingAt(startSeq),
 		r.clock,
 	)
 

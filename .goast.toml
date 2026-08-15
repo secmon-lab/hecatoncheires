@@ -265,3 +265,25 @@ count  = 1
   line     = 1
   message  = 'non-standard test filename "widget_e2e_test.go"; name test files xyz_test.go (one test file per source file)'
   severity = "ERROR"
+
+# ---------------------------------------------------------------------------
+# agent_serve_through_kernel.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "starting the agent worker via Kernel.Serve directly is flagged"
+policy = [".goast/agent_serve_through_kernel.rego"]
+source = [".goast/testdata/agent_serve_through_kernel/bad.go"]
+expect = "fail"
+count  = 2
+
+  [[test.cases.violations]]
+  line     = 18
+  message  = "start the agent worker through kernel.Serve, which applies NoDuplicateSideEffects; do not call Kernel.Serve directly"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "the kernel.Serve wrapper and unrelated .Serve calls are allowed"
+policy = [".goast/agent_serve_through_kernel.rego"]
+source = [".goast/testdata/agent_serve_through_kernel/good.go"]
+expect = "pass"

@@ -87,7 +87,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--policy` | `HECATONCHEIRES_POLICY` | - | Cond. | Path(s) to Rego policy files or directories used to authorize MCP requests (`data.auth.mcp`). Repeatable. **Required** when `--mcp` is set |
 | `--mcp-env` | `HECATONCHEIRES_MCP_ENV` | - | No | Names of environment variables to expose to the Rego policy as `input.env` (allow-list). Repeatable |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of **scheduled** Agent Job runs executing concurrently across the whole deployment. Set the same value on every instance (including `tick`). `0` disables the limit. See [operations.md](./operations.md) |
-| `--agent-max-steps` | `HECATONCHEIRES_AGENT_MAX_STEPS` | `64` | No | Maximum committed transitions one agent run may execute, sub-agents included. See [Agent runtime budgets](#agent-runtime-budgets) |
+| `--agent-max-steps` | `HECATONCHEIRES_AGENT_MAX_STEPS` | `128` | No | Maximum committed transitions one agent run may execute, sub-agents included. See [Agent runtime budgets](#agent-runtime-budgets) |
 | `--agent-max-input-tokens` | `HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS` | `500000` | No | Maximum input tokens one agent run may consume, sub-agents included |
 | `--agent-max-output-tokens` | `HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS` | `100000` | No | Maximum output tokens one agent run may produce, sub-agents included |
 | `--agent-task-max-steps` | `HECATONCHEIRES_AGENT_TASK_MAX_STEPS` | `48` | No | Maximum committed transitions one sub-agent may execute |
@@ -116,7 +116,16 @@ hide an output run-away — the expensive half — until the whole budget was go
 
 All three are cumulative over the whole run, sub-agents included: a sub-agent's
 usage is added to its parent when it finishes, so the ceiling on a run covers
-everything it spawned. A sub-agent's own allowance is a fifth of the root one.
+everything it spawned. Read the two tiers together — `--agent-task-max-steps`
+bounds ONE investigation, `--agent-max-steps` bounds the planner plus all of
+them. Raising the task allowance without raising the root one buys nothing: the
+turn simply runs out sooner. The default pair (128 root, 48 task) affords the
+planner's own work plus roughly two sub-agents at their full allowance, or
+several modest ones.
+
+Because a sub-agent's usage arrives in one addition when it finishes, a run can
+cross a ceiling by a whole sub-agent's worth at once; the reported figure is then
+past the ceiling rather than at it.
 Crossing `--agent-budget-notice-ratio` of any ceiling adds a line to the agent's
 next turn telling it to answer from what it already has and to stop calling
 tools; crossing the ceiling itself stops the run, and the user gets the same
@@ -275,6 +284,11 @@ They are **not detected** — which is different from not implemented:
 - **Whether a referenced Case may be referenced.** `case_ref_missing` checks
   existence only. Privacy and draft state gate references when they are written;
   applying that here would flag references that were legitimate at write time.
+- **Agent processes.** The `agentProcesses` documents that back an in-flight
+  agent run carry no configuration-derived values — their workspace and case ids
+  are references, and everything else is runtime state (strategy state, metrics,
+  lease). There is nothing a configuration edit can leave inconsistent there, so
+  they are out of scope by construction rather than by choice.
 
 The check reads the data as it finds it and does not take a snapshot, so a
 workspace being written to concurrently can yield a count that is already stale.
@@ -343,7 +357,9 @@ fix-unsent-action complete total=N fixed=X skipped=Y failed=Z
 
 ## `tick`
 
-The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches due ones. The same logic backs `POST /hooks/tick`; wire it to Cloud Scheduler (or any cron). The command exits when the sweep and in-flight async dispatches finish.
+The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches due ones. The same logic backs `POST /hooks/tick`; wire it to Cloud Scheduler (or any cron).
+
+The dispatched runs execute on the same agent runtime `serve` uses, and the sweep drives that runtime itself: **the command exits once every run it dispatched has finished**, so a scheduled sweep does not depend on a `serve` instance being up. That is why it takes the Cloud Storage and `--agent-*` flags below.
 
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
@@ -358,9 +374,16 @@ The `tick` command runs a single sweep over scheduled Agent Jobs and dispatches 
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI (e.g. `global`, `us-central1`) |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of scheduled Agent Job runs executing concurrently across the whole deployment. Must match the value given to `serve`. `0` disables the limit |
+| `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Cond. | Cloud Storage bucket holding the runs' conversation and trace archive. Required whenever an LLM provider is configured — without it a sweep cannot record the runs it dispatches |
+| `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the bucket |
+
+`tick` also accepts every `--agent-*` flag listed under [`serve`](#serve); they bound
+the dispatched runs and the sweep's own worker the same way. See
+[Agent runtime budgets](#agent-runtime-budgets).
 
 Operational depth (scheduling cadence, relationship to `POST /hooks/tick`, the
-concurrency limit) lives in [operations.md](./operations.md).
+concurrency limit, what the sweep waits for) lives in
+[operations.md](./operations.md).
 
 ---
 

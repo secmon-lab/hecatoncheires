@@ -30,52 +30,48 @@ func newHandlerFixture(t *testing.T) (*runtrace.Handler, *memory.Memory) {
 		RunID:       "run-1",
 		TraceID:     "trace-1",
 	}
-	seq := runtrace.NewSequencer()
 	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
-	h := runtrace.NewHandler(repo.JobRunEvent(), routing, seq, clock)
+	h := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
 	return h, repo
 }
 
-func TestSequencer_Next_MonotonicUnderConcurrency(t *testing.T) {
-	seq := runtrace.NewSequencer()
-	const N = 1000
-	var wg sync.WaitGroup
-	results := make([]int64, N)
-	for i := range N {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			results[i] = seq.Next()
-		}(i)
+// TestHandler_TwoHandlersShareOneTimeline pins the property that replaced the
+// in-process Sequencer: two Handlers on the same run — a resumed turn's, or
+// another instance's claim of the same durable run — append into one ordered
+// timeline without agreeing on a counter. An in-process counter would have both
+// starting at 1 and the whole timeline would collapse into an arbitrary order.
+func TestHandler_TwoHandlersShareOneTimeline(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	routing := runtrace.Routing{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+		RunID: "run-shared", TraceID: "trace-shared",
 	}
-	wg.Wait()
+	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
 
-	seen := make(map[int64]bool, N)
-	var minV, maxV int64 = int64(^uint64(0) >> 1), 0
-	for _, v := range results {
-		if seen[v] {
-			t.Fatalf("duplicate sequence %d", v)
-		}
-		seen[v] = true
-		if v < minV {
-			minV = v
-		}
-		if v > maxV {
-			maxV = v
+	first := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+	second := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+
+	for _, h := range []*runtrace.Handler{first, second, first} {
+		c := h.StartLLMCall(ctx)
+		h.EndLLMCall(c, &trace.LLMCallData{Model: "claude-opus-4-7"}, nil)
+	}
+
+	events, err := repo.JobRunEvent().List(ctx, model.JobRunKey{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+	}, "run-shared")
+	gt.NoError(t, err).Required()
+	// Three calls, each a request + a response.
+	gt.Array(t, events).Length(6).Required()
+
+	seen := make(map[int64]bool, len(events))
+	for i, ev := range events {
+		gt.Bool(t, seen[ev.Sequence]).False() // no two events share a number
+		seen[ev.Sequence] = true
+		if i > 0 {
+			gt.Bool(t, events[i-1].Sequence < ev.Sequence).True()
 		}
 	}
-	gt.Number(t, minV).Equal(1)
-	gt.Number(t, maxV).Equal(N)
-}
-
-func TestSequencer_StartingAt(t *testing.T) {
-	seq := runtrace.NewSequencerStartingAt(5)
-	gt.Number(t, seq.Next()).Equal(5)
-	gt.Number(t, seq.Next()).Equal(6)
-
-	// A start below 1 is clamped up to 1.
-	seq2 := runtrace.NewSequencerStartingAt(0)
-	gt.Number(t, seq2.Next()).Equal(1)
 }
 
 func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
@@ -191,7 +187,7 @@ func newSteppingHandler(t *testing.T, step time.Duration) (*runtrace.Handler, *m
 	clock := &steppingClock{now: time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC), step: step}
 	h := runtrace.NewHandler(repo.JobRunEvent(), runtrace.Routing{
 		WorkspaceID: "ws1", CaseID: 42, JobID: "job-A", RunID: "run-1", TraceID: "trace-1",
-	}, runtrace.NewSequencer(), clock.Now)
+	}, clock.Now)
 	return h, repo
 }
 
@@ -530,7 +526,52 @@ func TestHandler_NSerialToolExecs_MonotonicSeq(t *testing.T) {
 	gt.Number(t, events[4].ParentSequence).Equal(2)
 }
 
-func TestHandler_EmitRunError_SharesSequencer(t *testing.T) {
+// TestHandler_ToolCallLinksToAParentFromAnEarlierHandler pins the recovery a
+// durable run needs: the LLM call and the tool calls it asked for are separate
+// checkpointed transitions, so a claim can begin between them with a fresh
+// Handler that never saw the response. Without the lookup the tool event would
+// carry ParentSequence 0, which JobRunEvent.Validate rejects — the row would be
+// dropped from the timeline rather than merely unlinked.
+func TestHandler_ToolCallLinksToAParentFromAnEarlierHandler(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	routing := runtrace.Routing{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+		RunID: "run-split", TraceID: "trace-split",
+	}
+	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A"}
+
+	// First claim: the LLM asks for a tool.
+	first := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+	first.EndLLMCall(first.StartLLMCall(ctx), llmCallOfferingTools(10, 5, "probe__ping"), nil)
+
+	events, err := repo.JobRunEvent().List(ctx, key, "run-split")
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	responseSeq := events[1].Sequence
+
+	// Second claim, a fresh Handler: the tool runs here.
+	second := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
+	second.EndToolExec(second.StartToolExec(ctx, "probe__ping", map[string]any{}),
+		map[string]any{"ok": true}, nil)
+
+	events, err = repo.JobRunEvent().List(ctx, key, "run-split")
+	gt.NoError(t, err).Required()
+	// The tool call was recorded, not dropped.
+	gt.Array(t, events).Length(3).Required()
+	toolEv := events[2]
+	gt.Value(t, toolEv.Kind).Equal(model.JobRunEventKindToolCall)
+	// And it points at the response from the earlier claim.
+	gt.Value(t, toolEv.ParentSequence).Equal(responseSeq)
+	gt.Bool(t, toolEv.ParentSequence < toolEv.Sequence).True()
+}
+
+// TestHandler_EmitRunError_OrdersAfterTheCallsItFollows pins that the owner's
+// RUN_ERROR lands after the per-call events it followed. The two appenders no
+// longer share a counter — the repository allocates — so this is what stands in
+// for that former guarantee.
+func TestHandler_EmitRunError_OrdersAfterTheCallsItFollows(t *testing.T) {
 	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 

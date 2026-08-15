@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,6 +54,14 @@ func (m *agentTestSlackService) posts() []agentPostedMessage {
 	defer m.postMu.Unlock()
 	out := make([]agentPostedMessage, len(m.postedMessages))
 	copy(out, m.postedMessages)
+	return out
+}
+
+func (m *agentTestSlackService) updates() []agentUpdatedMessage {
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
+	out := make([]agentUpdatedMessage, len(m.updatedMessages))
+	copy(out, m.updatedMessages)
 	return out
 }
 
@@ -220,6 +229,9 @@ type agentRuntimeDeps struct {
 	Registry *model.WorkspaceRegistry
 	LLM      gollem.LLMClient
 	Trace    trace.Repository
+	// CaseUC wires the single-case writer tools (case__*). A test whose agent
+	// mutates the case through a tool call needs it; one that only reads does not.
+	CaseUC *usecase.CaseUseCase
 }
 
 // testAgentBudget is generous enough that no test turn ends on the ceiling; the
@@ -234,10 +246,30 @@ var testAgentBudget = budget.Config{
 func startAgentRuntime(t *testing.T, d agentRuntimeDeps) {
 	t.Helper()
 
+	k := bindAgentRuntimeWithoutWorker(t, d)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
+// bindAgentRuntimeWithoutWorker wires the runtime but never claims anything, so a
+// spawned run stays exactly where the host left it. Use it to assert what the
+// HOST did — the Session it claimed, the record it opened — without racing the
+// agent that would otherwise be finishing the run at the same time.
+func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.Kernel {
+	t.Helper()
+
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
-	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentBudget.Limiter(), history, procRepo)).Required()
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(), history)
+	gt.NoError(t, err).Required()
+	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentBudget.Limiter(), history, procRepo, taskAgent)).Required()
 
 	traceRepo := d.Trace
 	if traceRepo == nil {
@@ -250,18 +282,87 @@ func startAgentRuntime(t *testing.T, d agentRuntimeDeps) {
 		Trace:   traceRepo,
 		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
 		Agents:  reg,
-		Tools:   agentkernel.ToolDeps{Repo: d.Repo, Registry: d.Registry},
+		Tools: agentkernel.ToolDeps{
+			Repo: d.Repo, Registry: d.Registry,
+			CaseUC: usecase.NewCaseToolAdapter(d.CaseUC),
+		},
 	})
 	gt.NoError(t, err).Required()
 	d.UC.BindAgentKernel(k)
+	return k
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- k.Serve(ctx, agentkit.WithPollInterval(5*time.Millisecond)) }()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+// waitForLLMFlag blocks until a probe LLM has been asked for a session, which is
+// the signal that the worker picked the run up. The dispatch decision under test
+// happens synchronously; the agent it dispatched to does not.
+func waitForLLMFlag(t *testing.T, invoked *atomic.Bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !invoked.Load() {
+		if time.Now().After(deadline) {
+			gt.Bool(t, invoked.Load()).True().Required()
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitForPostContaining blocks until the mock has recorded a message carrying
+// the given text, and returns it.
+func waitForPostContaining(t *testing.T, m *agentTestSlackService, want string) agentPostedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, p := range m.posts() {
+			if strings.Contains(p.Text, want) {
+				return p
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no post containing "+want).Equal("a matching post").Required()
+			return agentPostedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// waitForPostIn blocks until the mock has recorded a message posted into the
+// given thread, whichever position it lands in.
+func waitForPostIn(t *testing.T, m *agentTestSlackService, channelID, threadTS string) agentPostedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, p := range m.posts() {
+			if p.ChannelID == channelID && p.ThreadTS == threadTS {
+				return p
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no post in "+channelID+"/"+threadTS).Equal("a post").Required()
+			return agentPostedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+// waitForUpdate blocks until the mock has recorded an in-place update of the
+// given message, which is how a durable run replaces a placeholder it posted
+// before the run started.
+func waitForUpdate(t *testing.T, m *agentTestSlackService, channelID, ts string) agentUpdatedMessage {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, u := range m.updates() {
+			if u.ChannelID == channelID && u.Timestamp == ts {
+				return u
+			}
+		}
+		if time.Now().After(deadline) {
+			gt.Value(t, "no update for "+channelID+"/"+ts).Equal("an update").Required()
+			return agentUpdatedMessage{}
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
 }
 
 // waitForPosts blocks until the mock has recorded at least want messages. The
@@ -354,6 +455,24 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		// Second message: final response (via PostThreadReply)
 		gt.Value(t, posts[1].ChannelID).Equal("C-AGENT-001")
 		gt.Value(t, posts[1].Text).Equal("This is a test response from the AI agent.")
+
+		// The run also records the per-call timeline the case agent page reads.
+		// The Sequence numbers come from the repository, not from an in-process
+		// counter, which is what lets a run that moves between instances keep one
+		// ordered timeline.
+		runs, err := repo.JobRun().ListByCase(ctx, "ws-test", 1)
+		gt.NoError(t, err).Required()
+		gt.Array(t, runs).Length(1).Required()
+		events, err := repo.JobRunEvent().List(ctx,
+			model.JobRunKey{WorkspaceID: "ws-test", CaseID: 1, JobID: runs[0].JobID},
+			runs[0].LastRunID)
+		gt.NoError(t, err).Required()
+		// One LLM call, recorded as a request and a response.
+		gt.Array(t, events).Length(2).Required()
+		gt.Value(t, events[0].Kind).Equal(model.JobRunEventKindLLMRequest)
+		gt.Value(t, events[1].Kind).Equal(model.JobRunEventKindLLMResponse)
+		gt.Value(t, events[0].Sequence).Equal(int64(1))
+		gt.Value(t, events[1].Sequence).Equal(int64(2))
 	})
 
 	t.Run("responds to mention in thread", func(t *testing.T) {
@@ -1020,6 +1139,51 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, session).NotNil().Required()
 	gt.Value(t, session.ActionID).Equal(createdAction.ID)
+}
+
+// traceCapture wraps the existing mockSlackService (defined in source_test.go)
+// and records every PostThreadMessage / UpdateMessage call so the trace tests
+// can assert on the rendered text and call sequence. All other Service methods
+// fall through to mockSlackService.
+type traceCapture struct {
+	mockSlackService
+	mu     sync.Mutex
+	posts  []traceCall
+	postID atomic.Int32
+}
+
+type traceCall struct {
+	method  string
+	ts      string
+	blocks  []goslack.Block
+	text    string
+	channel string
+}
+
+func (s *traceCapture) calls() []traceCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]traceCall, len(s.posts))
+	copy(out, s.posts)
+	return out
+}
+
+func (s *traceCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string, _ ...slack.PostThreadOption) (string, error) {
+	// Use a deterministic, monotonically-increasing TS per post so successive
+	// messages can be distinguished without relying on wall-clock timing.
+	id := s.postID.Add(1)
+	ts := "ts-" + string(rune('0'+id))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.posts = append(s.posts, traceCall{method: "post", ts: ts, blocks: blocks, text: text, channel: channelID})
+	return ts, nil
+}
+
+func (s *traceCapture) UpdateMessage(_ context.Context, channelID, ts string, blocks []goslack.Block, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.posts = append(s.posts, traceCall{method: "update", ts: ts, blocks: blocks, text: text, channel: channelID})
+	return nil
 }
 
 // traceBlockTexts extracts the rendered markdown text of every context block

@@ -3,6 +3,8 @@ package kernel
 import (
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 )
 
 // Agent names. These values are persisted on every Process row, so a running
@@ -39,6 +41,27 @@ const (
 	AgentTask agentkit.AgentName = "task"
 )
 
+// taskAgentVersion is the state version of the shared per-task sub-agent.
+const taskAgentVersion = 1
+
+// RegisterTaskAgent registers the ReAct sub-agent every plan-execute agent spawns
+// per planned task, and returns the handle they are all built with.
+//
+// It lives here, and is called exactly once per registry, because agentkit keys a
+// Process on the agent NAME: a second registration under AgentTask is an error,
+// and giving each host its own name would mean maintaining a separate tool palette
+// for each — for sub-agents that do the same thing.
+func RegisterTaskAgent(reg *agentkit.Registry, limiter agentkit.Limiter,
+	store agentkit.HistoryStore,
+) (agentkit.Agent[react.Input], error) {
+	handle, err := react.Register(reg, AgentTask, taskAgentVersion, limiter,
+		agentkit.WithHistoryStore[react.Output](store))
+	if err != nil {
+		return agentkit.Agent[react.Input]{}, goerr.Wrap(err, "register the task sub-agent")
+	}
+	return handle, nil
+}
+
 // RequiresActor reports whether an agent may only run with an identified Slack
 // user behind it.
 //
@@ -57,9 +80,15 @@ const (
 // schedule with nobody behind them, so there is no actor to name and their
 // system-context access is the intended one. A sub-agent inherits its parent's
 // metadata, so it carries whatever actor the parent was given.
+// AgentCaseThreadCreate is the scoped exception. A thread-mode case may be
+// raised by an integration bot's intake post that names no human, so demanding an
+// actor there would refuse a legitimate creation — the same relaxation
+// Case.ValidateNew already makes for the reporter. It is safe because a create
+// turn's palette (KnownToolSetIDsNoCore) carries no case-reading tool at all:
+// there is no private case for a missing actor to widen access to.
 func RequiresActor(name agentkit.AgentName) bool {
 	switch name {
-	case AgentCaseChannel, AgentCaseThread, AgentCaseThreadCreate, AgentWorkspace, AgentProposal:
+	case AgentCaseChannel, AgentCaseThread, AgentWorkspace, AgentProposal:
 		return true
 	default:
 		return false

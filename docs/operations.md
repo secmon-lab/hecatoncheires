@@ -107,11 +107,16 @@ flowchart LR
   LEASE -->|busy| SKIP[silent skip]
   LEASE --> SLOT[Concurrency slot\nscheduled runs only]
   SLOT -->|slots full| SKIP
-  SLOT --> EXEC[SingleLoopJobExecutor]
-  EXEC --> LLM[gollem agent]
-  LLM <-->|tool calls| TOOLS[(read-only + writer tools)]
-  EXEC --> REC[RecordRun]
+  SLOT --> SPAWN[Spawn onto the agent runtime]
+  SPAWN --> WORK[Kernel worker\none transition at a time]
+  WORK <-->|tool calls| TOOLS[(read-only + writer tools)]
+  WORK --> FIN[Completion handler\nRecordRun]
 ```
+
+`Run` returns once the run is recorded and spawned; the run itself executes on
+the Kernel worker, and its outcome is written by the completion handler. A
+deployment with no LLM configured has no runtime to spawn onto, and falls back to
+running the simple strategy in process (`SingleLoopJobExecutor`).
 
 #### Event matching
 
@@ -170,18 +175,32 @@ How it works:
   document whose `ExpiresAt` is in the future; a free slot has no
   document at all, so the number of stored documents *is* the number of
   in-flight runs. No counter, nothing to drift.
-- `JobRunner.Run` takes a slot after the lease and suspension checks and
-  before it builds any prompt, then releases it in a defer. While the run
-  executes, a heartbeat pushes `ExpiresAt` forward every 10 seconds
-  (TTL 30 seconds), so a crashed instance's slot frees itself within
-  ~30 seconds without any cleanup sweep. A hold stops renewing after
-  2 hours as a backstop against a leaked slot; the run itself continues.
-- **When no slot is free the run is skipped, not queued.** It records
-  nothing, so `LastRunAt` is untouched and the next tick finds the Job
+- A slot is taken twice over, at two different scopes, and both matter:
+  - `JobRunner.Run` takes one after the lease and suspension checks and before it
+    builds any prompt, releasing it when `Run` returns. This is the early refusal
+    that keeps a tick from preparing hundreds of runs it cannot execute.
+  - **The agent worker takes one per claim, and that is what bounds execution.**
+    A durable run outlives the call that started it — `Run` returns as soon as the
+    run is recorded — so the runner's hold alone would bound concurrent *spawns*
+    and nothing else. The gate is therefore also wired into the Kernel, which asks
+    it before every claim of a slot-gated run.
+  While a slot is held, a heartbeat pushes `ExpiresAt` forward every 10 seconds
+  (TTL 30 seconds), so a crashed instance's slot frees itself within ~30 seconds
+  without any cleanup sweep. A hold stops renewing after 2 hours as a backstop
+  against a leaked slot; the run itself continues.
+- A run that suspends to wait for its children releases its slot and asks again on
+  its next claim. Waiting occupies no execution capacity, so holding the slot
+  across the wait would under-admit.
+- **When no slot is free at the runner's gate the run is skipped, not queued.** It
+  records nothing, so `LastRunAt` is untouched and the next tick finds the Job
   due again — the effect is a postponement to a later tick, not a lost
   run. The skip is logged at `INFO`
   (`job run skipped: concurrency slots full`) and is not reported to
   Sentry.
+- **When no slot is free at the worker's gate the claim is refused and the run
+  waits.** It has already been recorded, so it is not lost and not retried from
+  scratch: the worker picks it up again once capacity frees, and its step budget is
+  not charged for the refusal.
 - If the slot state cannot be read (Firestore error) the run is
   **refused**, not started: with the state unknown, starting anyway
   invites the very rate-limit blowout the gate prevents. The error is
@@ -286,6 +305,7 @@ no need to match message strings:
 | `suspended` | An interactive run asked the user and paused. |
 | `skipped_lease` | Another runner held the `(workspace, case, job)` lease. |
 | `skipped_suspended` | Stepped aside for a genuinely open question. |
+| `skipped_running` | A durable run of the same `(workspace, case, job)` was still live. Expected on every tick of a Job that takes longer than the sweep interval — the lease is released as soon as the run is recorded, so this, not the lease, is what keeps a long run from being started twice. |
 | `skipped_slots_full` | Refused by the deployment-wide concurrency gate. |
 | `skipped_stale` | A resume whose run was no longer awaiting input. |
 
@@ -328,8 +348,8 @@ its walk returns without a summary instead of waiting).
 `due_total` counts the `(job, case)` pairs the sweep raised an event
 for. `started` counts the attempts that reached the executor.
 `completed` / `failed` / `suspended` / `skipped_slots_full` /
-`skipped_lease` / `skipped_suspended` are always present, zero
-included. `elapsed_ms` covers the whole sweep; `settled` is `false`
+`skipped_lease` / `skipped_suspended` / `skipped_running` are always
+present, zero included. `elapsed_ms` covers the whole sweep; `settled` is `false`
 when the wait was given up on, which marks the counts as partial.
 
 With the gate enabled the line adds `slot_limit`, `slot_busy_ms` (the
@@ -499,6 +519,121 @@ Every record carries `WorkspaceID`, `CaseID`, `JobID`, `RunID`,
   scheduler jitter.
 - Use the `JobRunRepository.List` API (over `workspaceID`) to surface
   per-Job state in an observability dashboard.
+
+## Agent runtime operations
+
+Every agent turn on `serve` — Slack mentions, case creation, case drafts, and
+scheduled Jobs — runs as an **agent process** on the durable runtime rather than
+inside the request that triggered it. The trigger records the run and returns;
+a worker in every `serve` instance drives it to completion.
+
+### What a worker does
+
+Each instance runs one worker with `--agent-worker-poll-concurrency` poll loops
+(default 2) looking for runnable processes every
+`--agent-worker-poll-interval` (default 2s), and drives at most
+`--agent-worker-concurrency` transitions at once (default 8). A claimed process
+is held for `--agent-worker-lease` (default 120s); if the instance dies, another
+instance may reclaim it once the lease expires.
+
+Sizing follows from what a transition is: **one LLM call or one tool call**. So
+worker concurrency is a cap on in-flight model/tool calls per instance, not on
+concurrent conversations — a single conversation occupies one slot at a time.
+
+Two ceilings apply to a run regardless of which instance drives which
+transition, because they are counted on the process itself: the step and token
+budgets (`--agent-max-*` / `--agent-task-max-*`, see
+[CLI Reference](./cli.md#agent-runtime-budgets)). A run that reaches one fails
+with a limit error and the host posts a fallback notice.
+
+### Concurrency per thread
+
+Two agent runs never execute concurrently on one Slack thread: every turn is
+spawned under the thread's **subject**, and the runtime admits one live run per
+subject. A trigger that arrives while a run is live is refused, and the host posts
+the "already handling your previous request" notice. This is what replaced the
+previous per-thread turn lock; there is no heartbeat or staleness window to
+tune any more.
+
+One caveat worth knowing when reading a thread's history: the subject is released
+when the run reaches its terminal state, and the run's **outward work** — the Slack
+reply, the case update, the session bookkeeping — happens immediately after, in the
+completion handler. A trigger landing in that window starts a new run while the
+previous one is still applying its result, so the two can interleave. It is a
+narrow window, but it is why a thread can occasionally show a reply arriving after
+the next turn has already begun. See `.claude/rules/architecture.md` §
+"the subject is free before the handler finishes".
+
+Deployment-wide Job concurrency is separate and still enforced by the Firestore
+execution slots described under [Concurrency](#concurrency). A scheduled trigger
+that finds a durable run of the same Job still live is skipped silently
+(`skipped_running` in the sweep summary) rather than recorded as a run.
+
+### A run that never finishes
+
+A run stuck in `running` with an expired lease is reclaimed automatically. A run
+that is genuinely wedged — waiting on an answer nobody will give, or repeatedly
+failing its transition — has to be ended deliberately. There is **no CLI for
+this**: inspect and cancel via the `agentProcesses` collection in Firestore.
+
+- The run-detail page (`/ws/{workspaceID}/cases/{caseID}/agent/runs/{runID}`)
+  shows the per-transition timeline for case-scoped runs, which is the fastest
+  way to see where a run stopped.
+- A run parked on a question keeps a pending `Await`; answering the Slack form
+  resumes it. Deleting the process document abandons the turn — the user sees no
+  reply, and the run log stays `RUNNING`.
+- **A completed run whose completion handler was lost keeps its log `RUNNING`,
+  and for a Job the scheduler will run it again.** That gap is documented in
+  `.claude/rules/architecture.md` § "the completion handler is best-effort"; it
+  is narrow but not yet closed.
+
+### Cutting over to the agent runtime (one-time)
+
+The release that introduced the agent runtime **must not run alongside the release
+before it.** The two use different mutual exclusion for a Slack thread: the older
+one takes a lock recorded on the Session, the newer one takes the run's subject.
+Neither sees the other's, so during an overlap both can accept the same mention and
+process it twice — two replies, two case updates.
+
+A normal rolling deploy overlaps revisions by design, so for this one release:
+
+- Cut over with no overlap — stop the old revision (or move all traffic in one
+  step) before the new one serves Slack events. On Cloud Run, migrate 100% of
+  traffic in a single revision change rather than a gradual split.
+- Roll back the same way. Rolling back to the older revision is otherwise safe:
+  a Session it reads carries no lock fields (the newer code rewrites the row
+  without them), which the older code reads as "idle" — the direction that
+  acquires rather than refuses.
+- Before rolling back, let in-flight runs finish or cancel them. A Process the
+  older revision does not know about will never be driven, and its run log stays
+  `RUNNING`.
+
+Everything after this release is an ordinary rolling deploy: two instances of the
+agent runtime coordinate through the same subjects and leases.
+
+### `tick` runs its own worker
+
+`hecatoncheires tick` dispatches its Jobs onto the agent runtime like `serve`, then
+**drives the worker itself** until every run it dispatched has finished, and exits.
+So a scheduled run gets the same step / token budget and the same
+one-transition-at-a-time checkpointing as any other run, without the sweep
+depending on a `serve` instance being up to execute what it dispatched.
+
+Two consequences for how a sweep is configured:
+
+- **`tick` needs the agent configuration too**: `--cloud-storage-bucket`
+  (`HECATONCHEIRES_CLOUD_STORAGE_BUCKET`) for the runs' conversation and trace
+  archive, plus optionally the `--agent-*` budget and worker flags. A sweep invoked
+  without the bucket fails at startup rather than dispatching runs it cannot
+  record.
+- **It waits only for its own runs**, so a long-running `serve` workload never
+  delays it. Set `HECATONCHEIRES_JOB_MAX_CONCURRENCY` to the same value on `serve`
+  and `tick`: the limit is deployment-wide, and both sides now count the same
+  claim-time holds.
+
+If a sweep is killed mid-run, the runs it had in flight are not lost — whichever
+worker claims them next (the following sweep, or a `serve` instance) picks them up
+once `--agent-worker-lease` expires.
 
 ## `tick` scheduling
 

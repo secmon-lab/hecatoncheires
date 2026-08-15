@@ -359,7 +359,7 @@ func missingDraftQuestionItems(pq *model.PendingQuestion, answers map[string]dra
 // input. Validation failures re-render the form with an inline error so
 // the user can fix and resubmit.
 func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
-	if uc.draftUC == nil {
+	if !uc.draftReady() {
 		return goerr.New("draft usecase is not configured")
 	}
 	if callback == nil || action == nil {
@@ -409,56 +409,44 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 
 	// Clear the pending snapshot before resuming so a duplicate Submit
 	// (network retry, double-click) lands on the stale-form path instead
-	// of re-running the planner.
+	// of re-running the planner. The run that asked is read out first: the resume
+	// inherits its conversation, and clearing drops the record.
+	askedBy := pq.AskedByProcessID
 	session.PendingQuestion = nil
-	if err := uc.repo.Session().Put(ctx, session); err != nil {
+	// One field, not a Put: this is the spawning side of the resumed turn, and the
+	// previous turn's completion handler may still be writing the same row.
+	if err := uc.repo.Session().SetPendingQuestion(ctx,
+		session.ChannelID, session.ThreadTS, nil); err != nil {
 		errutil.Handle(ctx, err, "clear PendingQuestion before resuming planner")
 	}
 
-	var (
-		d          *model.CaseProposal
-		proposalID model.CaseProposalID
-	)
+	var d *model.CaseProposal
 	if session.ProposalID != "" {
 		d, err = uc.repo.CaseProposal().Get(ctx, session.ProposalID)
 		if err != nil {
 			errutil.Handle(ctx, err, "thread-reply: failed to load draft; continuing without it")
 		}
 	}
-	if d != nil {
-		proposalID = d.ID
-	}
-	candidates := uc.accessibleWorkspaces(callback.User.ID)
-
-	handler := newSlackDraftHandler(
-		uc.repo, uc.registry, uc.slackService,
-		channelID, threadTS, messageTS, callback.User.ID,
-		candidates, proposalID, "", "",
-	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)
-	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
+	result, runErr := uc.runDraftTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
 		Trigger:          proposal.TriggerThreadReply,
 		TriggerTS:        messageTS,
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
-		Handler:          handler,
+		InheritFrom:      askedBy,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "draft question submit turn failed")
 	}
-	if result.Status == proposal.StatusFallback {
-		uc.notifyDraftFallback(ctx, channelID, threadTS, result.FallbackReason)
-	}
 
-	logger.Info("draft question submit turn finished",
+	logger.Info("draft question submit turn started",
 		"channel_id", channelID,
 		"thread_ts", threadTS,
 		"user_id", callback.User.ID,
 		"status", int(result.Status),
-		"ended_with", string(result.EndedWith),
 	)
 	return nil
 }

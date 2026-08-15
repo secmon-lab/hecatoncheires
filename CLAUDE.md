@@ -96,10 +96,17 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
 - `pkg/repository/` - Data persistence implementations
   - `firestore/` - Firestore backend
   - `memory/` - In-memory backend (testing/development)
+- `pkg/agent/` - The agent runtime, independent of any usecase
+  - `kernel/` - Builds the agentkit `Kernel` every host spawns onto: the agent registry, the per-agent tool factory (`ToolDeps`), the `Scope` carried as Process metadata, and the claim middleware (trace archive + run timeline + side-effect guard). `agentkernel.Serve` is the only permitted way to run the worker.
+  - `budget/` - `budget.Config` → `agentkit.Limiter`: the per-Process step and token ceilings. See `.claude/rules/architecture.md` § Budget.
+  - `react/` - The generic single-loop Strategy (tool calls until the model answers), used for the case-channel agent and the shared task sub-agent.
+  - `runtrace/` - Turns LLM / tool call boundaries into the `JobRunLog` / `JobRunEvent` records the run-detail UI reads.
 - `pkg/usecase/` - Application use cases orchestrating domain operations
-  - `agent/planexec/` - Reusable plan-and-execute runtime (planner LLM → parallel sub-agents → replan → final response). Shared by `agent/proposal` (case-draft mode) and `agent/job` (planexec-strategy Jobs).
-  - `agent/proposal/` - Case-draft (proposal) agent host. Owns the Slack-facing Handler interface and turn-lock semantics.
-  - `agent/job/` - Job execution layer: `SingleLoopJobExecutor` (strategy=simple) and `PlanexecJobExecutor` (strategy=planexec). The Job agent's tool set is assembled in `buildJobTools()` (`pkg/cli/job_runtime.go`). **When adding a new agent tool, wire it into every host that needs it — including this Job path — not just the mention/assist path; non-Action tools default to both channel- and thread-mode.** See `.claude/rules/architecture.md` § "Agent tool wiring (host coverage)".
+  - `agent/planexec/` - The plan-and-execute Strategy (plan → sub-agents → replan → terminal output). Shared by `agent/threadcase`, `agent/proposal` and `agent/job`. There is no in-process runner beside it any more: every host, the eval harness included, spawns onto the agentkit runtime.
+  - `agent/proposal/` - Case-draft (proposal) agent host: spawns the turn and applies its draft / question from the run's completion handler (`Host`).
+  - `agent/threadcase/` - Thread-mode case host (creation and mention turns).
+  - `agent/casebound/` / `agent/wsagent/` - Case-channel and workspace-channel mention hosts.
+  - `agent/job/` - Job execution layer. Every Job runs on the durable runtime (`pkg/usecase/job/durable.go`) — `serve`, `tick` and the eval harness alike. `SingleLoopJobExecutor` remains as the in-process fallback for a deployment with no LLM configured (where there is no runtime to spawn onto), and is wired only in that case (`inProcessExecutors`). The Job agent's tool set is assembled in `buildJobTools()` (`pkg/cli/job_runtime.go`). **When adding a new agent tool, wire it into every host that needs it — including this Job path — not just the mention/assist path; non-Action tools default to both channel- and thread-mode.** See `.claude/rules/architecture.md` § "Agent tool wiring (host coverage)".
   - `eval/` - Offline eval harness (`hecatoncheires eval`): runs scenario files through a workflow driver, judges the produced artifact with an LLM checklist, and dumps diagnostics. See `docs/eval.md`.
 - `pkg/utils/` - Shared utilities (logging, etc.)
 - `frontend/` - React TypeScript application

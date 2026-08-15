@@ -49,25 +49,8 @@ type plannerPromptInput struct {
 	// when true, the planner is told tasks may perform writes/actions
 	// (not only investigation), how to sequence them, and that the final
 	// response cannot perform side effects. Mirrors
-	// RunRequest.AllowSubAgentWrites.
+	// Input.AllowSubAgentWrites.
 	AllowSubAgentWrites bool
-}
-
-// buildPlannerSystemPrompt maps a RunRequest into the planner system prompt.
-// Run / RunText / ResumeText configure the planner identically except for the
-// final-output shape, which the entry point passes as structuredFinal (true for
-// Run[T], false for the text variants). It uses no Runner state, hence a free
-// function rather than a method.
-func buildPlannerSystemPrompt(req RunRequest, structuredFinal bool) (string, error) {
-	return renderPlannerSystemPrompt(plannerPromptInput{
-		HostPrompt:          req.SystemPrompt,
-		Language:            req.LanguageLabel,
-		KnownToolIDs:        req.KnownToolIDs,
-		AllowQuestion:       req.AllowQuestion,
-		AllowDirect:         req.AllowDirect,
-		StructuredFinal:     structuredFinal,
-		AllowSubAgentWrites: req.AllowSubAgentWrites,
-	})
 }
 
 // renderPlannerSystemPrompt builds the planner system prompt by piping

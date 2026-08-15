@@ -161,7 +161,12 @@ func (uc *AgentUseCase) userErrorText(ctx context.Context, err error, opMsg stri
 // because it already crossed the planexec boundary as one; the renderer clips
 // it to a safe length.
 func fallbackReasonError(reason string) error {
+	// The reason is attached BOTH as the user-facing cause and as a goerr value.
+	// Only the value reaches the log: without it an operator sees "agent turn ended
+	// without a decision" and a ref id, with nothing to say whether the turn hit its
+	// budget, lost the model, or died on a malformed request.
 	return goerr.New("agent turn ended without a decision",
+		goerr.V("fallback_reason", reason),
 		uierr.Attach(uierr.UserFacing{
 			Kind:        uierr.KindTransient,
 			What:        i18n.MsgUIErrAgentNoConclusionWhat,

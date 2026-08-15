@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
@@ -161,6 +162,64 @@ func TestConcurrencyLimiter_AdmitsUpToLimit(t *testing.T) {
 	job.ReleaseSlotForTest(ctx, hold)
 	job.ReleaseSlotForTest(ctx, holds[0])
 	job.ReleaseSlotForTest(ctx, holds[2])
+	async.Wait()
+
+	stored, err := repo.List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(0)
+}
+
+// The exported Acquire is what the agent runtime calls. It must report a full
+// gate as (nil, nil) — an untyped nil, not a typed nil in a non-nil interface,
+// which the runtime would read as "admitted" and let the run through.
+func TestConcurrencyLimiter_AcquireReportsAFullGateAsNoHold(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New().JobSlot()
+	limiter := newLimiter(t, repo, 1, newTestClock())
+
+	ref := agentkernel.SlotRef{WorkspaceID: "ws-1", CaseID: 9, JobID: "job-nightly"}
+	first, err := limiter.Acquire(ctx, ref)
+	gt.NoError(t, err).Required()
+	gt.Value(t, first).NotNil().Required()
+
+	// The slot records which run holds it, so an operator can see what occupies
+	// capacity.
+	stored, err := repo.List(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, stored).Length(1).Required()
+	gt.String(t, stored[0].WorkspaceID).Equal("ws-1")
+	gt.Number(t, stored[0].CaseID).Equal(9)
+	gt.String(t, stored[0].JobID).Equal("job-nightly")
+
+	second, err := limiter.Acquire(ctx, agentkernel.SlotRef{WorkspaceID: "ws-1", CaseID: 10, JobID: "job-other"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, second).Nil()
+	gt.Bool(t, second == nil).True() // untyped nil, so the runtime refuses the claim
+
+	first.Release(ctx)
+	async.Wait()
+
+	// Capacity is back.
+	third, err := limiter.Acquire(ctx, agentkernel.SlotRef{WorkspaceID: "ws-1", CaseID: 11, JobID: "job-third"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, third).NotNil().Required()
+	third.Release(ctx)
+	async.Wait()
+}
+
+// Release through the runtime's interface must be idempotent: the claim bracket
+// releases on its own path out, and a caller may release again.
+func TestConcurrencyLimiter_AcquireReleaseIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New().JobSlot()
+	limiter := newLimiter(t, repo, 1, newTestClock())
+
+	hold, err := limiter.Acquire(ctx, agentkernel.SlotRef{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-a"})
+	gt.NoError(t, err).Required()
+	gt.Value(t, hold).NotNil().Required()
+
+	hold.Release(ctx)
+	hold.Release(ctx)
 	async.Wait()
 
 	stored, err := repo.List(ctx)
