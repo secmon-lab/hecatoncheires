@@ -25,7 +25,8 @@ const notionHTTPTimeout = 30 * time.Second
 // Client provides agent-tool-scoped access to the Notion API. It calls the
 // search endpoint and the dedicated Markdown content endpoint
 // (GET /v1/pages/{id}/markdown, Notion-Version 2026-03-11) directly; the
-// jomei/notionapi library is used for its request/response types only.
+// jomei/notionapi library is used for its request types only. Responses are
+// decoded by this package — see searchResponse for why.
 type Client interface {
 	// Search performs a Notion-wide search via POST /v1/search.
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
@@ -38,8 +39,9 @@ type Client interface {
 // GET /v1/pages/{id}/markdown endpoint.
 const markdownAPIVersion = "2026-03-11"
 
-// searchAPIVersion pins POST /v1/search to the version jomei/notionapi is
-// written against, so notionapi.SearchResponse still decodes the payload.
+// searchAPIVersion pins POST /v1/search to the response shape searchResponse is
+// written against. Notion changes the payload between versions, so the pin is
+// what keeps the decoder and the API in step.
 const searchAPIVersion = "2022-06-28"
 
 // notionAPIMaxAttempts bounds how many times a request is sent when Notion
@@ -127,7 +129,7 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 
 	resp, err := c.doJSON(ctx, http.MethodPost, "/v1/search", searchAPIVersion, encoded)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to search notion",
+		return nil, goerr.Wrap(err, "failed to call notion search endpoint",
 			goerr.V("query", query),
 			goerr.V("page_size", pageSize),
 		)
@@ -135,15 +137,13 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 	defer safe.Close(ctx, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, goerr.New("notion search endpoint returned non-2xx",
+		return nil, newAPIError(ctx, "search", resp,
 			goerr.V("query", query),
 			goerr.V("page_size", pageSize),
-			goerr.V("status", resp.StatusCode),
-			goerr.V("body", readErrorBody(ctx, resp.Body)),
 		)
 	}
 
-	var decoded notionapi.SearchResponse
+	var decoded searchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, goerr.Wrap(err, "failed to decode notion search response",
 			goerr.V("query", query),
@@ -153,7 +153,7 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 	out := &SearchResult{
 		Items:      make([]SearchItem, 0, len(decoded.Results)),
 		HasMore:    decoded.HasMore,
-		NextCursor: string(decoded.NextCursor),
+		NextCursor: decoded.NextCursor,
 	}
 	for _, obj := range decoded.Results {
 		item, ok := convertSearchItem(obj)
@@ -236,50 +236,159 @@ func readErrorBody(ctx context.Context, body io.Reader) string {
 	return string(raw)
 }
 
-// convertSearchItem converts a notionapi.Object (Page or Database) into a SearchItem.
-// Returns false when the object type is not recognised.
-func convertSearchItem(obj notionapi.Object) (SearchItem, bool) {
-	switch v := obj.(type) {
-	case *notionapi.Page:
-		return SearchItem{
-			ID:         v.ID.String(),
-			Type:       "page",
-			Title:      extractPageTitle(v),
-			URL:        v.URL,
-			LastEdited: v.LastEditedTime,
-		}, true
-	case *notionapi.Database:
-		var title strings.Builder
-		for _, rt := range v.Title {
-			title.WriteString(rt.PlainText)
+// apiErrorDetailLimit bounds how much of the upstream explanation is repeated in
+// the error message. The whole body still travels as a goerr value; this is the
+// part a model reads, and a long one pushes the rest of its context out.
+const apiErrorDetailLimit = 512
+
+// notionErrorBody is the error payload Notion returns on every non-2xx response.
+type notionErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// newAPIError reports a non-2xx Notion response. The status and Notion's own
+// error code are put IN the message rather than only in goerr values because
+// that message is the whole of what the agent is told: a failed tool call is
+// rendered into its function response as err.Error() (pkg/agent/toolcall), which
+// drops goerr values. Told only "returned non-2xx", neither the model nor an
+// operator reading the recorded event can tell a page that does not exist from
+// one the integration cannot see, or either from a rate limit.
+func newAPIError(ctx context.Context, endpoint string, resp *http.Response, opts ...goerr.Option) error {
+	body := readErrorBody(ctx, resp.Body)
+
+	var decoded notionErrorBody
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+		// Not reported: a non-JSON body is a normal shape for an error served by
+		// a proxy in front of Notion, and the raw prefix below carries it.
+		decoded = notionErrorBody{}
+	}
+
+	msg := fmt.Sprintf("notion %s endpoint returned HTTP %d", endpoint, resp.StatusCode)
+	if decoded.Code != "" {
+		msg += " (" + decoded.Code + ")"
+	}
+	if detail := firstNonEmpty(decoded.Message, body); detail != "" {
+		msg += ": " + truncate(detail, apiErrorDetailLimit)
+	}
+
+	return goerr.New(msg, append(opts,
+		goerr.V("endpoint", endpoint),
+		goerr.V("status", resp.StatusCode),
+		goerr.V("code", decoded.Code),
+		goerr.V("body", body),
+	)...)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
+	}
+	return ""
+}
+
+// truncate cuts s to at most limit runes. Runes rather than bytes: the cut text
+// reaches the model, the run timeline and Sentry alike, and a byte-offset cut
+// splits a multi-byte character.
+func truncate(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "..."
+}
+
+// searchResponse decodes only what the search tool surfaces.
+//
+// jomei/notionapi's SearchResponse is deliberately not used: it decodes every
+// property of every page through a closed switch over the property types the
+// library knows (property.go, decodeProperty), and returns an error for any
+// other one. A single page carrying a property type Notion added since — `place`
+// in production — therefore failed the whole search, and the agent got nothing
+// back for an otherwise valid query. Decoding just id / title / url / timestamp
+// leaves an unknown property type harmless.
+type searchResponse struct {
+	Results    []searchObject `json:"results"`
+	HasMore    bool           `json:"has_more"`
+	NextCursor string         `json:"next_cursor"`
+}
+
+// searchObject is one entry of the search response: a page or a database.
+type searchObject struct {
+	Object         string    `json:"object"`
+	ID             string    `json:"id"`
+	URL            string    `json:"url"`
+	LastEditedTime time.Time `json:"last_edited_time"`
+	// Title is where a database carries its name.
+	Title []richText `json:"title"`
+	// Properties is where a page carries its name, under a user-defined key
+	// whose value is the property typed "title". The values stay raw so that a
+	// property type this code does not model cannot fail the decode.
+	Properties map[string]json.RawMessage `json:"properties"`
+}
+
+type richText struct {
+	PlainText string `json:"plain_text"`
+}
+
+// titleProperty is a page property narrowed to the title case.
+type titleProperty struct {
+	Type  string     `json:"type"`
+	Title []richText `json:"title"`
+}
+
+// convertSearchItem converts one search result into a SearchItem. Returns false
+// when the object is neither a page nor a database.
+func convertSearchItem(obj searchObject) (SearchItem, bool) {
+	switch obj.Object {
+	case "page":
 		return SearchItem{
-			ID:         v.ID.String(),
+			ID:         obj.ID,
+			Type:       "page",
+			Title:      extractPageTitle(obj.Properties),
+			URL:        obj.URL,
+			LastEdited: obj.LastEditedTime,
+		}, true
+	case "database":
+		return SearchItem{
+			ID:         obj.ID,
 			Type:       "database",
-			Title:      title.String(),
-			URL:        v.URL,
-			LastEdited: v.LastEditedTime,
+			Title:      plainText(obj.Title),
+			URL:        obj.URL,
+			LastEdited: obj.LastEditedTime,
 		}, true
 	default:
 		return SearchItem{}, false
 	}
 }
 
-// extractPageTitle pulls the first title-typed property's plain-text content
-// out of a Notion page.
-func extractPageTitle(page *notionapi.Page) string {
-	for _, prop := range page.Properties {
-		if title, ok := prop.(*notionapi.TitleProperty); ok {
-			var sb strings.Builder
-			for _, rt := range title.Title {
-				sb.WriteString(rt.PlainText)
-			}
-			if sb.Len() > 0 {
-				return sb.String()
-			}
+// extractPageTitle pulls the plain text of the page's title property. A property
+// that does not decode is skipped rather than failing the item: the page is
+// still worth returning without its title.
+func extractPageTitle(props map[string]json.RawMessage) string {
+	for _, raw := range props {
+		var prop titleProperty
+		if err := json.Unmarshal(raw, &prop); err != nil {
+			continue
+		}
+		if prop.Type != "title" {
+			continue
+		}
+		if title := plainText(prop.Title); title != "" {
+			return title
 		}
 	}
 	return ""
+}
+
+func plainText(parts []richText) string {
+	var sb strings.Builder
+	for _, rt := range parts {
+		sb.WriteString(rt.PlainText)
+	}
+	return sb.String()
 }
 
 // markdownResponse is the JSON shape returned by GET /v1/pages/{id}/markdown.
@@ -307,11 +416,7 @@ func (c *client) GetPageMarkdown(ctx context.Context, pageID string) (*PageMarkd
 	defer safe.Close(ctx, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, goerr.New("notion markdown endpoint returned non-2xx",
-			goerr.V("pageID", pageID),
-			goerr.V("status", resp.StatusCode),
-			goerr.V("body", readErrorBody(ctx, resp.Body)),
-		)
+		return nil, newAPIError(ctx, "markdown", resp, goerr.V("pageID", pageID))
 	}
 
 	var decoded markdownResponse

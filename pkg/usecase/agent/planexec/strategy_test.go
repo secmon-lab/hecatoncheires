@@ -562,17 +562,24 @@ func TestBudgetNoticeWrapsTheRunUp(t *testing.T) {
 // recordingTool answers a planner lookup and records that it was called.
 type recordingTool struct {
 	name string
-	mu   sync.Mutex
-	args []map[string]any
+	// params replaces the default parameter set when non-nil, for a test about
+	// the arguments themselves.
+	params map[string]*gollem.Parameter
+	mu     sync.Mutex
+	args   []map[string]any
 }
 
 func (t *recordingTool) Spec() gollem.ToolSpec {
+	params := t.params
+	if params == nil {
+		params = map[string]*gollem.Parameter{
+			"id": {Type: gollem.TypeString, Description: "what to look up"},
+		}
+	}
 	return gollem.ToolSpec{
 		Name:        t.name,
 		Description: "look something up",
-		Parameters: map[string]*gollem.Parameter{
-			"id": {Type: gollem.TypeString, Description: "what to look up"},
-		},
+		Parameters:  params,
 	}
 }
 
@@ -808,6 +815,36 @@ func TestParallelPlannerToolCallsAreAnsweredInOneTurn(t *testing.T) {
 	for i := 2; i < len(answered); i++ {
 		gt.Array(t, answered[i]).Length(0)
 	}
+}
+
+// A single value the planner sent for an array-typed argument reaches the tool as
+// the batch of one it meant. gollem refuses the whole call otherwise, before the
+// tool runs, and a model answering that refusal re-emits the same call.
+func TestASingleValueForAnArrayArgumentStillReachesTheTool(t *testing.T) {
+	lookup := &recordingTool{
+		name: "get_workspace",
+		params: map[string]*gollem.Parameter{
+			"ids": {Type: gollem.TypeArray, Items: &gollem.Parameter{Type: gollem.TypeString}},
+		},
+	}
+	planner := &toolCallingPlanner{replies: []any{
+		[]*gollem.FunctionCall{{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"ids": "ws-1"}}},
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Answered.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	got := lookup.calls()
+	gt.Array(t, got).Length(1).Required()
+	gt.Value(t, got[0]["ids"]).Equal([]any{"ws-1"})
 }
 
 // A planning phase that asked for tools can reach the terminal output without

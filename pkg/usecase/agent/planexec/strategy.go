@@ -13,6 +13,7 @@ import (
 
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolargs"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -525,6 +526,11 @@ func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from
 // the split the provider rejects. The conversation is advanced once, by the next
 // Generate, with every result in that one turn.
 //
+// The arguments pass through toolargs.Coerce first, for the same reason they do
+// in react.stepTool: it is the last point at which a single value sent for an
+// array-typed argument can be read as the batch of one the model meant, rather
+// than rejected by gollem before the tool sees it.
+//
 // A tool that fails is not a transition failure: the failure is recorded as this
 // call's response, so the planner gets to react to it on its next call and the
 // call is still answered. A refusal from the budget is the one error that must not
@@ -539,7 +545,7 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 	call := st.PendingCalls[0]
 	st.PendingCalls = st.PendingCalls[1:]
 	if call != nil {
-		out, err := sys.CallTool(ctx, *call)
+		out, err := sys.CallTool(ctx, toolargs.Coerce(sys.Tools(), *call))
 		if err != nil {
 			if errors.Is(err, agentkit.ErrLimitExceeded) {
 				return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err,

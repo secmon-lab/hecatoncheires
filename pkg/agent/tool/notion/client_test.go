@@ -186,7 +186,7 @@ func TestSearch(t *testing.T) {
 		gt.Value(t, sort["direction"]).Equal("ascending")
 	})
 
-	t.Run("returns error on non-2xx response", func(t *testing.T) {
+	t.Run("states the status and the upstream reason on a non-2xx response", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -199,7 +199,49 @@ func TestSearch(t *testing.T) {
 
 		_, err := c.Search(context.Background(), "q", notiontool.SearchOptions{})
 		gt.Value(t, err).NotNil().Required()
-		gt.Bool(t, strings.Contains(err.Error(), "non-2xx")).True()
+		// The message is the whole of what the agent is told, so the status and
+		// Notion's own reason must be in it, not only in the goerr values.
+		gt.String(t, err.Error()).Contains("400")
+		gt.String(t, err.Error()).Contains("validation_error")
+		gt.String(t, err.Error()).Contains("body failed validation")
+	})
+
+	t.Run("keeps results carrying a property type the client does not model", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// "place" is a property type Notion added after jomei/notionapi's
+			// closed switch was written; decoding through the library failed the
+			// whole search on it and the agent got nothing back.
+			_, _ = w.Write([]byte(`{
+				"object": "list",
+				"has_more": false,
+				"next_cursor": null,
+				"results": [
+					{
+						"object": "page",
+						"id": "00000000-0000-0000-0000-000000000009",
+						"last_edited_time": "2026-05-01T10:00:00Z",
+						"url": "https://www.notion.so/Site-Visit-0009",
+						"properties": {
+							"Location": {"id": "abcd", "type": "place", "place": {"name": "Tokyo"}},
+							"Name": {"id": "title", "type": "title", "title": [{"plain_text": "Site Visit"}]}
+						}
+					}
+				]
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.Search(context.Background(), "site", notiontool.SearchOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].ID).Equal("00000000-0000-0000-0000-000000000009")
+		gt.String(t, got.Items[0].Title).Equal("Site Visit")
+		gt.String(t, got.Items[0].URL).Equal("https://www.notion.so/Site-Visit-0009")
 	})
 
 	t.Run("retries a 429 with the same body", func(t *testing.T) {
@@ -413,7 +455,7 @@ func TestGetPageMarkdown(t *testing.T) {
 		gt.Number(t, attempts).Equal(2)
 	})
 
-	t.Run("returns error on non-2xx response", func(t *testing.T) {
+	t.Run("states the status and the upstream reason on a non-2xx response", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/v1/pages/missing/markdown", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
@@ -424,8 +466,26 @@ func TestGetPageMarkdown(t *testing.T) {
 
 		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
 		_, err := c.GetPageMarkdown(context.Background(), "missing")
-		gt.Value(t, err).NotNil()
-		gt.Bool(t, strings.Contains(err.Error(), "non-2xx")).True()
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("404")
+		gt.String(t, err.Error()).Contains("object_not_found")
+		gt.String(t, err.Error()).Contains("page not found")
+	})
+
+	t.Run("falls back to the raw body when the error payload is not Notion JSON", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/pages/gateway/markdown", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html>upstream connect error</html>"))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.GetPageMarkdown(context.Background(), "gateway")
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("502")
+		gt.String(t, err.Error()).Contains("upstream connect error")
 	})
 
 	t.Run("returns error when pageID is empty", func(t *testing.T) {

@@ -523,6 +523,28 @@ A model's argument mistake still reaches Sentry through the strategies'
 on the same rejected call is exactly what an operator needs to see. Do not
 silence it — make the feedback good enough that the loop stops.
 
+Better feedback did not stop that loop, though: the model re-emitted the same
+`memo__apply_memo_changes` call, so the memo writes were never applied while the
+run still reported success. `toolargs.Coerce` (`pkg/agent/toolargs`) closes the
+one case that needs no guessing — a single value sent for an array-typed
+argument, which reads as the batch of one the model meant — by wrapping it before
+gollem validates. Three properties a change here must preserve:
+
+- **It runs at the strategy, not as a middleware.** A `ToolCallMiddleware` cannot
+  see the `ToolSpec` (agentkit resolves it inside `toolCallBase`, after the
+  chain), so the coercion sits at the two `Syscalls.CallTool` sites — `react`'s
+  `stepTool` and `planexec`'s `stepPlannerTool` — which is also where
+  `sys.Tools()` is at hand. A third strategy must call it too.
+- **Only the array case, and only what already contradicts the spec.** Any other
+  mismatch is still a rejection explained by `toolArgsFeedbackMiddleware`;
+  inventing a reading for one would hide a real mistake behind a wrong guess.
+- **The call held on the checkpointed state is not mutated.** `Coerce` returns a
+  new arguments map, so a replayed transition coerces the same original again.
+
+What remains open is the run's own visibility: a rejection the model cannot
+repair is still absorbed as that call's response, so the turn completes
+successfully with the work undone, and only the Sentry report says otherwise.
+
 ## Agent runtime: no duplicated side effects (NON-NEGOTIABLE)
 
 Every `Kernel.Serve` call in this application MUST pass
