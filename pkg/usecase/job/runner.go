@@ -637,6 +637,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			// lands under it rather than nowhere.
 			channelID:       channelID,
 			sessionThreadTS: sessionThreadTS,
+			taskContext:     caseTaskContext(key, c),
 		})
 		if spawnErr != nil {
 			// A busy subject cannot reach here: the caller holds the (workspace, case,

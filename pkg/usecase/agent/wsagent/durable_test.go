@@ -188,7 +188,7 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 			return nil, nil
 		}))
 	gt.NoError(t, err).Required()
-	wa.Bind(k)
+	wa.Bind(k, nil)
 
 	return &durableHarness{agent: wa, host: host, progress: progress, kernel: k, locator: locator}
 }

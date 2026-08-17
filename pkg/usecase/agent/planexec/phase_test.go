@@ -18,7 +18,7 @@ func TestSubAgentPrompt_RendersTaskFields(t *testing.T) {
 		AcceptanceCriteria: "Top ten messages summarised.",
 		Tools:              []string{"slack_ro"},
 	}
-	got, err := planexec.RenderSubAgentPromptForTest(task, false)
+	got, err := planexec.RenderSubAgentPromptForTest(task, false, "")
 	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("- ID: t-1")
 	gt.String(t, got).Contains("- Title: Recent thread")
@@ -31,7 +31,7 @@ func TestSubAgentPrompt_EmptyFieldsStillWellFormed(t *testing.T) {
 	// All required fields are usually enforced by TaskPlan validation
 	// before this template is reached, but the template itself must
 	// not panic on zero values.
-	got, err := planexec.RenderSubAgentPromptForTest(planexec.TaskPlan{}, false)
+	got, err := planexec.RenderSubAgentPromptForTest(planexec.TaskPlan{}, false, "")
 	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("## Your Task")
 	gt.String(t, got).Contains("Output rules")
@@ -39,7 +39,7 @@ func TestSubAgentPrompt_EmptyFieldsStillWellFormed(t *testing.T) {
 
 func TestSubAgentPrompt_ObservationOnlyByDefault(t *testing.T) {
 	task := planexec.TaskPlan{ID: "t-1", Title: "Investigate", Description: "d", AcceptanceCriteria: "a"}
-	got, err := planexec.RenderSubAgentPromptForTest(task, false)
+	got, err := planexec.RenderSubAgentPromptForTest(task, false, "")
 	gt.NoError(t, err).Required()
 	// allowWrites=false keeps the observation-only prohibition.
 	gt.String(t, got).Contains("observation-only")
@@ -48,7 +48,7 @@ func TestSubAgentPrompt_ObservationOnlyByDefault(t *testing.T) {
 
 func TestSubAgentPrompt_WriteModeGrantsWrites(t *testing.T) {
 	task := planexec.TaskPlan{ID: "t-1", Title: "Post", Description: "post the summary", AcceptanceCriteria: "posted"}
-	got, err := planexec.RenderSubAgentPromptForTest(task, true)
+	got, err := planexec.RenderSubAgentPromptForTest(task, true, "")
 	gt.NoError(t, err).Required()
 	// allowWrites=true drops the observation-only prohibition entirely and
 	// grants the write permission (guarded by "after ... enough supporting
@@ -57,6 +57,33 @@ func TestSubAgentPrompt_WriteModeGrantsWrites(t *testing.T) {
 	gt.Bool(t, contains(got, "Do NOT post messages or mutate")).False()
 	gt.String(t, got).Contains("you MAY use it")
 	gt.String(t, got).Contains("enough supporting information")
+}
+
+// A sub-agent's tools are pinned to the run's subject while its prompt is built
+// from the planner's task text alone, so the host-supplied context block is the
+// only way it learns the ids those tools need.
+func TestSubAgentPrompt_RendersHostTaskContext(t *testing.T) {
+	task := planexec.TaskPlan{ID: "t-1", Title: "Read", Description: "read the case thread", AcceptanceCriteria: "summarised"}
+	ctxBlock := "- slack_channel_id: C0123456789\n- slack_thread_ts: 1700000000.000100"
+
+	got, err := planexec.RenderSubAgentPromptForTest(task, false, ctxBlock)
+	gt.NoError(t, err).Required()
+	gt.String(t, got).Contains("## Run context")
+	gt.String(t, got).Contains("- slack_channel_id: C0123456789")
+	gt.String(t, got).Contains("- slack_thread_ts: 1700000000.000100")
+	gt.String(t, got).Contains("never invent a Slack")
+	// The task section must survive alongside it.
+	gt.String(t, got).Contains("- ID: t-1")
+}
+
+// An empty block omits the section entirely rather than leaving an empty
+// heading a model could read as "there is no such thing".
+func TestSubAgentPrompt_OmitsEmptyTaskContext(t *testing.T) {
+	task := planexec.TaskPlan{ID: "t-1", Title: "Read", Description: "d", AcceptanceCriteria: "a"}
+	got, err := planexec.RenderSubAgentPromptForTest(task, false, "")
+	gt.NoError(t, err).Required()
+	gt.Bool(t, contains(got, "## Run context")).False()
+	gt.String(t, got).Contains("## Your Task")
 }
 
 // ----- formatObservationsAsUserTurn ---------------------------------

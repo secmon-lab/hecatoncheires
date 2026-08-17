@@ -109,6 +109,10 @@ exempt_name := {
 	"BindAgentKernel",
 	"BindDurableDraft",
 	"AttachRunner",
+	# assembles the agent tool dependencies from clients the UseCases already
+	# holds. A struct literal over its own fields: no I/O, and it runs once per
+	# process while the Kernel is being built, before any request exists.
+	"AgentToolDeps",
 	# TrackSpawns is the same kind of startup switch: it initialises an in-memory
 	# slice so a batch command can later wait for its own runs. No I/O.
 	"TrackSpawns",

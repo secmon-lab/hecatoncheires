@@ -538,7 +538,7 @@ func bindDurableJobRuntime(
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry},
 	})
 	gt.NoError(t, err).Required()
-	durable.Bind(k)
+	durable.Bind(k, nil)
 	durable.AttachRunner(runner)
 	return k
 }

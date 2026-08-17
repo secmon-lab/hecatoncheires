@@ -56,6 +56,10 @@ type DurableRuntime struct {
 	simple   agentkit.Agent[react.Input]
 	planexec agentkit.Agent[planexec.Input]
 	runner   *JobRunner
+	// probe answers which toolset ids resolve to a tool for a run's scope, so the
+	// planner is offered only what its sub-agents will actually receive. Filled by
+	// Bind; nil leaves the palette unfiltered.
+	probe *agentkernel.ToolSetProbe
 
 	// trackedMu guards tracked. It is written by every spawn and read by Drain.
 	trackedMu sync.Mutex
@@ -254,9 +258,12 @@ func (d *DurableRuntime) Register(reg *agentkit.Registry, limiter agentkit.Limit
 // Bind hands over the Kernel the registered agents run on. Until it is called
 // agentFor reports no agent, so a Job started before the runtime is ready takes
 // the in-process path rather than failing.
-func (d *DurableRuntime) Bind(k *agentkit.Kernel) {
+// probe filters the planner palette down to the toolset ids that resolve to a
+// tool for the run; nil leaves it unfiltered.
+func (d *DurableRuntime) Bind(k *agentkit.Kernel, probe *agentkernel.ToolSetProbe) {
 	if d != nil {
 		d.Kernel = k
+		d.probe = probe
 	}
 }
 
@@ -302,6 +309,13 @@ type spawnParams struct {
 	// refuse the run.
 	channelID       string
 	sessionThreadTS string
+
+	// taskContext is the subject block every sub-agent of a planexec run is told.
+	// It carries the CASE's own channel and thread, which is not the same as the
+	// pair above: sessionThreadTS is the operational log's thread, freshly rooted
+	// for a channel-mode case, whereas a sub-agent asked to read the case
+	// conversation needs the case thread.
+	taskContext agent.TaskContext
 
 	job          *model.Job
 	event        Event
@@ -368,10 +382,30 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 	var pid agentkit.ProcessID
 	var err error
 	if strategy == model.JobStrategyPlanexec {
+		taskContext, tcErr := p.taskContext.Render()
+		if tcErr != nil {
+			return "", goerr.Wrap(tcErr, "render the sub-agent task context",
+				goerr.V("job_id", p.key.JobID), goerr.V("run_id", p.runID))
+		}
+		// Offer the planner only the toolsets this run's tools actually resolve
+		// to. The palette is a fixed list while the tools behind it depend on what
+		// the deployment configured and on the case: advertising slack_post to a
+		// deployment with no Slack poster is what produced a planner assigning a
+		// task a tool its sub-agent never received.
+		knownToolIDs, ktErr := d.probe.Available(ctx, scope, agent.KnownToolSetIDsJob)
+		if ktErr != nil {
+			return "", goerr.Wrap(ktErr, "resolve the job tool palette",
+				goerr.V("job_id", p.key.JobID), goerr.V("run_id", p.runID))
+		}
 		pid, err = d.planexec.Spawn(ctx, d.Kernel, planexec.Input{
 			SystemPrompt: p.systemPrompt,
 			UserInput:    p.userPrompt,
-			KnownToolIDs: agent.KnownToolSetIDsJob,
+			KnownToolIDs: knownToolIDs,
+			// The Job's own system prompt already names the case's channel and
+			// thread; its sub-agents get a prompt built from the planner's task text
+			// alone, so without this they hold the Slack tools with no id to call
+			// them with.
+			TaskContext: taskContext,
 			// A Job's sub-agents perform the deliverable action (posting the result,
 			// filing an action) rather than only observing, so the write tools its
 			// palette carries are actually usable.
@@ -397,6 +431,19 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 	// Only a batch command tracks; see TrackSpawns.
 	d.track(pid)
 	return pid, nil
+}
+
+// caseTaskContext is the subject block a Job run's sub-agents are told. The
+// Slack pair comes from the Case, so it is empty for a case that has no Slack
+// binding and the sub-agent prompt then omits those lines rather than offering
+// an empty id.
+func caseTaskContext(key model.JobRunKey, c *model.Case) agent.TaskContext {
+	out := agent.TaskContext{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID}
+	if c != nil {
+		out.SlackChannelID = c.SlackChannelID
+		out.SlackThreadTS = c.SlackThreadTS
+	}
+	return out
 }
 
 // jobRunProcessKey is the idempotency key one Job run's Process is filed under.

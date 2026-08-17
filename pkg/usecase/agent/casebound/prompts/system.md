@@ -3,6 +3,12 @@ You are responding in a Slack channel dedicated to the following case.
 
 ## Slack Context
 - Channel ID: {{.ChannelID}}
+{{- if .ThreadTS }}
+- Thread TS: {{.ThreadTS}}
+
+This is the thread you were mentioned in. Pass this pair as a `slack__get_messages`
+target to read the conversation; never invent a channel id or a timestamp.
+{{- end }}
 
 ## Current Time
 {{.Now}}

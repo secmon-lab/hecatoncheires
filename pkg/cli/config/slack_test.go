@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/slack-go/slack"
+	"github.com/urfave/cli/v3"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	"github.com/slack-go/slack"
 )
 
 func TestSlackSetNoAuthUID(t *testing.T) {
@@ -258,4 +260,38 @@ func TestSlackDetectOrgLevel(t *testing.T) {
 		err := s.DetectOrgLevel(context.Background())
 		gt.Value(t, err).NotNil()
 	})
+}
+
+// A command with no HTTP surface registers RuntimeFlags, so it is never asked
+// for the credentials that only authenticate an inbound request.
+func TestSlackRuntimeFlags_OmitsTheHTTPOnlyCredentials(t *testing.T) {
+	var cfg config.Slack
+
+	names := func(flags []cli.Flag) map[string]bool {
+		out := make(map[string]bool, len(flags))
+		for _, f := range flags {
+			for _, n := range f.Names() {
+				out[n] = true
+			}
+		}
+		return out
+	}
+
+	runtime := names(cfg.RuntimeFlags())
+	gt.Bool(t, runtime["slack-bot-token"]).True()
+	gt.Bool(t, runtime["slack-user-oauth-token"]).True()
+	gt.Bool(t, runtime["slack-notification-slot-duration"]).True()
+	gt.Bool(t, runtime["slack-client-id"]).False()
+	gt.Bool(t, runtime["slack-client-secret"]).False()
+	gt.Bool(t, runtime["slack-signing-secret"]).False()
+
+	// serve keeps the full set, and RuntimeFlags is a subset of it rather than a
+	// second list that can drift.
+	full := names(cfg.Flags())
+	for n := range runtime {
+		gt.Bool(t, full[n]).True()
+	}
+	gt.Bool(t, full["slack-client-id"]).True()
+	gt.Bool(t, full["slack-client-secret"]).True()
+	gt.Bool(t, full["slack-signing-secret"]).True()
 }

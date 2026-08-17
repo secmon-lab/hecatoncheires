@@ -45,8 +45,13 @@ type Slack struct {
 	authAPI slackAuthAPI
 }
 
+// Flags is the full Slack surface: the runtime flags below plus the ones only
+// an HTTP process uses (the OAuth client pair and the signing secret that
+// verifies inbound webhooks). A command that serves no endpoints registers
+// RuntimeFlags instead, so its deployment is never asked for credentials it
+// cannot use.
 func (x *Slack) Flags() []cli.Flag {
-	return []cli.Flag{
+	return append([]cli.Flag{
 		&cli.StringFlag{
 			Name:        "slack-client-id",
 			Usage:       "Slack OAuth client ID",
@@ -62,6 +67,22 @@ func (x *Slack) Flags() []cli.Flag {
 			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_CLIENT_SECRET"),
 		},
 		&cli.StringFlag{
+			Name:        "slack-signing-secret",
+			Usage:       "Slack Signing Secret (for webhook verification)",
+			Category:    "Slack",
+			Destination: &x.signingSecret,
+			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_SIGNING_SECRET"),
+		},
+	}, x.RuntimeFlags()...)
+}
+
+// RuntimeFlags is the subset a process needs to TALK to Slack: the two tokens
+// the API clients are built from and the notification aggregation window. It
+// carries nothing that authenticates an inbound request, because a command with
+// no HTTP surface has no inbound request to authenticate.
+func (x *Slack) RuntimeFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
 			Name:        "slack-bot-token",
 			Usage:       "Slack Bot User OAuth Token (for fetching user info)",
 			Category:    "Slack",
@@ -74,13 +95,6 @@ func (x *Slack) Flags() []cli.Flag {
 			Category:    "Slack",
 			Destination: &x.userOAuthToken,
 			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN"),
-		},
-		&cli.StringFlag{
-			Name:        "slack-signing-secret",
-			Usage:       "Slack Signing Secret (for webhook verification)",
-			Category:    "Slack",
-			Destination: &x.signingSecret,
-			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_SIGNING_SECRET"),
 		},
 		&cli.DurationFlag{
 			Name:        "slack-notification-slot-duration",

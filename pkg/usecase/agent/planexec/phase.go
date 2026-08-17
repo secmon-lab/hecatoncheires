@@ -68,19 +68,20 @@ var subAgentPromptTemplate = template.Must(template.New("planexec_subagent").Par
 // subAgentPromptInput is the data fed into prompts/subagent.md. It embeds
 // the per-task fields and adds AllowWrites so the template can toggle the
 // observation-only vs may-write instruction. AllowWrites mirrors the run's
-// Input.AllowSubAgentWrites.
+// Input.AllowSubAgentWrites, and Context mirrors Input.TaskContext.
 type subAgentPromptInput struct {
 	TaskPlan
 	AllowWrites bool
+	Context     string
 }
 
 // buildSubAgentSystemPrompt renders prompts/subagent.md with the per-task
-// fields. Returns an error only when template execution fails — should
-// never happen with valid struct data, but the guard prevents a
-// malformed task from silently producing an empty prompt.
-func buildSubAgentSystemPrompt(task TaskPlan, allowWrites bool) (string, error) {
+// fields and the run's host-supplied context block. Returns an error only when
+// template execution fails — should never happen with valid struct data, but
+// the guard prevents a malformed task from silently producing an empty prompt.
+func buildSubAgentSystemPrompt(task TaskPlan, allowWrites bool, taskContext string) (string, error) {
 	var buf bytes.Buffer
-	input := subAgentPromptInput{TaskPlan: task, AllowWrites: allowWrites}
+	input := subAgentPromptInput{TaskPlan: task, AllowWrites: allowWrites, Context: taskContext}
 	if err := subAgentPromptTemplate.Execute(&buf, input); err != nil {
 		return "", goerr.Wrap(err, "render sub-agent system prompt",
 			goerr.V("task_id", task.ID))

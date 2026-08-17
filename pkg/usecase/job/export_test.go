@@ -159,3 +159,9 @@ const (
 	OutcomeSkippedSlotsFullForTest = string(outcomeSkippedSlotsFull)
 	OutcomeSkippedRunningForTest   = string(outcomeSkippedRunning)
 )
+
+// CaseTaskContextForTest exposes caseTaskContext, which decides which Slack
+// thread a Job's sub-agents are told about. The distinction it encodes — the
+// CASE thread, not the run's operational log thread — is easy to get wrong and
+// invisible from the outside, so it is pinned by a test.
+var CaseTaskContextForTest = caseTaskContext

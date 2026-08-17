@@ -437,6 +437,27 @@ func withoutToolSet(ids []string, drop string) []string {
 	return out
 }
 
+// Has reports whether id contributes at least one tool. It is what a host filters
+// its planner-facing palette with, so an id that would resolve to nothing is never
+// offered as a choice.
+//
+// It deliberately does NOT count the knowledge read tools Resolve always includes:
+// those are present for every sub-agent regardless of what was requested, so
+// counting them would report every id as available.
+//
+// ToolSetKnowledge is the one id whose availability is not its own slice —
+// requesting it REPLACES that always-present base with the read+write set — so it
+// is answered by whether that write-bearing set was built.
+func (r *ToolSetResolver) Has(id string) bool {
+	if r == nil {
+		return false
+	}
+	if id == ToolSetKnowledge {
+		return len(r.knowledgeWrite) > 0
+	}
+	return len(r.setFor(id)) > 0
+}
+
 // setFor maps one toolset id to its built slice. Unknown ids resolve to nothing
 // so a stray id cannot crash a turn.
 //
