@@ -438,12 +438,15 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 								ID:   "c1",
 								Name: "probe__ping",
 								// Two of the three arrays are well formed; targets is a
-								// stringified array. gollem reports one "expected array
-								// type" for the call and names no parameter, so only the
-								// shape can attribute it to targets.
+								// number. gollem reports one "expected array type" for the
+								// call and names no parameter, so only the shape can
+								// attribute it to targets. A number rather than a
+								// stringified array: the latter is now decoded by
+								// toolargs.Coerce before gollem sees it, and this test is
+								// about the mismatches that still reach a rejection.
 								Arguments: map[string]any{
 									"items":    []any{"a", "b"},
-									"targets":  `["c","d"]`,
+									"targets":  float64(42),
 									"archives": []any{"e"},
 								},
 							}},
@@ -524,7 +527,7 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 	// targets contradicts the expectation — which is the attribution gollem's
 	// own message cannot make.
 	gt.String(t, told).Contains(
-		"The arguments received were: archives=array[1] of string, items=array[2] of string, targets=string")
+		"The arguments received were: archives=array[1] of string, items=array[2] of string, targets=number")
 
 	// The run timeline records the SAME message the model was given. This is what
 	// pins the middleware order: registered outside the trace bracket instead of

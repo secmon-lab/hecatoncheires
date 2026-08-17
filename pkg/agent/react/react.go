@@ -29,6 +29,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolargs"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -226,6 +227,10 @@ func noticeInstruction(msg string) string {
 // for why they cannot be reported one at a time, and why this uses the primitive
 // CallTool rather than the session's.
 //
+// The arguments pass through toolargs.Coerce first, which is the only point
+// before gollem's own validation where a single value sent for an array-typed
+// argument can still be read as the batch of one the model meant.
+//
 // A tool that fails is not a transition failure: the failure is recorded as this
 // call's response, so the call is still answered and the model gets to react to
 // it on its next turn — which is how the previous runtime behaved too. The one
@@ -253,7 +258,7 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		return st, agentkit.Continue[Output](), nil
 	}
 
-	out, err := sys.CallTool(ctx, *call)
+	out, err := sys.CallTool(ctx, toolargs.Coerce(sys.Tools(), *call))
 	if err != nil {
 		if errors.Is(err, agentkit.ErrLimitExceeded) {
 			return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: tool call refused by the budget",
