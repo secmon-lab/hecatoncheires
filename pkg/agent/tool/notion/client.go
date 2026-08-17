@@ -156,7 +156,7 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 		NextCursor: decoded.NextCursor,
 	}
 	for _, obj := range decoded.Results {
-		item, ok := convertSearchItem(obj)
+		item, ok := convertSearchItem(ctx, obj)
 		if !ok {
 			continue
 		}
@@ -340,8 +340,11 @@ type titleProperty struct {
 }
 
 // convertSearchItem converts one search result into a SearchItem. Returns false
-// when the object is neither a page nor a database.
-func convertSearchItem(obj searchObject) (SearchItem, bool) {
+// when the object is neither a page nor a database: dropping the one entry keeps
+// the rest of the search usable. It is reported rather than dropped silently,
+// because from the caller's side a skipped result is indistinguishable from a
+// search that simply did not match.
+func convertSearchItem(ctx context.Context, obj searchObject) (SearchItem, bool) {
 	switch obj.Object {
 	case "page":
 		return SearchItem{
@@ -360,6 +363,10 @@ func convertSearchItem(obj searchObject) (SearchItem, bool) {
 			LastEdited: obj.LastEditedTime,
 		}, true
 	default:
+		errutil.Handle(ctx, goerr.New("skipped an unrecognised notion search result",
+			goerr.V("object", obj.Object),
+			goerr.V("id", obj.ID),
+		), "skipped an unrecognised notion search result")
 		return SearchItem{}, false
 	}
 }

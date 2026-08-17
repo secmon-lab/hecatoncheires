@@ -72,7 +72,11 @@ func TestSearch(t *testing.T) {
 						"last_edited_time": "2026-04-02T09:00:00Z",
 						"title": [{"type": "text", "text": {"content": "Runbooks"}, "plain_text": "Runbooks"}],
 						"description": [],
-						"properties": {},
+						"properties": {
+							"Name": {"id": "title", "type": "title", "title": {}},
+							"Tags": {"id": "abcd", "type": "multi_select", "multi_select": {"options": [{"id": "id", "name": "tag", "color": "blue"}]}},
+							"Owner": {"id": "efgh", "type": "people", "people": {}}
+						},
 						"parent": {"type": "workspace", "workspace": true},
 						"url": "https://www.notion.so/Runbooks-0002",
 						"archived": false,
@@ -114,10 +118,41 @@ func TestSearch(t *testing.T) {
 		gt.String(t, got.Items[0].URL).Equal("https://www.notion.so/Incident-Playbook-0001")
 		gt.Bool(t, got.Items[0].LastEdited.Equal(time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC))).True()
 
+		// The database fixture carries a real schema, where "properties" holds
+		// column DEFINITIONS ("title": {}) rather than a page's values
+		// ("title": [...]). Decoding both shapes with one type fails the whole
+		// response, so the database title must still resolve here.
 		gt.String(t, got.Items[1].ID).Equal("00000000-0000-0000-0000-000000000002")
 		gt.String(t, got.Items[1].Type).Equal("database")
 		gt.String(t, got.Items[1].Title).Equal("Runbooks")
 		gt.String(t, got.Items[1].URL).Equal("https://www.notion.so/Runbooks-0002")
+	})
+
+	t.Run("skips a result whose object type is neither page nor database", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"object": "list",
+				"has_more": false,
+				"next_cursor": null,
+				"results": [
+					{"object": "block", "id": "00000000-0000-0000-0000-000000000005", "url": "https://www.notion.so/0005"},
+					{"object": "page", "id": "00000000-0000-0000-0000-000000000006", "url": "https://www.notion.so/0006"}
+				]
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		// The unrecognised entry is reported through errutil.Handle and dropped;
+		// the rest of the search still reaches the caller.
+		got, err := c.Search(context.Background(), "q", notiontool.SearchOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].ID).Equal("00000000-0000-0000-0000-000000000006")
 	})
 
 	t.Run("omits the filter key when no object type is requested", func(t *testing.T) {
@@ -227,6 +262,15 @@ func TestSearch(t *testing.T) {
 							"Location": {"id": "abcd", "type": "place", "place": {"name": "Tokyo"}},
 							"Name": {"id": "title", "type": "title", "title": [{"plain_text": "Site Visit"}]}
 						}
+					},
+					{
+						"object": "page",
+						"id": "00000000-0000-0000-0000-000000000010",
+						"last_edited_time": "2026-05-02T10:00:00Z",
+						"url": "https://www.notion.so/0010",
+						"properties": {
+							"Location": {"id": "efgh", "type": "place", "place": {"name": "Osaka"}}
+						}
 					}
 				]
 			}`))
@@ -238,10 +282,16 @@ func TestSearch(t *testing.T) {
 
 		got, err := c.Search(context.Background(), "site", notiontool.SearchOptions{})
 		gt.NoError(t, err).Required()
-		gt.Array(t, got.Items).Length(1).Required()
+		gt.Array(t, got.Items).Length(2).Required()
 		gt.String(t, got.Items[0].ID).Equal("00000000-0000-0000-0000-000000000009")
 		gt.String(t, got.Items[0].Title).Equal("Site Visit")
 		gt.String(t, got.Items[0].URL).Equal("https://www.notion.so/Site-Visit-0009")
+
+		// A page whose only property is one the client does not model still
+		// reaches the agent; it just has no title to show.
+		gt.String(t, got.Items[1].ID).Equal("00000000-0000-0000-0000-000000000010")
+		gt.String(t, got.Items[1].Title).Equal("")
+		gt.String(t, got.Items[1].URL).Equal("https://www.notion.so/0010")
 	})
 
 	t.Run("retries a 429 with the same body", func(t *testing.T) {
