@@ -3,10 +3,13 @@ package kernel_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gollem-dev/agentkit"
 	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
@@ -99,7 +102,27 @@ func (probeStrategy) EncodeOutput(o probeOutput) ([]byte, error) { return json.M
 type probeTool struct{}
 
 func (probeTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{Name: "probe__ping", Description: "ping"}
+	// Three array parameters, all optional. Optional keeps the calls that pass no
+	// arguments valid, and three of the same type reproduces the situation the
+	// argument-feedback middleware exists for: gollem reports the expectation
+	// without saying which parameter carried it, so one rejected call has to be
+	// attributable to one of the three from the shape alone.
+	arrayOfString := func(desc string) *gollem.Parameter {
+		return &gollem.Parameter{
+			Type:        gollem.TypeArray,
+			Description: desc,
+			Items:       &gollem.Parameter{Type: gollem.TypeString},
+		}
+	}
+	return gollem.ToolSpec{
+		Name:        "probe__ping",
+		Description: "ping",
+		Parameters: map[string]*gollem.Parameter{
+			"items":    arrayOfString("items to ping"),
+			"targets":  arrayOfString("targets to ping"),
+			"archives": arrayOfString("ids to archive"),
+		},
+	}
 }
 
 func (probeTool) Run(context.Context, map[string]any) (map[string]any, error) {
@@ -381,6 +404,297 @@ func TestRunTimelineLinksAToolCallAcrossAClaimBoundary(t *testing.T) {
 	// The link survived the claim boundary and points at a real LLM_RESPONSE.
 	gt.Number(t, toolEvents[0].ParentSequence).GreaterOrEqual(1)
 	gt.Bool(t, responses[toolEvents[0].ParentSequence]).True()
+}
+
+// TestARejectedToolCallTellsTheModelWhatItSent drives a real Kernel through a
+// tool call whose argument has the wrong type, and pins that what comes back to
+// the model identifies the offending argument.
+//
+// gollem's own message names the tool and the expectation but not the parameter,
+// so a tool with several same-typed parameters leaves the model guessing and
+// re-emitting the same call. The received shape is what closes that gap, and it
+// has to survive the whole path: the middleware chain, the strategy's tool
+// response, and the next LLM call's inputs.
+func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	seedCase(t, ctx, repo, &model.Case{Title: "argument feedback target"})
+
+	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	reg := agentkit.NewRegistry()
+	handle, err := react.Register(reg, kernel.AgentCaseChannel, 1, cfg.Limiter(),
+		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
+	gt.NoError(t, err).Required()
+
+	var calls atomic.Int32
+	var reported atomic.Value
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, inputs []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					if calls.Add(1) == 1 {
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{{
+								ID:   "c1",
+								Name: "probe__ping",
+								// Two of the three arrays are well formed; targets is a
+								// stringified array. gollem reports one "expected array
+								// type" for the call and names no parameter, so only the
+								// shape can attribute it to targets.
+								Arguments: map[string]any{
+									"items":    []any{"a", "b"},
+									"targets":  `["c","d"]`,
+									"archives": []any{"e"},
+								},
+							}},
+							InputToken: 10, OutputToken: 5,
+						}, nil
+					}
+					for _, in := range inputs {
+						if res, ok := in.(gollem.FunctionResponse); ok && res.Error != nil {
+							reported.Store(res.Error.Error())
+						}
+					}
+					return &gollem.Response{Texts: []string{"done"}, InputToken: 3, OutputToken: 2}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+
+	k, err := kernel.Build(kernel.Deps{
+		Repo:    agentprocmemory.New(),
+		History: agentarchive.NewMemoryHistoryStore(),
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Agents:  reg,
+		Tools: kernel.ToolDeps{
+			Repo:      repo,
+			Registry:  testRegistry(channelWorkspace()),
+			JiraTools: []gollem.Tool{probeTool{}},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-feedback", JobRunID: "run-feedback",
+	}
+
+	serveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() {
+		served <- k.Serve(serveCtx, agentkit.WithPollInterval(5*time.Millisecond))
+	}()
+
+	pid, err := handle.Spawn(ctx, k, react.Input{SystemPrompt: "be helpful", Prompt: "ping it"},
+		agentkit.WithMetadata(sc.Metadata()))
+	gt.NoError(t, err).Required()
+
+	for {
+		proc, gerr := k.GetProcess(serveCtx, pid)
+		gt.NoError(t, gerr).Required()
+		if proc.Status.Terminal() {
+			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+			break
+		}
+		select {
+		case <-serveCtx.Done():
+			gt.NoError(t, serveCtx.Err()).Required()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-served
+
+	// The failure was answered rather than swallowed: the run continued to a
+	// second LLM call, and that call carried the tool's error.
+	told, ok := reported.Load().(string)
+	gt.Bool(t, ok).True().Required()
+
+	// gollem's half: which tool, and what it expected.
+	gt.String(t, told).Contains(`"probe__ping"`)
+	gt.String(t, told).Contains("expected array type")
+	// The half this middleware adds. All three arrays are named, and only
+	// targets contradicts the expectation — which is the attribution gollem's
+	// own message cannot make.
+	gt.String(t, told).Contains(
+		"The arguments received were: archives=array[1] of string, items=array[2] of string, targets=string")
+
+	// The run timeline records the SAME message the model was given. This is what
+	// pins the middleware order: registered outside the trace bracket instead of
+	// inside it, the timeline would keep gollem's unattributed message and an
+	// operator reading the run would not see which argument was refused.
+	events, err := repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-feedback"}, "run-feedback")
+	gt.NoError(t, err).Required()
+
+	var toolEvents []*model.JobRunEvent
+	for _, ev := range events {
+		if ev.Kind == model.JobRunEventKindToolCall {
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	gt.Array(t, toolEvents).Length(1).Required()
+	gt.Bool(t, toolEvents[0].ToolCall.IsError).True()
+	gt.String(t, toolEvents[0].ToolCall.ErrorMessage).Equal(told)
+}
+
+// TestToolArgsFeedbackLeavesEveryOtherErrorAlone pins the two properties the
+// argument-feedback middleware must hold for its callers: a rejected call still
+// answers errors.Is against gollem's sentinel, and anything that is not an
+// argument rejection is passed through untouched.
+//
+// Neither is reachable through a Kernel — a real tool call can only produce the
+// errors a real tool produces — so the middleware is driven directly here.
+func TestToolArgsFeedbackLeavesEveryOtherErrorAlone(t *testing.T) {
+	ctx := context.Background()
+	req := &agentkit.ToolCallRequest{
+		Call: gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{"items": "x"}},
+	}
+
+	t.Run("an argument rejection keeps gollem's sentinel and gains the shape", func(t *testing.T) {
+		spec := probeTool{}.Spec()
+		cause := goerr.Wrap(spec.ValidateArgs(req.Call.Arguments), "validate tool args")
+		h := kernel.ToolArgsFeedbackHandlerForTest(
+			func(context.Context, *agentkit.ToolCallRequest) (map[string]any, error) {
+				return nil, cause
+			})
+
+		out, err := h(ctx, req)
+		gt.Value(t, out).Nil()
+		gt.Error(t, err).Is(gollem.ErrToolArgsValidation)
+		gt.String(t, err.Error()).Contains("The arguments received were: items=string")
+	})
+
+	t.Run("a tool's own failure is passed through unchanged", func(t *testing.T) {
+		cause := goerr.New("the backend refused the write")
+		h := kernel.ToolArgsFeedbackHandlerForTest(
+			func(context.Context, *agentkit.ToolCallRequest) (map[string]any, error) {
+				return nil, cause
+			})
+
+		_, err := h(ctx, req)
+		gt.Value(t, err).Equal(cause)
+	})
+
+	t.Run("a successful call is passed through unchanged", func(t *testing.T) {
+		want := map[string]any{"pong": true}
+		h := kernel.ToolArgsFeedbackHandlerForTest(
+			func(context.Context, *agentkit.ToolCallRequest) (map[string]any, error) {
+				return want, nil
+			})
+
+		out, err := h(ctx, req)
+		gt.NoError(t, err)
+		gt.Value(t, out).Equal(want)
+	})
+}
+
+// TestRejectedArgumentsAreDescribedByShapeNotByValue pins the wording of the
+// shape line and, more importantly, that no argument VALUE appears in it. The
+// line reaches the operator's Sentry and the run timeline as well as the model,
+// and tool arguments carry case content.
+func TestRejectedArgumentsAreDescribedByShapeNotByValue(t *testing.T) {
+	testCases := map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"no arguments at all": {
+			args: map[string]any{},
+			want: "no arguments",
+		},
+		"names are sorted so one call always reads the same way": {
+			args: map[string]any{"updates": nil, "archives": []any{}, "creates": "x"},
+			want: "archives=array[0], creates=string, updates=null",
+		},
+		"scalars are named by type, never by value": {
+			args: map[string]any{"count": 3.0, "flag": true, "title": "a secret memo title"},
+			want: "count=number, flag=boolean, title=string",
+		},
+		"an array reports its length and its element shape": {
+			args: map[string]any{"archives": []any{"id-1", "id-2"}},
+			want: "archives=array[2] of string",
+		},
+		// The shape of a real memo__apply_memo_changes entry: creates[] holds an
+		// object whose fields[] holds objects carrying values[]. gollem reports a
+		// violation anywhere in there without saying where, so every level has to
+		// be reachable.
+		"the deepest position a tool spec declares is still described": {
+			args: map[string]any{"creates": []any{
+				map[string]any{
+					"title": "confidential",
+					"fields": []any{
+						map[string]any{"field_id": "severity", "values": []any{"high"}},
+					},
+				},
+			}},
+			want: "creates=array[1] of object{fields: array[1] of object{field_id: string, values: array[1] of string}, title: string}",
+		},
+		// The entry gollem refused is the one that differs, and gollem drops its
+		// index — so a mixed array must not be collapsed onto its first entry.
+		"a mixed array is listed per index rather than collapsed": {
+			args: map[string]any{"creates": []any{
+				map[string]any{"title": "ok"},
+				"a stringified entry",
+			}},
+			want: "creates=array[2]{0: object{title: string}, 1: string}",
+		},
+		"a long shape is cut on a rune boundary, not a byte offset": {
+			args: longMultibyteArgs(),
+			want: longMultibyteArgsWant(),
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			got := kernel.DescribeArgsForTest(tc.args)
+			gt.String(t, got).Equal(tc.want)
+			gt.Bool(t, utf8.ValidString(got)).True()
+		})
+	}
+}
+
+// longMultibyteArgs builds arguments whose rendered shape overruns the length
+// bound with a multi-byte object key straddling the cut. A workspace names its
+// own memo field ids, so a non-ASCII key is ordinary input, and cutting at a
+// byte offset would put a broken rune in front of the model and in Sentry.
+func longMultibyteArgs() map[string]any {
+	fields := map[string]any{}
+	for i := range 120 {
+		fields["フィールド"+strconv.Itoa(i)] = "v"
+	}
+	return map[string]any{"creates": []any{map[string]any{"fields": fields}}}
+}
+
+// longMultibyteArgsWant renders what describeArgs must produce for
+// longMultibyteArgs: the untruncated shape, cut back to the last rune boundary
+// at or before the bound, with the marker appended.
+func longMultibyteArgsWant() string {
+	fields := longMultibyteArgs()["creates"].([]any)[0].(map[string]any)["fields"].(map[string]any)
+
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+": string")
+	}
+	full := "creates=array[1] of object{fields: object{" + strings.Join(parts, ", ") + "}}"
+
+	cut := kernel.ArgShapeMaxLenForTest
+	for cut > 0 && !utf8.RuneStart(full[cut]) {
+		cut--
+	}
+	return full[:cut] + "..."
 }
 
 // spanKinds collects the span kinds recorded in a trace, at any depth.

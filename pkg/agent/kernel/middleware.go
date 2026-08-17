@@ -2,9 +2,14 @@ package kernel
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/gollem-dev/agentkit"
+	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
@@ -202,4 +207,163 @@ func toolCallMiddleware() agentkit.ToolCallMiddleware {
 			return out, err
 		}
 	}
+}
+
+// toolArgsFeedbackMiddleware states the shape of the arguments a rejected tool
+// call actually carried, so the model can tell WHICH argument it got wrong.
+//
+// gollem rejects a call whose arguments do not match the ToolSpec, but the
+// message it produces names only the tool and the expectation — not the
+// offending parameter. The parameter name IS recorded, as a goerr value on a
+// per-parameter error that gollem keeps in an unexported slice outside the
+// Unwrap chain, so it is rendered by neither Error() nor goerr.Values: it is
+// unreachable from here and from the model alike. A model told only
+// "expected array type" for a tool whose creates / updates / archives are all
+// arrays cannot tell which one to repair, and re-emits the same call.
+//
+// The shape of what was sent supplies the missing half — exactly one argument
+// will contradict the expectation. Only the JSON shape is rendered, never a
+// value: this error reaches the run timeline and the operator's Sentry as well
+// as the model, and a tool call's arguments carry case content.
+//
+// It wraps rather than replaces, so errors.Is(err, gollem.ErrToolArgsValidation)
+// still holds and a caller discriminating on it is unaffected.
+func toolArgsFeedbackMiddleware() agentkit.ToolCallMiddleware {
+	return func(next agentkit.ToolCallHandler) agentkit.ToolCallHandler {
+		return func(ctx context.Context, req *agentkit.ToolCallRequest) (map[string]any, error) {
+			out, err := next(ctx, req)
+			if err == nil || !errors.Is(err, gollem.ErrToolArgsValidation) {
+				return out, err
+			}
+			return out, &toolArgsFeedbackError{cause: err, shape: describeArgs(req.Call.Arguments)}
+		}
+	}
+}
+
+// toolArgsFeedbackError appends the received argument shape to a rejected tool
+// call's error.
+//
+// goerr.Wrap cannot express this: it renders as "message: cause", which would
+// put the shape BEFORE the expectation it exists to explain, and the whole
+// string is read by a model.
+type toolArgsFeedbackError struct {
+	cause error
+	shape string
+}
+
+func (e *toolArgsFeedbackError) Error() string {
+	return e.cause.Error() + "\nThe arguments received were: " + e.shape
+}
+
+func (e *toolArgsFeedbackError) Unwrap() error { return e.cause }
+
+// argShapeMaxDepth bounds how far describeValue descends. Six levels reach the
+// deepest value a tool spec in this application declares — memo's creates[] ->
+// object -> fields[] -> object -> values[] -> string (pkg/agent/tool/memo,
+// fieldsParameter). gollem rejects a value at that position as readily as a
+// top-level one, so a shape that stops short of it says nothing about what was
+// refused.
+const argShapeMaxDepth = 6
+
+// argShapeMaxLen bounds the rendered shape. A batch tool takes up to 50 entries
+// whose objects carry a field list each, and an unbounded rendering would push
+// the real expectation out of the model's view.
+const argShapeMaxLen = 1000
+
+// describeArgs renders the shape of one tool call's arguments: each name against
+// the JSON type of its value, in sorted order so the same call always reads the
+// same way.
+func describeArgs(args map[string]any) string {
+	if len(args) == 0 {
+		return "no arguments"
+	}
+
+	names := make([]string, 0, len(args))
+	for name := range args {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+"="+describeValue(args[name], argShapeMaxDepth))
+	}
+
+	shape := strings.Join(parts, ", ")
+	if len(shape) > argShapeMaxLen {
+		// runtrace.Truncate rather than a plain slice: cutting at a byte offset
+		// splits a multi-byte argument name or object key, and the broken rune
+		// reaches the model, the run timeline and Sentry alike.
+		shape = runtrace.Truncate(shape, argShapeMaxLen) + "..."
+	}
+	return shape
+}
+
+// describeValue names the JSON shape of v and never its value. The numeric cases
+// list the concrete types a decoded tool call can hold: encoding/json produces
+// float64, and a hand-built call in a test may hold any of the others.
+func describeValue(v any, depth int) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64, float32, int, int64:
+		return "number"
+	case []any:
+		return describeArray(t, depth)
+	case map[string]any:
+		if depth <= 1 || len(t) == 0 {
+			return "object"
+		}
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		fields := make([]string, 0, len(keys))
+		for _, k := range keys {
+			fields = append(fields, k+": "+describeValue(t[k], depth-1))
+		}
+		return "object{" + strings.Join(fields, ", ") + "}"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+// describeArray renders an array's length and the shape of its elements.
+//
+// Uniform elements collapse to one rendering; a mixed array is listed per index
+// instead. That distinction is the point of the function rather than a nicety:
+// gollem stops at the FIRST element that fails validation and reports the index
+// as a goerr value on an error this application cannot reach, so the index is
+// lost. Collapsing a mixed array onto its first element would then state that
+// every entry has the shape of the one entry that happens to be valid — the
+// refused entry would not appear at all.
+func describeArray(arr []any, depth int) string {
+	length := "array[" + strconv.Itoa(len(arr)) + "]"
+	if depth <= 1 || len(arr) == 0 {
+		return length
+	}
+
+	shapes := make([]string, 0, len(arr))
+	uniform := true
+	for _, item := range arr {
+		shape := describeValue(item, depth-1)
+		if len(shapes) > 0 && shape != shapes[0] {
+			uniform = false
+		}
+		shapes = append(shapes, shape)
+	}
+	if uniform {
+		return length + " of " + shapes[0]
+	}
+
+	entries := make([]string, 0, len(shapes))
+	for i, shape := range shapes {
+		entries = append(entries, strconv.Itoa(i)+": "+shape)
+	}
+	return length + "{" + strings.Join(entries, ", ") + "}"
 }
