@@ -141,6 +141,14 @@ func (c *Client) analyze(ctx context.Context, text string) (*analyzeResult, erro
 	if c.llm == nil {
 		return nil, goerr.New("LLM client is not configured for webfetch analyze")
 	}
+	// An empty payload has nothing to screen and cannot be sent: the provider
+	// drops an empty text block, leaving a request with no message at all, which
+	// comes back as an opaque 400 from the API rather than a diagnosable local
+	// failure. Callers decide what an empty body means (fetchTool.Run reports it
+	// as an empty result); reaching here with one is a caller bug.
+	if strings.TrimSpace(text) == "" {
+		return nil, goerr.New("webfetch analyze was called with empty text")
+	}
 
 	session, err := c.llm.NewSession(ctx,
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),

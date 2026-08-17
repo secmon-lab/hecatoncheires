@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
@@ -81,6 +82,23 @@ func (t *fetchTool) Run(ctx context.Context, args map[string]any) (map[string]an
 	text, _, err := extract(contentType, body)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to extract body", goerr.V("url", rawURL))
+	}
+
+	// A body that renders to nothing — a WAF 403 page whose markup is all
+	// script, a zero-length response — has no content to screen, and handing it
+	// to analyze is a hard failure rather than an empty verdict: the provider
+	// drops an empty text block, so the request carries no message at all and is
+	// rejected (400 invalid_request_error). Report the empty result with the
+	// status instead, matching how fetch already leaves non-2xx for the agent to
+	// reason about.
+	if strings.TrimSpace(text) == "" {
+		return map[string]any{
+			"result":       "",
+			"url":          rawURL,
+			"status":       status,
+			"content_type": contentType,
+			"truncated":    truncated,
+		}, nil
 	}
 
 	result, err := t.client.analyze(ctx, text)

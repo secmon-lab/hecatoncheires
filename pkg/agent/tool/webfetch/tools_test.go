@@ -83,6 +83,37 @@ func TestFetchToolRun(t *testing.T) {
 		gt.Bool(t, f.AnalyzeCalled).False()
 	})
 
+	t.Run("body with no text content skips analyze and reports the status", func(t *testing.T) {
+		f := &webfetch.FakeFetchClient{
+			Status:      http.StatusForbidden,
+			ContentType: "text/html",
+			Body:        []byte("<html><head><script>var a=1;</script></head><body></body></html>"),
+			Markdown:    "should not be used",
+		}
+		out, err := runTool(t, f, map[string]any{"url": "https://example.com/blocked"})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, f.AnalyzeCalled).False()
+		gt.Value(t, out["result"]).Equal("")
+		gt.Value(t, out["url"]).Equal("https://example.com/blocked")
+		gt.Value(t, out["status"]).Equal(http.StatusForbidden)
+		gt.Value(t, out["content_type"]).Equal("text/html")
+		gt.Value(t, out["truncated"]).Equal(false)
+	})
+
+	t.Run("whitespace only plain text skips analyze", func(t *testing.T) {
+		f := &webfetch.FakeFetchClient{
+			Status:      http.StatusOK,
+			ContentType: "text/plain",
+			Body:        []byte("   \n\t\n  "),
+			Markdown:    "should not be used",
+		}
+		out, err := runTool(t, f, map[string]any{"url": "https://example.com/blank"})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, f.AnalyzeCalled).False()
+		gt.Value(t, out["result"]).Equal("")
+		gt.Value(t, out["status"]).Equal(http.StatusOK)
+	})
+
 	t.Run("truncated flag is propagated", func(t *testing.T) {
 		f := &webfetch.FakeFetchClient{
 			Status:      http.StatusOK,

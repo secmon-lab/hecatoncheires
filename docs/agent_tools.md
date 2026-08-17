@@ -199,7 +199,7 @@ interactive/investigation only.
 
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
-| `webfetch` | R | Fetch an HTTP(S) URL and return it as Markdown. | Blocks non-public IPs and screens the result for indirect prompt injection before returning it. Wired when a web-fetch client is configured. |
+| `webfetch` | R | Fetch an HTTP(S) URL and return it as Markdown. | Blocks non-public IPs and screens the result for indirect prompt injection before returning it. Wired when a web-fetch client is configured. The HTTP status is returned rather than raised as an error. If extraction yields no text, the tool returns an empty `result` with the HTTP status without calling the analyzer. |
 
 ### Planner metadata tools (`wsmeta`)
 
