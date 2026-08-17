@@ -623,6 +623,10 @@ func cmdServe() *cli.Command {
 					jobSlots = l
 				}
 
+				// One ToolDeps value feeds both the Kernel and the probe, so what a
+				// host advertises to its planner and what the tool factory builds can
+				// never disagree.
+				toolDeps := uc.AgentToolDeps()
 				k, kErr := agentkernel.Build(agentkernel.Deps{
 					Repo:    agentProcessRepo,
 					History: processHistory,
@@ -631,35 +635,20 @@ func cmdServe() *cli.Command {
 					Budgets: budgets,
 					Agents:  agentRegistry,
 					Slots:   jobSlots,
-					Tools: agentkernel.ToolDeps{
-						Repo:              repo,
-						Registry:          registry,
-						SlackBot:          slackSvc,
-						SlackSearch:       uc.SlackSearchService(),
-						SlackRetriever:    uc.SlackMessageRetriever(),
-						NotionClient:      uc.NotionToolClient(),
-						GitHubClient:      uc.GitHubToolClient(),
-						WebFetchClient:    uc.WebFetchClient(),
-						JiraTools:         jiraTools,
-						ActionUC:          usecase.NewActionToolAdapter(uc.Action),
-						ActionStepUC:      usecase.NewActionStepToolAdapter(uc.ActionStep),
-						CaseUC:            usecase.NewCaseToolAdapter(uc.Case),
-						CaseRefUC:         uc.Case,
-						CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(uc.Case),
-						CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(uc.Action, uc.ActionStep),
-						MemoUC:            usecase.NewMemoToolAdapter(uc.Memo),
-						KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
-						KnowledgeMutator:  usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
-					},
+					Tools:   toolDeps,
 				})
 				if kErr != nil {
 					return goerr.Wrap(kErr, "failed to build the agent runtime")
 				}
+				probe, pErr := agentkernel.NewToolSetProbe(toolDeps)
+				if pErr != nil {
+					return goerr.Wrap(pErr, "failed to build the agent toolset probe")
+				}
 				agentKernel = k
-				uc.Agent.BindAgentKernel(agentKernel)
-				durableJobs.Bind(agentKernel)
+				uc.Agent.BindAgentKernel(agentKernel, probe)
+				durableJobs.Bind(agentKernel, probe)
 				if durableDraft != nil {
-					durableDraft.Bind(agentKernel)
+					durableDraft.Bind(agentKernel, probe)
 					uc.MentionProposal.BindDurableDraft(durableDraft)
 				}
 				logging.Default().Info("Agent runtime configured", logAttrsToArgs(agentCfg.LogAttrs())...)

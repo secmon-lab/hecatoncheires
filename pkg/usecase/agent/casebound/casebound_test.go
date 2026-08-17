@@ -474,7 +474,7 @@ func TestBuildSystemPrompt_CaseAndFieldValues(t *testing.T) {
 	}
 	now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, nil, nil, messages)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, nil, nil, messages)
 
 	gt.String(t, prompt).Contains("Important Case")
 	gt.String(t, prompt).Contains("This is very important")
@@ -492,12 +492,29 @@ func TestBuildSystemPrompt_ChannelIDAndTime(t *testing.T) {
 	c := &model.Case{Title: "Test Case", Status: types.CaseStatusOpen}
 	now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0123ABC", now, nil, nil, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0123ABC", "1700000000.000100", now, nil, nil, nil)
 
 	gt.String(t, prompt).Contains("## Slack Context")
 	gt.String(t, prompt).Contains("Channel ID: C0123ABC")
+	// The agent holds slack__get_messages, whose targets take a (channel_id, ts)
+	// pair. Without the ts in the prompt it has to invent one.
+	gt.String(t, prompt).Contains("Thread TS: 1700000000.000100")
+	gt.String(t, prompt).Contains("slack__get_messages")
 	gt.String(t, prompt).Contains("## Current Time")
 	gt.String(t, prompt).Contains("2026-05-04T12:30:45Z")
+}
+
+// A turn with no thread must not render a dangling "Thread TS:" label the model
+// could pass on as an id.
+func TestBuildSystemPrompt_OmitsAbsentThreadTS(t *testing.T) {
+	entry := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-test", Name: "Test"}}
+	c := &model.Case{Title: "Test Case", Status: types.CaseStatusOpen}
+	now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
+
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0123ABC", "", now, nil, nil, nil)
+
+	gt.String(t, prompt).Contains("Channel ID: C0123ABC")
+	gt.Bool(t, strings.Contains(prompt, "Thread TS:")).False()
 }
 
 func TestBuildSystemPrompt_CaseWideActionsTitleOnly(t *testing.T) {
@@ -509,7 +526,7 @@ func TestBuildSystemPrompt_CaseWideActionsTitleOnly(t *testing.T) {
 	}
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, nil, actions, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, nil, actions, nil)
 
 	gt.String(t, prompt).Contains("## Actions")
 	gt.String(t, prompt).Contains("Investigate the issue")
@@ -537,7 +554,7 @@ func TestBuildSystemPrompt_CurrentActionInActionThread(t *testing.T) {
 	others := []*model.Action{{ID: 8, Title: "Sibling action"}}
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, currentAction, others, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, currentAction, others, nil)
 
 	gt.String(t, prompt).Contains("## Current Action")
 	gt.String(t, prompt).Contains("Patch the vulnerable library")
@@ -556,7 +573,7 @@ func TestBuildSystemPrompt_CurrentActionWithoutAssignee(t *testing.T) {
 	currentAction := &model.Action{ID: 9, Title: "Triage", Status: types.ActionStatusTodo}
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, currentAction, nil, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, currentAction, nil, nil)
 
 	gt.String(t, prompt).Contains("Assignee: unassigned")
 	gt.Bool(t, strings.Contains(prompt, "- Due:")).False()
@@ -568,7 +585,7 @@ func TestBuildSystemPrompt_NoActionsSection(t *testing.T) {
 	c := &model.Case{Title: "Test Case", Status: types.CaseStatusOpen}
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, nil, nil, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, nil, nil, nil)
 
 	gt.Bool(t, strings.Contains(prompt, "## Actions")).False()
 	gt.Bool(t, strings.Contains(prompt, "## Current Action")).False()
@@ -626,7 +643,7 @@ func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
 	c := &model.Case{Title: "Case", Status: types.CaseStatusOpen}
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, nil, nil, nil)
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", "1700000000.000100", now, nil, nil, nil)
 
 	gt.String(t, prompt).Contains("Editable Custom Fields")
 	gt.String(t, prompt).Contains("`severity`")

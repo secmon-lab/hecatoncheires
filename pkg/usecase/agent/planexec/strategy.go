@@ -64,6 +64,18 @@ type Input struct {
 	// KnownToolIDs is the toolset-id vocabulary the planner may assign to a task.
 	// It is both the prompt's enumeration and the JSON schema's enum.
 	KnownToolIDs []string `json:"known_tool_ids"`
+	// TaskContext is an opaque block the host renders into EVERY sub-agent's
+	// system prompt. planexec neither parses nor validates it.
+	//
+	// It exists because a sub-agent's prompt is otherwise built from the planner's
+	// task text alone, while its tools are pinned to the run's subject: a task
+	// handed the Slack read tools and told to "read the case thread" has no way to
+	// know the channel id or thread ts, so it invents them and the call fails
+	// (slack__get_messages then reports "requires both channel_id and ts"). The
+	// host puts the identifiers its tools are pinned to here — see
+	// .claude/rules/architecture.md § "Agent tool wiring": a prompt that names a
+	// tool and the context that tool needs must ship together.
+	TaskContext string `json:"task_context,omitempty"`
 
 	AllowQuestion       bool `json:"allow_question,omitempty"`
 	AllowDirect         bool `json:"allow_direct,omitempty"`
@@ -991,7 +1003,7 @@ func (s *strategy[T]) launchDirect(ctx context.Context, sys agentkit.Syscalls, s
 
 // spawnTask launches one task as a child Process.
 func (s *strategy[T]) spawnTask(ctx context.Context, sys agentkit.Syscalls, st state, task TaskPlan) (agentkit.ProcessID, error) {
-	prompt, err := buildSubAgentSystemPrompt(task, st.Input.AllowSubAgentWrites)
+	prompt, err := buildSubAgentSystemPrompt(task, st.Input.AllowSubAgentWrites, st.Input.TaskContext)
 	if err != nil {
 		return "", goerr.Wrap(err, "planexec: build the task prompt", goerr.V("task_id", task.ID))
 	}

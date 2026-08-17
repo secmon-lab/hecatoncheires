@@ -144,43 +144,103 @@ func NewToolFactory(d ToolDeps) (agentkit.ToolFactory, error) {
 			return nil, nil
 		}
 
-		var entry *model.WorkspaceEntry
-		if sc.WorkspaceID != "" {
-			found, err := d.Registry.Get(sc.WorkspaceID)
-			if err != nil {
-				// The Process names a workspace this deployment does not
-				// configure. Failing the claim is right: handing the agent an
-				// empty tool set would let it run to a confident, tool-less
-				// conclusion instead of surfacing the misconfiguration.
-				return nil, goerr.Wrap(err, "resolve the process workspace",
-					goerr.V("process", proc.ID), goerr.V("workspace_id", sc.WorkspaceID))
-			}
-			entry = found
+		resolver, err := d.resolverFor(ctx, sc)
+		if err != nil {
+			return nil, goerr.Wrap(err, "build the process tool resolver",
+				goerr.V("process", proc.ID))
 		}
-
-		var target *model.Case
-		if sc.CaseID != 0 {
-			found, err := d.Repo.Case().Get(ctx, sc.WorkspaceID, sc.CaseID)
-			if err != nil {
-				return nil, goerr.Wrap(err, "load the process case",
-					goerr.V("process", proc.ID), goerr.V("case_id", sc.CaseID))
-			}
-			target = found
-		}
-
-		resolver := agent.NewToolSetResolver(buildToolSetDeps(d, sc, entry, target))
 
 		ids := sc.ToolSets
 		if slices.Contains(ids, ToolSetsAll) {
-			expanded, err := defaultToolSets(proc.Agent)
-			if err != nil {
-				return nil, goerr.Wrap(err, "expand the agent tool palette",
+			expanded, eErr := defaultToolSets(proc.Agent)
+			if eErr != nil {
+				return nil, goerr.Wrap(eErr, "expand the agent tool palette",
 					goerr.V("process", proc.ID))
 			}
 			ids = expanded
 		}
 		return resolver.Resolve(ids), nil
 	}, nil
+}
+
+// resolverFor narrows ToolDeps down to one Process's scope and returns the
+// resolver built from it.
+//
+// The tool factory and ToolSetProbe MUST both go through this: the probe answers
+// "which toolset ids exist for this run" and the factory decides what the run
+// actually gets, so two independent constructions of the same thing would drift
+// and re-create the advertised-but-absent tool this whole path exists to avoid.
+func (d ToolDeps) resolverFor(ctx context.Context, sc Scope) (*agent.ToolSetResolver, error) {
+	var entry *model.WorkspaceEntry
+	if sc.WorkspaceID != "" {
+		found, err := d.Registry.Get(sc.WorkspaceID)
+		if err != nil {
+			// The scope names a workspace this deployment does not configure.
+			// Failing is right: handing the agent an empty tool set would let it
+			// run to a confident, tool-less conclusion instead of surfacing the
+			// misconfiguration.
+			return nil, goerr.Wrap(err, "resolve the workspace",
+				goerr.V("workspace_id", sc.WorkspaceID))
+		}
+		entry = found
+	}
+
+	var target *model.Case
+	if sc.CaseID != 0 {
+		found, err := d.Repo.Case().Get(ctx, sc.WorkspaceID, sc.CaseID)
+		if err != nil {
+			return nil, goerr.Wrap(err, "load the case",
+				goerr.V("workspace_id", sc.WorkspaceID), goerr.V("case_id", sc.CaseID))
+		}
+		target = found
+	}
+
+	return agent.NewToolSetResolver(buildToolSetDeps(d, sc, entry, target)), nil
+}
+
+// ToolSetProbe answers which toolset ids actually resolve to a tool for a given
+// scope. A plan-execute host asks it before Spawn and advertises only what comes
+// back, so its planner is never offered an id that resolves to nothing.
+//
+// Without it a palette is a fixed list while the tools behind it are conditional
+// on what a deployment configured and on the case the run is pinned to. The
+// planner then assigns a task a toolset the sub-agent does not get — which is how
+// slack__post_to_case_channel came to be requested on a deployment that had built
+// no poster, and the run died on "unknown tool" instead of doing its work.
+type ToolSetProbe struct {
+	deps ToolDeps
+}
+
+// NewToolSetProbe builds the probe from the same ToolDeps the Kernel was built
+// with. Pass the identical value; see resolverFor for why.
+func NewToolSetProbe(d ToolDeps) (*ToolSetProbe, error) {
+	if err := d.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "validate tool deps")
+	}
+	return &ToolSetProbe{deps: d}, nil
+}
+
+// Available returns palette with every id that resolves to no tool removed,
+// preserving the caller's order.
+//
+// A nil probe returns the palette unchanged: a host wired without one keeps the
+// behaviour it had before the probe existed rather than losing its whole
+// vocabulary.
+func (p *ToolSetProbe) Available(ctx context.Context, sc Scope, palette []string) ([]string, error) {
+	if p == nil {
+		return palette, nil
+	}
+	resolver, err := p.deps.resolverFor(ctx, sc)
+	if err != nil {
+		return nil, goerr.Wrap(err, "build the tool resolver for the scope")
+	}
+	out := make([]string, 0, len(palette))
+	for _, id := range palette {
+		if resolver.Has(id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // buildToolSetDeps flavours every toolset for one Process's scope. It is the

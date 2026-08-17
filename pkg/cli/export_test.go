@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"github.com/gollem-dev/gollem"
 
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -51,6 +53,19 @@ func BuildJobToolsWithReadDepsForTest(deps JobReadToolDepsForTest, c *model.Case
 		NotionTool:     deps.Notion,
 		JiraTools:      deps.Jira,
 	}, jobToolAdapters{}, c, ws)
+}
+
+// TickIntegrationConfigsForTest exposes the sweep's integration configuration
+// bag so a test can drive configureTickIntegrations.
+type TickIntegrationConfigsForTest = tickIntegrationConfigs
+
+// ConfigureTickIntegrationsForTest runs configureTickIntegrations and returns
+// what a caller can observe: the Slack service and Jira tools (which no usecase
+// accessor exposes) plus the usecase options, so a test can apply them through
+// usecase.New and assert on the built UseCases rather than on opaque funcs.
+func ConfigureTickIntegrationsForTest(ctx context.Context, cfg tickIntegrationConfigs) (slacksvc.Service, []gollem.Tool, []usecase.Option, error) {
+	out, err := configureTickIntegrations(ctx, cfg)
+	return out.slack, out.jiraTools, out.ucOpts, err
 }
 
 // --- serve.go seams (GraphQL error → HTTP status mapping) ------------------

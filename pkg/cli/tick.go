@@ -26,17 +26,51 @@ func cmdTick() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var llmCfg config.LLM
+	var embCfg config.Embedding
 	var jobCfg config.JobConcurrency
 	var agentCfg config.Agent
 	var storageCfg config.Storage
+	// The integrations below are configured here for the same reason the LLM is:
+	// a sweep EXECUTES the runs it dispatches, so the Job agent's tools are built
+	// from THIS process's clients. Leaving one out does not simply disable a
+	// capability — the Job palette still advertises its toolset id to the planner,
+	// which then hands the model a tool that resolves to nothing. See
+	// docs/operations.md § Running scheduled Jobs.
+	//
+	// GitHub is absent on purpose: a sweep runs only Job agents, and the Job tool
+	// palette withholds the github toolset from an unattended run.
+	var slackCfg config.Slack
+	var jiraCfg config.Jira
+	var webfetchCfg config.WebFetch
+	var notionToken string
+	var baseURL string
 
-	var flags []cli.Flag
+	flags := []cli.Flag{
+		&cli.StringFlag{
+			Name:        "notion-api-token",
+			Usage:       "Notion API token for Source integration and the notion__* agent tools",
+			Sources:     cli.EnvVars("HECATONCHEIRES_NOTION_API_TOKEN"),
+			Destination: &notionToken,
+		},
+		&cli.StringFlag{
+			Name:        "base-url",
+			Usage:       "Base URL for the application (e.g., https://your-domain.com). Slack messages a dispatched run posts link back to it",
+			Sources:     cli.EnvVars("HECATONCHEIRES_BASE_URL"),
+			Destination: &baseURL,
+		},
+	}
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, jobCfg.Flags()...)
 	flags = append(flags, agentCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
+	// RuntimeFlags, not Flags: a sweep serves no endpoints, so the OAuth client
+	// pair and the webhook signing secret would be credentials it can never use.
+	flags = append(flags, slackCfg.RuntimeFlags()...)
+	flags = append(flags, jiraCfg.Flags()...)
+	flags = append(flags, webfetchCfg.Flags()...)
 
 	return &cli.Command{
 		Name:  "tick",
@@ -49,8 +83,14 @@ func cmdTick() *cli.Command {
 				return goerr.Wrap(err, "invalid job concurrency configuration")
 			}
 
-			deps, err := buildTickRuntime(ctx, &appCfg, &repoCfg, &llmCfg, &jobCfg,
-				&agentCfg, &storageCfg, c)
+			deps, err := buildTickRuntime(ctx, &appCfg, &repoCfg, &llmCfg, &embCfg, &jobCfg,
+				&agentCfg, &storageCfg, tickIntegrationConfigs{
+					Slack:       &slackCfg,
+					Jira:        &jiraCfg,
+					WebFetch:    &webfetchCfg,
+					NotionToken: notionToken,
+					BaseURL:     baseURL,
+				}, c)
 			if err != nil {
 				return goerr.Wrap(err, "failed to build tick runtime")
 			}

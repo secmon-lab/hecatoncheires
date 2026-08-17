@@ -528,3 +528,99 @@ func seedCase(t *testing.T, ctx context.Context, repo interfaces.Repository, c *
 	gt.NoError(t, err).Required()
 	return ctx
 }
+
+// --- ToolSetProbe ---------------------------------------------------------
+
+// The palette a host advertises to its planner is a fixed list, while the tools
+// behind it depend on what the deployment configured. The probe is what closes
+// that gap: an id it drops is one whose tools the sub-agent would never receive.
+func TestToolSetProbeDropsUnconfiguredToolSets(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	ctx = seedCase(t, ctx, repo, &model.Case{
+		Title:          "job target",
+		SlackChannelID: "C-JOB",
+	})
+
+	// Slack is wired, Notion / Jira / WebFetch are not — the shape of a
+	// deployment that configured only Slack.
+	probe, err := kernel.NewToolSetProbe(kernel.ToolDeps{
+		Repo:        repo,
+		Registry:    testRegistry(channelWorkspace()),
+		SlackBot:    stubSlackBot{},
+		SlackPoster: stubSlackPoster{},
+		ActionUC:    stubActionMutator{},
+		CaseUC:      stubCaseMutator{},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{kernel.ToolSetsAll}}
+	got, err := probe.Available(ctx, sc, agent.KnownToolSetIDsJob)
+	gt.NoError(t, err).Required()
+
+	gt.Bool(t, slices.Contains(got, agent.ToolSetSlackPost)).True()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetSlackRO)).True()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetCoreJob)).True()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetCaseWrite)).True()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetNotion)).False()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetJira)).False()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetWebFetch)).False()
+}
+
+// Without a Slack poster the id behind slack__post_to_case_channel must not be
+// offered at all. Advertising it is what let a planner assign a task the tool
+// this deployment never built, and the run died on "unknown tool".
+func TestToolSetProbeDropsSlackPostWithoutAPoster(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	ctx = seedCase(t, ctx, repo, &model.Case{
+		Title:          "job target",
+		SlackChannelID: "C-JOB",
+	})
+
+	probe, err := kernel.NewToolSetProbe(kernel.ToolDeps{
+		Repo:     repo,
+		Registry: testRegistry(channelWorkspace()),
+		SlackBot: stubSlackBot{},
+		ActionUC: stubActionMutator{},
+		CaseUC:   stubCaseMutator{},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{WorkspaceID: "ws-1", CaseID: 1, ToolSets: []string{kernel.ToolSetsAll}}
+	got, err := probe.Available(ctx, sc, agent.KnownToolSetIDsJob)
+	gt.NoError(t, err).Required()
+
+	gt.Bool(t, slices.Contains(got, agent.ToolSetSlackPost)).False()
+	// The reads are unaffected: they need the bot, which is wired.
+	gt.Bool(t, slices.Contains(got, agent.ToolSetSlackRO)).True()
+}
+
+// A run pinned to no case cannot write to one, so the single-case writer id has
+// nothing behind it and must not be offered.
+func TestToolSetProbeDropsCaseWriteWithoutACase(t *testing.T) {
+	probe, err := kernel.NewToolSetProbe(kernel.ToolDeps{
+		Repo:     memory.New(),
+		Registry: testRegistry(channelWorkspace()),
+		SlackBot: stubSlackBot{},
+		CaseUC:   stubCaseMutator{},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{WorkspaceID: "ws-1", ToolSets: []string{kernel.ToolSetsAll}}
+	got, err := probe.Available(context.Background(), sc,
+		[]string{agent.ToolSetCaseWrite, agent.ToolSetSlackRO})
+	gt.NoError(t, err).Required()
+
+	gt.Bool(t, slices.Contains(got, agent.ToolSetCaseWrite)).False()
+	gt.Bool(t, slices.Contains(got, agent.ToolSetSlackRO)).True()
+}
+
+// A host bound without a probe keeps the palette it had, rather than losing its
+// whole vocabulary.
+func TestToolSetProbeNilReturnsThePaletteUnchanged(t *testing.T) {
+	var probe *kernel.ToolSetProbe
+	got, err := probe.Available(context.Background(), kernel.Scope{}, agent.KnownToolSetIDsJob)
+	gt.NoError(t, err).Required()
+	gt.Value(t, got).Equal(agent.KnownToolSetIDsJob)
+}

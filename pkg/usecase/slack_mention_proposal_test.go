@@ -118,7 +118,7 @@ func bindDraftRuntimeWithoutWorker(
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry, SlackBot: slackSvc},
 	})
 	gt.NoError(t, err).Required()
-	d.Bind(k)
+	d.Bind(k, nil)
 	uc.BindDurableDraft(d)
 	return locator, k
 }

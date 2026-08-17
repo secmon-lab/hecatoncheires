@@ -3,6 +3,7 @@ package job_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,4 +120,45 @@ func TestDurableRuntime_DrainWithoutTrackingWaitsForNothing(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageRunning)
+}
+
+// A Job's sub-agents are told the CASE's thread, not the thread the run's
+// operational log consolidates into. The two differ for a channel-mode case,
+// where the log thread is rooted fresh at the "starting" marker: telling a
+// sub-agent that one would send it to read the run's own progress notes instead
+// of the conversation the case is about.
+func TestCaseTaskContext_CarriesTheCaseThreadNotTheSessionThread(t *testing.T) {
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "triage"}
+	c := &model.Case{
+		ID:             7,
+		SlackChannelID: "C-CASE",
+		SlackThreadTS:  "1700000000.000100",
+	}
+
+	got := job.CaseTaskContextForTest(key, c)
+	gt.Value(t, got.WorkspaceID).Equal("ws-1")
+	gt.Value(t, got.CaseID).Equal(int64(7))
+	gt.Value(t, got.SlackChannelID).Equal("C-CASE")
+	gt.Value(t, got.SlackThreadTS).Equal("1700000000.000100")
+
+	rendered, err := got.Render()
+	gt.NoError(t, err).Required()
+	gt.String(t, rendered).Contains("- slack_thread_ts: 1700000000.000100")
+}
+
+// A run whose case could not be loaded still names the workspace and case it is
+// for; the Slack lines are simply absent rather than empty.
+func TestCaseTaskContext_WithoutACaseCarriesOnlyTheKey(t *testing.T) {
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "triage"}
+
+	got := job.CaseTaskContextForTest(key, nil)
+	gt.Value(t, got.WorkspaceID).Equal("ws-1")
+	gt.Value(t, got.CaseID).Equal(int64(7))
+	gt.Value(t, got.SlackChannelID).Equal("")
+	gt.Value(t, got.SlackThreadTS).Equal("")
+
+	rendered, err := got.Render()
+	gt.NoError(t, err).Required()
+	gt.Bool(t, strings.Contains(rendered, "slack_channel_id")).False()
+	gt.Bool(t, strings.Contains(rendered, "slack_thread_ts")).False()
 }

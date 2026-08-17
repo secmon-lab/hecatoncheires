@@ -6,13 +6,19 @@ import (
 	"testing"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
+
+	urfavecli "github.com/urfave/cli/v3"
 
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
@@ -272,4 +278,137 @@ func TestRegistryHasInteractiveJob(t *testing.T) {
 		})
 		gt.Bool(t, cli.RegistryHasInteractiveJobForTest(reg)).False()
 	})
+}
+
+// --- configureTickIntegrations -------------------------------------------
+
+// slackConfigFromEnv populates a config.Slack the way the process actually does
+// — by parsing its own flags — so the test also pins that the sweep reads the
+// same environment variables serve does.
+func slackConfigFromEnv(t *testing.T, botToken, userToken string) *config.Slack {
+	t.Helper()
+	t.Setenv("HECATONCHEIRES_SLACK_BOT_TOKEN", botToken)
+	t.Setenv("HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN", userToken)
+
+	var cfg config.Slack
+	cmd := &urfavecli.Command{
+		Name:   "tick",
+		Flags:  cfg.RuntimeFlags(),
+		Action: func(context.Context, *urfavecli.Command) error { return nil },
+	}
+	gt.NoError(t, cmd.Run(context.Background(), []string{"tick"})).Required()
+	gt.String(t, cfg.BotToken()).Equal(botToken)
+	return &cfg
+}
+
+// Every config pointer is required: a sweep executes the runs it dispatches, so
+// omitting one silently leaves a toolset the Job palette advertises resolving to
+// nothing.
+func TestTickIntegrationConfigs_Validate(t *testing.T) {
+	full := func() cli.TickIntegrationConfigsForTest {
+		return cli.TickIntegrationConfigsForTest{
+			Slack:    &config.Slack{},
+			Jira:     &config.Jira{},
+			WebFetch: &config.WebFetch{},
+		}
+	}
+	gt.NoError(t, full().Validate())
+
+	testCases := map[string]func(*cli.TickIntegrationConfigsForTest){
+		"slack":    func(c *cli.TickIntegrationConfigsForTest) { c.Slack = nil },
+		"jira":     func(c *cli.TickIntegrationConfigsForTest) { c.Jira = nil },
+		"webfetch": func(c *cli.TickIntegrationConfigsForTest) { c.WebFetch = nil },
+	}
+	for name, drop := range testCases {
+		t.Run("missing "+name, func(t *testing.T) {
+			cfg := full()
+			drop(&cfg)
+			gt.Error(t, cfg.Validate())
+		})
+	}
+}
+
+// With nothing configured the sweep must still come up — every client stays nil
+// and its tool constructor binds nothing — but the base URL is applied so a
+// scheduled run's Slack messages link back the way serve's do.
+func TestConfigureTickIntegrations_UnconfiguredLeavesClientsNil(t *testing.T) {
+	slackSvc, jiraTools, opts, err := cli.ConfigureTickIntegrationsForTest(
+		context.Background(), cli.TickIntegrationConfigsForTest{
+			Slack:    &config.Slack{},
+			Jira:     &config.Jira{},
+			WebFetch: &config.WebFetch{},
+			BaseURL:  "https://hecatoncheires.example.com",
+		})
+	gt.NoError(t, err).Required()
+	gt.Value(t, slackSvc).Nil()
+	gt.Array(t, jiraTools).Length(0)
+
+	uc := usecase.New(memory.New(), model.NewWorkspaceRegistry(), opts...)
+	gt.Value(t, uc.SlackService()).Nil()
+	gt.Value(t, uc.SlackSearchService()).Nil()
+	gt.Value(t, uc.SlackMessageRetriever()).Nil()
+	gt.Value(t, uc.NotionToolClient()).Nil()
+	gt.Value(t, uc.GitHubToolClient()).Nil()
+	gt.Value(t, uc.WebFetchClient()).Nil()
+	gt.String(t, uc.Case.CaseURL("ws-1", 7)).Equal("https://hecatoncheires.example.com/ws/ws-1/cases/7")
+}
+
+// A Slack bot token is what makes the whole Slack surface exist for a sweep: the
+// service the runner reports through, the read tools, and the poster
+// slack__post_to_case_channel is built from.
+func TestConfigureTickIntegrations_SlackBotTokenWiresTheService(t *testing.T) {
+	slackCfg := slackConfigFromEnv(t, "xoxb-test-token", "")
+	slackSvc, _, opts, err := cli.ConfigureTickIntegrationsForTest(
+		context.Background(), cli.TickIntegrationConfigsForTest{
+			Slack:    slackCfg,
+			Jira:     &config.Jira{},
+			WebFetch: &config.WebFetch{},
+		})
+	gt.NoError(t, err).Required()
+	gt.Value(t, slackSvc).NotNil()
+
+	// usecase.New refuses a Slack service with no LLM client, which is the same
+	// invariant buildTickRuntime reports as an error before getting here.
+	opts = append(opts, usecase.WithLLMClient(&mock.LLMClientMock{}))
+	uc := usecase.New(memory.New(), model.NewWorkspaceRegistry(), opts...)
+	gt.Value(t, uc.SlackService()).NotNil()
+	// Non-nil is what the tool factory checks, so the poster must materialise.
+	gt.Value(t, uc.AgentToolDeps().SlackPoster).NotNil()
+	// No User OAuth token, so the two User-token-backed read clients stay unset.
+	gt.Value(t, uc.SlackSearchService()).Nil()
+	gt.Value(t, uc.SlackMessageRetriever()).Nil()
+}
+
+// The User OAuth token is the only token search.messages accepts, and what lets
+// the message reader reach public channels the bot has not joined.
+func TestConfigureTickIntegrations_UserTokenWiresTheReadClients(t *testing.T) {
+	slackCfg := slackConfigFromEnv(t, "xoxb-test-token", "xoxp-test-token")
+	_, _, opts, err := cli.ConfigureTickIntegrationsForTest(
+		context.Background(), cli.TickIntegrationConfigsForTest{
+			Slack:    slackCfg,
+			Jira:     &config.Jira{},
+			WebFetch: &config.WebFetch{},
+		})
+	gt.NoError(t, err).Required()
+
+	opts = append(opts, usecase.WithLLMClient(&mock.LLMClientMock{}))
+	uc := usecase.New(memory.New(), model.NewWorkspaceRegistry(), opts...)
+	gt.Value(t, uc.SlackSearchService()).NotNil()
+	gt.Value(t, uc.SlackMessageRetriever()).NotNil()
+}
+
+// The Notion token backs the notion__* agent tools; without it the `notion`
+// toolset the Job palette advertises resolves to nothing.
+func TestConfigureTickIntegrations_NotionTokenWiresTheToolClient(t *testing.T) {
+	_, _, opts, err := cli.ConfigureTickIntegrationsForTest(
+		context.Background(), cli.TickIntegrationConfigsForTest{
+			Slack:       &config.Slack{},
+			Jira:        &config.Jira{},
+			WebFetch:    &config.WebFetch{},
+			NotionToken: "secret_test_token",
+		})
+	gt.NoError(t, err).Required()
+
+	uc := usecase.New(memory.New(), model.NewWorkspaceRegistry(), opts...)
+	gt.Value(t, uc.NotionToolClient()).NotNil()
 }

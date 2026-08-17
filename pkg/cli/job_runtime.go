@@ -28,6 +28,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	modelconfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
@@ -81,9 +82,11 @@ func buildTickRuntime(
 	appCfg *config.AppConfig,
 	repoCfg *config.Repository,
 	llmCfg *config.LLM,
+	embCfg *config.Embedding,
 	jobCfg *config.JobConcurrency,
 	agentCfg *config.Agent,
 	storageCfg *config.Storage,
+	integrationCfg tickIntegrationConfigs,
 	c *cli.Command,
 ) (*tickRuntime, error) {
 	_, registry, err := appCfg.Configure(c)
@@ -100,7 +103,57 @@ func buildTickRuntime(
 		return nil, goerr.Wrap(err, "init LLM client")
 	}
 
-	uc := usecase.New(repo, registry)
+	integrations, err := configureTickIntegrations(ctx, integrationCfg)
+	if err != nil {
+		return nil, err
+	}
+	// Slack and the LLM are required together, in both directions.
+	//
+	// Slack-without-LLM is what usecase.New enforces with a panic; surfacing it
+	// here turns a stack trace into a sentence, which is what a process started by
+	// a scheduler should produce.
+	//
+	// LLM-without-Slack is refused because a sweep with an LLM dispatches agent
+	// runs, and Slack is the only way an unattended run reports anything: it would
+	// mutate cases and tell nobody. It also leaves slack_post and slack_ro
+	// resolving to nothing while the Job palette still advertises them.
+	switch {
+	case integrations.slack != nil && llmClient == nil:
+		return nil, goerr.New("a Slack bot token is configured but no LLM provider is; " +
+			"a sweep with Slack wired must also be given --llm-provider")
+	case integrations.slack == nil && llmClient != nil:
+		return nil, goerr.New("an LLM provider is configured but no Slack bot token is; " +
+			"a sweep that dispatches agent runs must be given --slack-bot-token, " +
+			"or the runs would mutate cases with no way to report it")
+	}
+
+	ucOpts := integrations.ucOpts
+	// The usecase set needs the LLM and embedding clients too, not just the agent
+	// runtime.
+	//
+	// The webfetch client is built only when BOTH the HTTP settings and an LLM
+	// client are present, because the LLM screen is this codebase's only
+	// prompt-injection defense and webfetch fails closed without it. The knowledge
+	// tools' similarity search runs on the embedder. Omitting either left a toolset
+	// the Job palette advertises resolving to nothing.
+	//
+	// Embedding is required whenever an LLM is configured, and refused loudly
+	// rather than defaulted — the same contract serve enforces, so a sweep cannot
+	// silently run knowledge-blind Jobs a serve instance would have refused to
+	// start for.
+	if llmClient != nil {
+		ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
+		if !embCfg.IsEnabled() {
+			return nil, goerr.New("--embedding-gemini-project-id is required when --llm-provider is set")
+		}
+		embedClient, eErr := embCfg.NewClient(ctx)
+		if eErr != nil {
+			return nil, goerr.Wrap(eErr, "init embedding client for the sweep")
+		}
+		ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
+		logging.Default().Info("Embedding client enabled for the sweep", logAttrsToArgs(embCfg.LogAttrs())...)
+	}
+	uc := usecase.New(repo, registry, ucOpts...)
 
 	// The sweep runs its Jobs on the same agent runtime serve does, so a scheduled
 	// run gets the same step / token budget and the same one-transition-at-a-time
@@ -109,6 +162,7 @@ func buildTickRuntime(
 	durable, cleanup, err := buildTickAgentRuntime(ctx, tickAgentDeps{
 		repo: repo, registry: registry, llm: llmClient, uc: uc,
 		agentCfg: agentCfg, storageCfg: storageCfg, repoCfg: repoCfg,
+		slackSvc: integrations.slack, jiraTools: integrations.jiraTools,
 		slotLimit: jobCfg.Limit(),
 	})
 	if err != nil {
@@ -126,15 +180,15 @@ func buildTickRuntime(
 		// defeat it entirely.
 		SlotLimit:   jobCfg.Limit(),
 		SlotLimiter: durable.SlotLimiter,
-		// Mirror the read-tool wiring done in serve.go so every Job host
-		// resolves the same tool set. The tick CLI builds `uc` without the
-		// Slack / Notion options, so these accessors return nil today and the
-		// tools stay disabled; passing them keeps the host-coverage rule honest
-		// and lights the tools up automatically if the tick uc ever configures
-		// them.
+		// Mirror the tool wiring done in serve.go so every Job host resolves the
+		// same tool set. SlackService additionally backs the runner's own session
+		// log and the interaction poster, so a sweep reports its runs exactly the
+		// way serve does.
+		SlackService:   integrations.slack,
 		SlackSearch:    uc.SlackSearchService(),
 		SlackRetriever: uc.SlackMessageRetriever(),
 		NotionTool:     uc.NotionToolClient(),
+		JiraTools:      integrations.jiraTools,
 		Durable:        durable.Runtime,
 	})
 	if err != nil {
@@ -159,6 +213,148 @@ func buildTickRuntime(
 	}, nil
 }
 
+// tickIntegrationConfigs is the external-integration configuration a sweep
+// parses. Every field is required to be non-nil: a sweep EXECUTES the runs it
+// dispatches, so each of these decides whether a tool the Job palette advertises
+// actually exists. An unconfigured integration is expressed by its own config
+// being empty, never by omitting it here.
+// GitHub is deliberately absent: a sweep runs only Job agents, and
+// agent.KnownToolSetIDsJob withholds the github toolset from an unattended run
+// on purpose. Configuring a GitHub client here would build one no Job can reach.
+type tickIntegrationConfigs struct {
+	Slack    *config.Slack
+	Jira     *config.Jira
+	WebFetch *config.WebFetch
+	// NotionToken backs both the Source service and the notion__* agent tools,
+	// exactly as it does in serve. Empty disables both.
+	NotionToken string
+	// BaseURL is the web UI origin the Slack messages a run produces link back
+	// to. A Job that files an Action posts a notification carrying that Action's
+	// URL, so without this the link is dropped from a scheduled run's message but
+	// present on the identical message from serve.
+	BaseURL string
+}
+
+// Validate enforces the non-nil contract above.
+func (c tickIntegrationConfigs) Validate() error {
+	if c.Slack == nil {
+		return goerr.New("slack configuration is required")
+	}
+	if c.Jira == nil {
+		return goerr.New("jira configuration is required")
+	}
+	if c.WebFetch == nil {
+		return goerr.New("webfetch configuration is required")
+	}
+	return nil
+}
+
+// tickIntegrations is what configureTickIntegrations built. The two concrete
+// values are the ones no usecase accessor exposes; everything else reaches the
+// tool wiring through the usecase options.
+type tickIntegrations struct {
+	slack     slacksvc.Service
+	jiraTools []gollem.Tool
+	ucOpts    []usecase.Option
+}
+
+// configureTickIntegrations builds the external clients a sweep's Job runs need
+// and the usecase options that install them. It mirrors serve.go's integration
+// blocks, minus everything only an HTTP process uses (Slack OAuth, the signing
+// secret, the org-level detection that guards channel creation — a sweep creates
+// no channels).
+//
+// It exists because the sweep does not hand its runs to a serve instance: it
+// drives the agent worker itself, so the Job agent's tools are built from THIS
+// process's clients. Leaving one unconfigured does not degrade gracefully — the
+// Job palette still advertises the toolset id to the planner, which then assigns
+// the model a tool that resolves to nothing and the call fails with "unknown
+// tool". Each unconfigured integration is logged at startup for that reason.
+func configureTickIntegrations(ctx context.Context, cfg tickIntegrationConfigs) (tickIntegrations, error) {
+	if err := cfg.Validate(); err != nil {
+		return tickIntegrations{}, goerr.Wrap(err, "invalid sweep integration configuration")
+	}
+	out := tickIntegrations{ucOpts: []usecase.Option{usecase.WithBaseURL(cfg.BaseURL)}}
+	if cfg.BaseURL == "" {
+		logging.Default().Warn("Base URL not configured; Slack messages a scheduled run posts will carry no link back to the web UI")
+	}
+
+	if cfg.Slack.BotToken() != "" {
+		svc, err := slacksvc.New(cfg.Slack.BotToken())
+		if err != nil {
+			return tickIntegrations{}, goerr.Wrap(err, "init slack service for the sweep")
+		}
+		out.slack = svc
+		out.ucOpts = append(out.ucOpts,
+			usecase.WithSlackService(svc),
+			usecase.WithNotificationSlotDuration(cfg.Slack.NotificationSlotDuration()),
+		)
+
+		// The User OAuth token is what lets the read tools reach public channels
+		// the bot has not joined, and is the only token search.messages accepts.
+		// Without it the sweep keeps the bot-token reads, exactly as serve does.
+		if cfg.Slack.UserOAuthToken() != "" {
+			searchSvc, sErr := slacktool.NewSearchClient(cfg.Slack.UserOAuthToken())
+			if sErr != nil {
+				return tickIntegrations{}, goerr.Wrap(sErr, "init slack search service for the sweep")
+			}
+			retrieverSvc, rErr := slacktool.NewMessageRetriever(cfg.Slack.UserOAuthToken())
+			if rErr != nil {
+				return tickIntegrations{}, goerr.Wrap(rErr, "init slack message retriever for the sweep")
+			}
+			out.ucOpts = append(out.ucOpts,
+				usecase.WithSlackSearchService(searchSvc),
+				usecase.WithSlackMessageRetriever(retrieverSvc),
+			)
+		}
+		logging.Default().Info("Slack service enabled for the sweep", logAttrsToArgs(cfg.Slack.LogAttrs())...)
+	} else {
+		logging.Default().Warn("Slack bot token not configured; scheduled Job runs will have no Slack tools and cannot report their results")
+	}
+
+	if cfg.NotionToken != "" {
+		notionSvc, err := notion.New(cfg.NotionToken)
+		if err != nil {
+			return tickIntegrations{}, goerr.Wrap(err, "init notion service for the sweep")
+		}
+		notionToolClient, err := notiontool.NewClient(cfg.NotionToken)
+		if err != nil {
+			return tickIntegrations{}, goerr.Wrap(err, "init notion tool client for the sweep")
+		}
+		out.ucOpts = append(out.ucOpts,
+			usecase.WithNotion(notionSvc),
+			usecase.WithNotionToolClient(notionToolClient),
+		)
+		logging.Default().Info("Notion service enabled for the sweep")
+	} else {
+		logging.Default().Warn("Notion API token not configured; scheduled Job runs will have no notion__* tools")
+	}
+
+	jiraTools, err := cfg.Jira.Configure(ctx)
+	if err != nil {
+		return tickIntegrations{}, goerr.Wrap(err, "init jira tools for the sweep")
+	}
+	if jiraTools != nil {
+		out.jiraTools = jiraTools
+		out.ucOpts = append(out.ucOpts, usecase.WithJiraTools(jiraTools))
+		logging.Default().Info("Jira service enabled for the sweep", logAttrsToArgs(cfg.Jira.LogAttrs())...)
+	} else {
+		logging.Default().Warn("Jira not configured; scheduled Job runs will have no jira_* tools")
+	}
+
+	// The webfetch tool screens fetched content for prompt injection through the
+	// LLM, so it is only ever built alongside one — the same condition serve
+	// applies.
+	if cfg.WebFetch.IsEnabled() {
+		out.ucOpts = append(out.ucOpts, usecase.WithWebFetch(cfg.WebFetch.Settings()))
+		logging.Default().Info("WebFetch tool enabled for the sweep", logAttrsToArgs(cfg.WebFetch.LogAttrs())...)
+	} else {
+		logging.Default().Warn("WebFetch not enabled; scheduled Job runs will have no webfetch tool")
+	}
+
+	return out, nil
+}
+
 // tickAgentDeps is what building the sweep's agent runtime needs.
 type tickAgentDeps struct {
 	repo       interfaces.Repository
@@ -168,7 +364,14 @@ type tickAgentDeps struct {
 	agentCfg   *config.Agent
 	storageCfg *config.Storage
 	repoCfg    *config.Repository
-	slotLimit  int
+	// slackSvc is the bot-token client. nil when Slack is unconfigured; every
+	// Slack-backed tool then binds nothing.
+	slackSvc slacksvc.Service
+	// jiraTools carries the already-expanded Jira read tools. Unlike the other
+	// integrations there is no usecase accessor to read them back from, so they
+	// travel as a plain slice — see ToolDeps.JiraTools.
+	jiraTools []gollem.Tool
+	slotLimit int
 }
 
 // tickAgentRuntime is the sweep's agent runtime plus the slot gate the Job runner
@@ -241,6 +444,10 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 		return nil, noop, goerr.Wrap(err, "register the job agents")
 	}
 
+	// The same assembly serve uses, so a scheduled run resolves the same tool set.
+	// Every client behind it comes from the sweep's own configuration (see
+	// configureTickIntegrations), because the sweep executes the runs itself.
+	toolDeps := d.uc.AgentToolDeps()
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    procRepo,
 		History: archive.ProcessHistory,
@@ -249,35 +456,18 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 		Budgets: budgets,
 		Agents:  reg,
 		Slots:   slots,
-		// The same tool palette serve gives a Job run, so a scheduled run behaves
-		// identically wherever it is dispatched from. The Slack / Notion / GitHub
-		// clients are nil in a sweep (its usecase set is built without them) and each
-		// tool's constructor degrades to no tool, which is the pre-existing shape of
-		// the tick path.
-		Tools: agentkernel.ToolDeps{
-			Repo:              d.repo,
-			Registry:          d.registry,
-			SlackSearch:       d.uc.SlackSearchService(),
-			SlackRetriever:    d.uc.SlackMessageRetriever(),
-			NotionClient:      d.uc.NotionToolClient(),
-			GitHubClient:      d.uc.GitHubToolClient(),
-			WebFetchClient:    d.uc.WebFetchClient(),
-			ActionUC:          usecase.NewActionToolAdapter(d.uc.Action),
-			ActionStepUC:      usecase.NewActionStepToolAdapter(d.uc.ActionStep),
-			CaseUC:            usecase.NewCaseToolAdapter(d.uc.Case),
-			CaseRefUC:         d.uc.Case,
-			CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(d.uc.Case),
-			CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(d.uc.Action, d.uc.ActionStep),
-			MemoUC:            usecase.NewMemoToolAdapter(d.uc.Memo),
-			KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(d.uc.Knowledge, d.uc.Tag),
-			KnowledgeMutator:  usecase.NewKnowledgeToolMutator(d.uc.Knowledge, d.uc.Tag),
-		},
+		Tools:   toolDeps,
 	})
 	if err != nil {
 		cleanup()
 		return nil, noop, goerr.Wrap(err, "build the agent runtime")
 	}
-	durable.Bind(k)
+	probe, err := agentkernel.NewToolSetProbe(toolDeps)
+	if err != nil {
+		cleanup()
+		return nil, noop, goerr.Wrap(err, "build the agent toolset probe")
+	}
+	durable.Bind(k, probe)
 	// The sweep waits for exactly the runs it dispatched, so it must remember them.
 	durable.TrackSpawns()
 
@@ -572,7 +762,7 @@ func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case,
 	})...)
 	if deps.SlackService != nil && channelID != "" {
 		out = append(out, slackpost.New(slackpost.Deps{
-			Poster:          slackPosterAdapter{svc: deps.SlackService},
+			Poster:          usecase.NewSlackPoster(deps.SlackService),
 			ChannelID:       channelID,
 			DefaultThreadTS: threadTS,
 		})...)

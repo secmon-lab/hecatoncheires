@@ -376,10 +376,38 @@ The dispatched runs execute on the same agent runtime `serve` uses, and the swee
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of scheduled Agent Job runs executing concurrently across the whole deployment. Must match the value given to `serve`. `0` disables the limit |
 | `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Cond. | Cloud Storage bucket holding the runs' conversation and trace archive. Required whenever an LLM provider is configured — without it a sweep cannot record the runs it dispatches |
 | `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the bucket |
+| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL of the web UI. Slack messages a dispatched run posts (e.g. an Action notification) link back to it; without it the link is dropped |
+| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | Cond. | Slack Bot User OAuth Token. Required whenever an LLM provider is configured: it is what gives the dispatched runs their Slack read tools and `slack__post_to_case_channel`, the only way an unattended run reports its result |
+| `--slack-user-oauth-token` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | - | No | Slack User OAuth Token. Enables `slack__search_messages` (`search:read`) and lets `slack__get_messages` read public channels the bot has not joined (`channels:history`) |
+| `--slack-notification-slot-duration` | `HECATONCHEIRES_NOTIFICATION_SLOT_DURATION` | `1h` | No | Rolling window for aggregating channel-side change notifications. Set the same value as `serve` so a case updated by a scheduled run notifies the way it does elsewhere |
+| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | No | Notion API token. Enables the `notion__*` agent tools |
+| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Required whenever an LLM provider is configured (same rule as `serve`). The knowledge tools' similarity search runs on this embedder |
 
-`tick` also accepts every `--agent-*` flag listed under [`serve`](#serve); they bound
-the dispatched runs and the sweep's own worker the same way. See
+`tick` also accepts every `--agent-*` flag listed under [`serve`](#serve), plus the
+Jira (`--jira-*`) and WebFetch (`--webfetch-*`) flags documented there. See
 [Agent runtime budgets](#agent-runtime-budgets).
+
+**Configure the integrations here, not only on `serve`.** The sweep executes the
+runs it dispatches, so the Job agent's tools are built from *this* process's
+clients. An integration left unconfigured is not offered to the planner at all
+(the palette is derived per run from what actually resolved), so the runs simply
+proceed without that capability. The command logs a warning at startup for each
+one, because a sweep silently running Notion-blind or Jira-blind Jobs is almost
+never what the operator intended.
+
+Slack and the LLM are required **together**: `tick` refuses to start with one and
+not the other. A sweep with an LLM dispatches agent runs, and Slack is the only
+way an unattended run reports anything — without it the runs would mutate cases
+and tell nobody.
+
+Two families of `serve` flags are deliberately *not* accepted here:
+
+- **Slack OAuth client id/secret and the signing secret.** They authenticate
+  inbound HTTP requests; a sweep serves no endpoints, so asking a cron deployment
+  for them would spread credentials it can never use.
+- **GitHub App (`--github-*`).** A sweep runs only Job agents, and the Job tool
+  palette withholds the `github` toolset from an unattended run. A GitHub client
+  configured here would be one no Job can reach.
 
 Operational depth (scheduling cadence, relationship to `POST /hooks/tick`, the
 concurrency limit, what the sweep waits for) lives in

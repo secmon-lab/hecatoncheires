@@ -232,6 +232,9 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 		return nil, goerr.Wrap(err, "env: register the job agents")
 	}
 
+	// The same assembly serve uses, so a scenario exercises the tool palette a
+	// deployment actually gets rather than one this harness composed by hand.
+	toolDeps := uc.AgentToolDeps()
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    procRepo,
 		History: history,
@@ -239,31 +242,17 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 		Trace:   agentarchive.NewMemoryTraceRepository(),
 		Budgets: agentkernel.Budgets{Root: evalRootBudget, Task: evalTaskBudget},
 		Agents:  reg,
-		Tools: agentkernel.ToolDeps{
-			Repo:              repo,
-			Registry:          registry,
-			SlackBot:          uc.SlackService(),
-			SlackSearch:       uc.SlackSearchService(),
-			SlackRetriever:    uc.SlackMessageRetriever(),
-			NotionClient:      uc.NotionToolClient(),
-			GitHubClient:      uc.GitHubToolClient(),
-			WebFetchClient:    uc.WebFetchClient(),
-			ActionUC:          usecase.NewActionToolAdapter(uc.Action),
-			ActionStepUC:      usecase.NewActionStepToolAdapter(uc.ActionStep),
-			CaseUC:            usecase.NewCaseToolAdapter(uc.Case),
-			CaseRefUC:         uc.Case,
-			CaseMultiUC:       usecase.NewCaseMultiCaseAdapter(uc.Case),
-			CaseMultiActionUC: usecase.NewCaseMultiActionAdapter(uc.Action, uc.ActionStep),
-			MemoUC:            usecase.NewMemoToolAdapter(uc.Memo),
-			KnowledgeAccessor: usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
-			KnowledgeMutator:  usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
-		},
+		Tools:   toolDeps,
 	})
 	if err != nil {
 		return nil, goerr.Wrap(err, "env: build the agent runtime")
 	}
-	uc.Agent.BindAgentKernel(k)
-	durable.Bind(k)
+	probe, err := agentkernel.NewToolSetProbe(toolDeps)
+	if err != nil {
+		return nil, goerr.Wrap(err, "env: build the agent toolset probe")
+	}
+	uc.Agent.BindAgentKernel(k, probe)
+	durable.Bind(k, probe)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

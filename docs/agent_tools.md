@@ -100,7 +100,31 @@ closes a Case by moving it to a closed board status:
 | `slack__search_messages` | R | Workspace-wide message search (`search.messages`). | Requires a Slack **User** OAuth token with `search:read`. See [slack.md](slack.md#user-token-scopes). Wired into the interactive / investigation contexts **and into Jobs** (both modes) when the User token is configured. |
 | `slack__get_messages` | R | Bulk-fetch 1–10 messages with thread context (parallel, partial failure tolerated). | Wired into the interactive / investigation contexts **and into Jobs** (both modes) when a Slack service is configured. Reads via the User token when present, else via the bot if it is a channel member. Thread-mode Jobs use this to read their case thread first (the thread's `slack_thread_ts` is in the Job system prompt). |
 | `slack__post_message` | W | Post a message to the case's Slack channel (supports `thread_ts`). | Used by the assist / mention flow, where the agent posts where it directs. Not suppressed by a Job's `quiet`. |
-| `slack__post_to_case_channel` | W | Post a message to the case's bound channel. | **The only Slack *write* tool a Job gets** (Jobs also get the read tools above). The channel id is hard-pinned to `Case.SlackChannelID`; arbitrary channels are not reachable. Wired only when a Slack service is configured and the case has a bound channel. |
+| `slack__post_to_case_channel` | W | Post a message to the case's bound channel. | **The only Slack *write* tool a Job gets** (Jobs also get the read tools above). The channel id is hard-pinned to `Case.SlackChannelID`; arbitrary channels are not reachable. Wired only when a Slack service is configured and the case has a bound channel. Both `serve` and `tick` must be given a Slack bot token — a sweep executes the runs it dispatches, so a `tick` without one leaves this tool unbuilt. The same holds for every other integration on the Job palette (Notion, GitHub, Jira, WebFetch): see [cli.md](cli.md#tick). |
+
+**A planner is only offered toolsets that resolve to a tool.** The palettes above
+are the *ceiling* on what a host may advertise, not what it does advertise: before
+each Spawn, a plan-execute host filters its palette through
+`agentkernel.ToolSetProbe`, which builds the same resolver the tool factory uses
+and drops every id that would yield nothing. So a deployment without Notion never
+sees `notion` in a plan, and a case with no Slack channel never sees `slack_post`.
+Without this the planner assigns a task a toolset its sub-agent never receives,
+and the run dies on `unknown tool` — which is exactly what happened when
+`slack__post_to_case_channel` was advertised on a deployment that built no poster.
+When you add a toolset whose tools are conditional, make sure the condition is
+visible to `ToolSetResolver.Has`.
+
+**Sub-agents are told the ids their tools are pinned to.** A plan-execute run
+spawns one sub-agent per planned task, and that sub-agent's system prompt is
+built from the planner's task text — not from the host's. Its tools, however,
+are pinned to the run's subject. So every plan-execute host passes the run's
+identifiers (`workspace_id`, `case_id`, `slack_channel_id`, `slack_thread_ts`)
+as a context block rendered into each sub-agent's prompt. Without it a task told
+to "read the case thread" has to invent a channel id and a timestamp, and
+`slack__get_messages` rejects the call. When you add a tool that takes an
+identifier the host already knows, put that identifier in the block
+(`agent.TaskContext`) rather than relying on the planner to copy it into the
+task description.
 
 ### Knowledge tools (`knowledge`)
 

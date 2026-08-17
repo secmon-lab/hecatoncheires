@@ -78,7 +78,12 @@ type promptStatus struct {
 
 // promptData holds all data for the casebound system prompt template.
 type promptData struct {
-	ChannelID     string
+	ChannelID string
+	// ThreadTS is the thread the agent was mentioned in. It is in the prompt
+	// because the agent holds slack__get_messages, whose targets take a
+	// (channel_id, ts) pair: without the ts it has to invent one, and the tool
+	// rejects the call or looks up a message that does not exist.
+	ThreadTS      string
 	Now           string
 	Case          *model.Case
 	Fields        []promptField
@@ -96,9 +101,10 @@ type promptData struct {
 // suppressed — only the current action's detail is surfaced, to avoid
 // drowning the LLM in unrelated work items. Otherwise the case-wide
 // actions list is rendered as a title-only summary.
-func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID string, now time.Time, currentAction *model.Action, actions []*model.Action, messages []ConversationMessage) string {
+func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID, threadTS string, now time.Time, currentAction *model.Action, actions []*model.Action, messages []ConversationMessage) string {
 	data := promptData{
 		ChannelID: channelID,
+		ThreadTS:  threadTS,
 		Now:       now.UTC().Format(time.RFC3339),
 		Case:      c,
 	}

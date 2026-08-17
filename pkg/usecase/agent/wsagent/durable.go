@@ -48,6 +48,9 @@ type Durable struct {
 
 	agent  agentkit.Agent[planexec.Input]
 	kernel *agentkit.Kernel
+	// probe filters the planner palette down to the toolset ids that resolve to a
+	// tool for this run. nil leaves the palette unfiltered.
+	probe *agentkernel.ToolSetProbe
 }
 
 // NewDurable builds the durable workspace-agent host. locator is used only to
@@ -86,10 +89,12 @@ func (d *Durable) Register(
 	return nil
 }
 
-// Bind hands over the Kernel the registered agent runs on.
-func (d *Durable) Bind(k *agentkit.Kernel) {
+// Bind hands over the Kernel the registered agent runs on, and the probe that
+// tells this host which toolset ids actually resolve to a tool for a given run.
+func (d *Durable) Bind(k *agentkit.Kernel, probe *agentkernel.ToolSetProbe) {
 	if d != nil {
 		d.kernel = k
+		d.probe = probe
 	}
 }
 
@@ -142,10 +147,29 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return &Result{Status: StatusIdempotent}, nil
 	}
 
+	// The workspace agent spans every case, so there is no case id to give — but
+	// the channel and thread it was mentioned in are what a sub-agent asked to
+	// read the request's own conversation needs.
+	taskContext, err := agent.TaskContext{
+		WorkspaceID:    req.Workspace.Workspace.ID,
+		SlackChannelID: req.Session.ChannelID,
+		SlackThreadTS:  req.Session.ThreadTS,
+	}.Render()
+	if err != nil {
+		return nil, err
+	}
+
+	knownToolIDs, err := d.probe.Available(ctx, scope, agent.KnownToolSetIDsWorkspaceChannel)
+	if err != nil {
+		return nil, goerr.Wrap(err, "resolve the workspace agent tool palette",
+			goerr.V("session_id", req.Session.ID))
+	}
+
 	_, err = d.agent.Spawn(ctx, d.kernel, planexec.Input{
 		SystemPrompt:  systemPrompt,
 		UserInput:     req.MentionText,
-		KnownToolIDs:  agent.KnownToolSetIDsWorkspaceChannel,
+		KnownToolIDs:  knownToolIDs,
+		TaskContext:   taskContext,
 		Progress:      planexec.ProgressTarget{ChannelID: req.Session.ChannelID, ThreadTS: req.Session.ThreadTS},
 		AllowDirect:   true,
 		AllowQuestion: false,

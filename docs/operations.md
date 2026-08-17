@@ -260,6 +260,27 @@ $ hecatoncheires tick --config /etc/hecatoncheires/workspaces/
 Suitable for `cron`, GitHub Actions, or any external timer. The command
 exits when the sweep and every dispatched Job goroutine finish.
 
+**Give it the same integration configuration as `serve`.** The sweep does
+not hand the runs to a `serve` instance — it executes them itself, so
+every client the Job agent's tools are built from comes from *this*
+process: Slack, Notion, Jira, WebFetch, the embedder, and the base URL
+its Slack messages link back to.
+
+An integration left unconfigured is not advertised to the planner: each
+run's tool palette is derived from what its scope actually resolves to,
+so the run proceeds without that capability rather than being handed a
+tool that does not exist. What is lost is the capability itself, which is
+why the command logs a warning at startup for each one.
+
+Slack and the LLM are required together and `tick` refuses to start with
+one and not the other. A sweep with an LLM dispatches agent runs, and
+`slack__post_to_case_channel` is the only way an unattended run reports
+anything: without it the Job would run, mutate the case, and tell no one.
+
+GitHub is not configurable here — the Job tool palette withholds the
+`github` toolset from unattended runs, so a sweep has nothing to use it
+for. See [cli.md](./cli.md#tick) for the full flag list.
+
 #### HTTP: `POST /hooks/tick`
 
 Available on the `hecatoncheires serve` HTTP server. Wire to Cloud

@@ -85,6 +85,9 @@ type Durable struct {
 	mention agentkit.Agent[planexec.Input]
 	create  agentkit.Agent[planexec.Input]
 	kernel  *agentkit.Kernel
+	// probe filters the planner palette down to the toolset ids that resolve to a
+	// tool for this run. nil leaves the palette unfiltered.
+	probe *agentkernel.ToolSetProbe
 }
 
 // NewDurable builds the durable thread-mode host. The registry is required
@@ -151,10 +154,12 @@ func (d *Durable) Register(
 	return nil
 }
 
-// Bind hands over the Kernel the registered agents run on.
-func (d *Durable) Bind(k *agentkit.Kernel) {
+// Bind hands over the Kernel the registered agents run on, and the probe that
+// tells this host which toolset ids actually resolve to a tool for a given run.
+func (d *Durable) Bind(k *agentkit.Kernel, probe *agentkernel.ToolSetProbe) {
 	if d != nil {
 		d.kernel = k
+		d.probe = probe
 	}
 }
 
@@ -190,7 +195,10 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return &Result{Status: StatusIdempotent}, nil
 	}
 
-	in := d.input(req, isCreate)
+	in, err := d.input(ctx, req, scope, isCreate)
+	if err != nil {
+		return nil, err
+	}
 	opts := []agentkit.SpawnOption{
 		agentkit.WithSubject(agentkernel.ThreadSubject(req.Session.ID)),
 		agentkit.WithIdempotencyKey(agentkernel.TriggerKey(req.ChannelID, req.ThreadTS, req.TriggerTS)),
@@ -198,7 +206,6 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 	}
 	opts = append(opts, d.inheritOpts(ctx, req.InheritFrom)...)
 
-	var err error
 	if isCreate {
 		_, err = d.create.Spawn(ctx, d.kernel, in, opts...)
 	} else {
@@ -253,16 +260,41 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 // assignee changes and status transitions are all tool calls inside the loop
 // rather than host-applied decisions. A create turn has no case yet, so it stays
 // observation-only and materialises the new case from its terminal output.
-func (d *Durable) input(req TurnRequest, isCreate bool) planexec.Input {
-	knownToolIDs := agent.KnownToolSetIDsNoCore
+func (d *Durable) input(ctx context.Context, req TurnRequest, scope agentkernel.Scope, isCreate bool) (planexec.Input, error) {
+	palette := agent.KnownToolSetIDsNoCore
 	allowWrites := false
 	if req.Mode == ModeMention {
-		knownToolIDs = agent.KnownToolSetIDsThreadWrite
+		palette = agent.KnownToolSetIDsThreadWrite
 		allowWrites = true
+	}
+	// Only offer the planner what this run's tools actually resolve to. A create
+	// turn has no case, so case_write resolves to nothing there; an unconfigured
+	// integration resolves to nothing anywhere. Advertising either would hand a
+	// task a toolset its sub-agent never receives.
+	knownToolIDs, err := d.probe.Available(ctx, scope, palette)
+	if err != nil {
+		return planexec.Input{}, goerr.Wrap(err, "resolve the thread-mode tool palette",
+			goerr.V("session_id", req.Session.ID))
 	}
 	uiChannel, uiThread := req.UIChannelID, req.UIThreadTS
 	if uiChannel == "" {
 		uiChannel, uiThread = req.ChannelID, req.ThreadTS
+	}
+	// The conversation a sub-agent may be asked to read is the turn's own thread,
+	// which is the case thread for an existing case and the triggering thread on a
+	// create turn (no case exists yet). Without these ids a task holding the Slack
+	// read tools has to invent them.
+	taskCtx := agent.TaskContext{
+		WorkspaceID:    req.Workspace.Workspace.ID,
+		SlackChannelID: req.ChannelID,
+		SlackThreadTS:  req.ThreadTS,
+	}
+	if req.Case != nil {
+		taskCtx.CaseID = req.Case.ID
+	}
+	taskContext, tcErr := taskCtx.Render()
+	if tcErr != nil {
+		return planexec.Input{}, tcErr
 	}
 	return planexec.Input{
 		SystemPrompt: buildSystemPrompt(req.Case, req.Workspace, req.Mode, req.CreateInstruction),
@@ -273,6 +305,7 @@ func (d *Durable) input(req TurnRequest, isCreate bool) planexec.Input {
 			Text:      req.MentionText,
 		}),
 		KnownToolIDs: knownToolIDs,
+		TaskContext:  taskContext,
 		// Milestones are drawn where the person who triggered the turn is looking,
 		// which for a reaction-raised case is not the case thread.
 		Progress:            planexec.ProgressTarget{ChannelID: uiChannel, ThreadTS: uiThread},
@@ -281,7 +314,7 @@ func (d *Durable) input(req TurnRequest, isCreate bool) planexec.Input {
 		// A create turn must materialise a case, which the direct fast path
 		// deliberately never does.
 		AllowDirect: !isCreate,
-	}
+	}, nil
 }
 
 // scope describes the run to the runtime: what it acts on, whose access it acts

@@ -148,7 +148,7 @@ func (uc *UseCase) StartTurn(ctx context.Context, req TurnRequest) (*Result, err
 		return nil, err
 	}
 
-	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID,
+	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID, req.ThreadTS,
 		time.Now().UTC(), req.CurrentAction, req.Actions, req.SystemMessages)
 	userInput := buildUserInput(req.DeltaMessages, req.MentionText, req.MentionTS)
 

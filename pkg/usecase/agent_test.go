@@ -288,7 +288,7 @@ func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.K
 		},
 	})
 	gt.NoError(t, err).Required()
-	d.UC.BindAgentKernel(k)
+	d.UC.BindAgentKernel(k, nil)
 	return k
 }
 

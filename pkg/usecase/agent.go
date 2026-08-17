@@ -179,12 +179,17 @@ func (uc *AgentUseCase) RegisterAgents(
 
 // BindAgentKernel hands the built Kernel to every agent RegisterAgents
 // registered. Until it is called, a mention turn cannot be spawned.
-func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel) {
+//
+// probe travels with the Kernel because the two must be built from the same
+// ToolDeps: it is what a plan-execute host filters its planner palette with, and
+// a probe answering about a different wiring than the tool factory uses would
+// re-create the very mismatch it exists to prevent.
+func (uc *AgentUseCase) BindAgentKernel(k *agentkit.Kernel, probe *agentkernel.ToolSetProbe) {
 	if uc.casebound != nil {
 		uc.casebound.Bind(k)
 	}
-	uc.durableWorkspaceAgent.Bind(k)
-	uc.durableThreadcase.Bind(k)
+	uc.durableWorkspaceAgent.Bind(k, probe)
+	uc.durableThreadcase.Bind(k, probe)
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
