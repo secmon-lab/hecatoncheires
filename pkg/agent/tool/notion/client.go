@@ -1,17 +1,20 @@
 package notiontool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jomei/notionapi"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
 
@@ -19,10 +22,10 @@ import (
 // would let goroutines hang indefinitely if Notion stops responding mid-stream.
 const notionHTTPTimeout = 30 * time.Second
 
-// Client provides agent-tool-scoped access to the Notion API. It wraps the
-// notionapi search endpoint and adds the dedicated Markdown content endpoint
-// (GET /v1/pages/{id}/markdown, Notion-Version 2026-03-11) which the
-// jomei/notionapi library does not yet expose.
+// Client provides agent-tool-scoped access to the Notion API. It calls the
+// search endpoint and the dedicated Markdown content endpoint
+// (GET /v1/pages/{id}/markdown, Notion-Version 2026-03-11) directly; the
+// jomei/notionapi library is used for its request/response types only.
 type Client interface {
 	// Search performs a Notion-wide search via POST /v1/search.
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
@@ -35,8 +38,24 @@ type Client interface {
 // GET /v1/pages/{id}/markdown endpoint.
 const markdownAPIVersion = "2026-03-11"
 
+// searchAPIVersion pins POST /v1/search to the version jomei/notionapi is
+// written against, so notionapi.SearchResponse still decodes the payload.
+const searchAPIVersion = "2022-06-28"
+
+// notionAPIMaxAttempts bounds how many times a request is sent when Notion
+// answers 429. It stands in for notionapi.WithRetry(3): the library re-sent the
+// same *http.Request whose body had already been consumed, so a retried POST
+// carried an empty body — rebuilding the request per attempt avoids that.
+const notionAPIMaxAttempts = 3
+
+// defaultRetryAfter applies when a 429 carries no usable Retry-After header.
+const defaultRetryAfter = time.Second
+
+// errorBodyLimit bounds how much of a response body is read for diagnostics and
+// how much of a 429 body is drained before the connection is reused.
+const errorBodyLimit = 4096
+
 type client struct {
-	api        *notionapi.Client
 	token      string
 	httpClient *http.Client
 	apiBaseURL string
@@ -49,17 +68,26 @@ func NewClient(token string) (Client, error) {
 	if token == "" {
 		return nil, goerr.New("Notion API token is required")
 	}
-	httpClient := &http.Client{Timeout: notionHTTPTimeout}
 	return &client{
-		api: notionapi.NewClient(
-			notionapi.Token(token),
-			notionapi.WithRetry(3),
-			notionapi.WithHTTPClient(httpClient),
-		),
 		token:      token,
-		httpClient: httpClient,
+		httpClient: &http.Client{Timeout: notionHTTPTimeout},
 		apiBaseURL: "https://api.notion.com",
 	}, nil
+}
+
+// searchRequest is the POST /v1/search body. It exists instead of
+// notionapi.SearchRequest because that type declares Filter as a non-pointer
+// struct whose fields carry no omitempty (the struct-level omitempty is a no-op
+// in encoding/json), so an unfiltered search serialised as
+// "filter":{"value":"","property":""} and Notion rejected the whole request with
+// 400 `body.filter.property should be "object", instead was ""`. A pointer lets
+// the key be omitted, which is how "search pages and databases" is expressed.
+type searchRequest struct {
+	Query       string                  `json:"query,omitempty"`
+	Sort        *notionapi.SortObject   `json:"sort,omitempty"`
+	Filter      *notionapi.SearchFilter `json:"filter,omitempty"`
+	StartCursor string                  `json:"start_cursor,omitempty"`
+	PageSize    int                     `json:"page_size,omitempty"`
 }
 
 // Search performs a Notion-wide search via POST /v1/search and converts the response.
@@ -72,40 +100,62 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 		pageSize = 100
 	}
 
-	req := &notionapi.SearchRequest{
-		Query:    query,
-		PageSize: pageSize,
+	body := &searchRequest{
+		Query:       query,
+		StartCursor: opts.StartCursor,
+		PageSize:    pageSize,
 	}
 	if opts.FilterType != "" {
-		req.Filter = notionapi.SearchFilter{
+		body.Filter = &notionapi.SearchFilter{
 			Property: "object",
 			Value:    opts.FilterType,
 		}
 	}
 	if opts.SortByEdit != "" {
-		req.Sort = &notionapi.SortObject{
+		body.Sort = &notionapi.SortObject{
 			Timestamp: notionapi.TimestampType("last_edited_time"),
 			Direction: notionapi.SortOrder(opts.SortByEdit),
 		}
 	}
-	if opts.StartCursor != "" {
-		req.StartCursor = notionapi.Cursor(opts.StartCursor)
+
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to encode notion search request",
+			goerr.V("query", query),
+		)
 	}
 
-	resp, err := c.api.Search.Do(ctx, req)
+	resp, err := c.doJSON(ctx, http.MethodPost, "/v1/search", searchAPIVersion, encoded)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to search notion",
 			goerr.V("query", query),
 			goerr.V("page_size", pageSize),
 		)
 	}
+	defer safe.Close(ctx, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, goerr.New("notion search endpoint returned non-2xx",
+			goerr.V("query", query),
+			goerr.V("page_size", pageSize),
+			goerr.V("status", resp.StatusCode),
+			goerr.V("body", readErrorBody(ctx, resp.Body)),
+		)
+	}
+
+	var decoded notionapi.SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode notion search response",
+			goerr.V("query", query),
+		)
+	}
 
 	out := &SearchResult{
-		Items:      make([]SearchItem, 0, len(resp.Results)),
-		HasMore:    resp.HasMore,
-		NextCursor: string(resp.NextCursor),
+		Items:      make([]SearchItem, 0, len(decoded.Results)),
+		HasMore:    decoded.HasMore,
+		NextCursor: string(decoded.NextCursor),
 	}
-	for _, obj := range resp.Results {
+	for _, obj := range decoded.Results {
 		item, ok := convertSearchItem(obj)
 		if !ok {
 			continue
@@ -113,6 +163,77 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 		out.Items = append(out.Items, item)
 	}
 	return out, nil
+}
+
+// doJSON sends one Notion API request, retrying while Notion answers 429. The
+// request is rebuilt on every attempt so the retry carries the same payload.
+func (c *client) doJSON(ctx context.Context, method, path, notionVersion string, body []byte) (*http.Response, error) {
+	endpoint := c.apiBaseURL + path
+
+	for attempt := 1; ; attempt++ {
+		var reader io.Reader
+		if body != nil {
+			reader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to build notion request", goerr.V("path", path))
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Notion-Version", notionVersion)
+		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to call notion api", goerr.V("path", path))
+		}
+		if resp.StatusCode != http.StatusTooManyRequests || attempt >= notionAPIMaxAttempts {
+			return resp, nil
+		}
+
+		wait := retryAfter(resp.Header.Get("Retry-After"))
+		// Drain before closing: net/http can only reuse a connection whose body
+		// was read to EOF, and reconnecting on every attempt makes a rate limit
+		// more expensive to recover from than it needs to be.
+		safe.Copy(ctx, io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
+		safe.Close(ctx, resp.Body)
+
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, goerr.Wrap(ctx.Err(), "notion api retry aborted", goerr.V("path", path))
+		case <-timer.C:
+		}
+	}
+}
+
+// retryAfter reads Notion's Retry-After header, which carries whole seconds.
+// Notion always sends it on 429, but a missing or unparseable value falls back
+// to a fixed wait rather than failing the call: for an agent tool, one more
+// attempt is a better outcome than surfacing a rate limit as a hard error.
+func retryAfter(header string) time.Duration {
+	sec, err := strconv.Atoi(header)
+	if err != nil || sec < 0 {
+		return defaultRetryAfter
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// readErrorBody reads a bounded prefix of a non-2xx body for diagnostics. A read
+// failure is non-fatal — the caller is already returning the HTTP error — so it
+// is reported rather than returned.
+func readErrorBody(ctx context.Context, body io.Reader) string {
+	raw, err := io.ReadAll(io.LimitReader(body, errorBodyLimit))
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to read notion error body"),
+			"failed to read notion error body")
+		return ""
+	}
+	return string(raw)
 }
 
 // convertSearchItem converts a notionapi.Object (Page or Database) into a SearchItem.
@@ -177,27 +298,19 @@ func (c *client) GetPageMarkdown(ctx context.Context, pageID string) (*PageMarkd
 	// PathEscape: pageID arrives from LLM tool args, so guard against accidental
 	// slashes / spaces / non-UUID characters that would break the URL or escape
 	// the /v1/pages/ scope.
-	endpoint := fmt.Sprintf("%s/v1/pages/%s/markdown", c.apiBaseURL, url.PathEscape(pageID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to build markdown request", goerr.V("pageID", pageID))
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Notion-Version", markdownAPIVersion)
-	req.Header.Set("Accept", "application/json")
+	path := fmt.Sprintf("/v1/pages/%s/markdown", url.PathEscape(pageID))
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doJSON(ctx, http.MethodGet, path, markdownAPIVersion, nil)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to call notion markdown endpoint", goerr.V("pageID", pageID))
 	}
 	defer safe.Close(ctx, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, goerr.New("notion markdown endpoint returned non-2xx",
 			goerr.V("pageID", pageID),
 			goerr.V("status", resp.StatusCode),
-			goerr.V("body", string(body)),
+			goerr.V("body", readErrorBody(ctx, resp.Body)),
 		)
 	}
 

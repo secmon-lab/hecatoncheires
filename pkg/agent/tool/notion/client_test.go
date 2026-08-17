@@ -2,6 +2,8 @@ package notiontool_test
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,7 +96,7 @@ func TestSearch(t *testing.T) {
 		gt.String(t, capturedMethod).Equal(http.MethodPost)
 		gt.String(t, capturedPath).Equal("/v1/search")
 		gt.String(t, capturedAuth).Equal("Bearer secret-token")
-		gt.String(t, capturedNotionVersion).NotEqual("") // notionapi sets a version
+		gt.String(t, capturedNotionVersion).Equal("2022-06-28")
 		gt.Bool(t, strings.Contains(capturedBody, `"query":"incident"`)).True()
 		gt.Bool(t, strings.Contains(capturedBody, `"page_size":50`)).True()
 		gt.Bool(t, strings.Contains(capturedBody, `"property":"object"`)).True()
@@ -116,6 +118,196 @@ func TestSearch(t *testing.T) {
 		gt.String(t, got.Items[1].Type).Equal("database")
 		gt.String(t, got.Items[1].Title).Equal("Runbooks")
 		gt.String(t, got.Items[1].URL).Equal("https://www.notion.so/Runbooks-0002")
+	})
+
+	t.Run("omits the filter key when no object type is requested", func(t *testing.T) {
+		var capturedBody string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[]}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		_, err := c.Search(context.Background(), "closed network", notiontool.SearchOptions{})
+		gt.NoError(t, err).Required()
+
+		// Notion rejects the whole request with 400 when filter is present but
+		// filter.property is not "object", so the key must be absent entirely.
+		gt.Bool(t, strings.Contains(capturedBody, `"filter"`)).False()
+		gt.Bool(t, strings.Contains(capturedBody, `"query":"closed network"`)).True()
+	})
+
+	t.Run("sends pagination, sort and filter as documented fields", func(t *testing.T) {
+		var decoded map[string]any
+		var capturedVersion, capturedContentType string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			capturedVersion = r.Header.Get("Notion-Version")
+			capturedContentType = r.Header.Get("Content-Type")
+			gt.NoError(t, json.NewDecoder(r.Body).Decode(&decoded))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[]}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		_, err := c.Search(context.Background(), "runbook", notiontool.SearchOptions{
+			PageSize:    30,
+			FilterType:  "database",
+			SortByEdit:  "ascending",
+			StartCursor: "cursor-abc",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedVersion).Equal("2022-06-28")
+		gt.String(t, capturedContentType).Equal("application/json")
+
+		gt.Value(t, decoded["query"]).Equal("runbook")
+		gt.Value(t, decoded["start_cursor"]).Equal("cursor-abc")
+		gt.Value(t, decoded["page_size"]).Equal(float64(30))
+
+		filter := gt.Cast[map[string]any](t, decoded["filter"])
+		gt.Value(t, filter["property"]).Equal("object")
+		gt.Value(t, filter["value"]).Equal("database")
+
+		sort := gt.Cast[map[string]any](t, decoded["sort"])
+		gt.Value(t, sort["timestamp"]).Equal("last_edited_time")
+		gt.Value(t, sort["direction"]).Equal("ascending")
+	})
+
+	t.Run("returns error on non-2xx response", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"object":"error","status":400,"code":"validation_error","message":"body failed validation"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		_, err := c.Search(context.Background(), "q", notiontool.SearchOptions{})
+		gt.Value(t, err).NotNil().Required()
+		gt.Bool(t, strings.Contains(err.Error(), "non-2xx")).True()
+	})
+
+	t.Run("retries a 429 with the same body", func(t *testing.T) {
+		var bodies []string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			bodies = append(bodies, string(raw))
+			if len(bodies) == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[]}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.Search(context.Background(), "retry me", notiontool.SearchOptions{FilterType: "page"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Items).Length(0)
+
+		gt.Array(t, bodies).Length(2).Required()
+		gt.String(t, bodies[1]).Equal(bodies[0])
+		gt.Bool(t, strings.Contains(bodies[1], `"query":"retry me"`)).True()
+	})
+
+	t.Run("retries after the default wait when Retry-After is unusable", func(t *testing.T) {
+		for name, header := range map[string]string{
+			"absent":      "",
+			"unparseable": "later",
+			"negative":    "-5",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				attempts := 0
+				mux := http.NewServeMux()
+				mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					if attempts == 1 {
+						if header != "" {
+							w.Header().Set("Retry-After", header)
+						}
+						w.WriteHeader(http.StatusTooManyRequests)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[]}`))
+				})
+				srv := httptest.NewServer(mux)
+				defer srv.Close()
+
+				c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+				_, err := c.Search(context.Background(), "q", notiontool.SearchOptions{})
+				gt.NoError(t, err).Required()
+				gt.Number(t, attempts).Equal(2)
+			})
+		}
+	})
+
+	t.Run("stops retrying when the context is cancelled during the wait", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		attempts := 0
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			// A long Retry-After keeps the client inside the wait, so the only way
+			// out is the context — which is what this test pins.
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			cancel()
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		_, err := c.Search(ctx, "q", notiontool.SearchOptions{})
+		gt.Value(t, err).NotNil().Required()
+		gt.Number(t, attempts).Equal(1)
+	})
+
+	t.Run("gives up after the retry budget is exhausted", func(t *testing.T) {
+		attempts := 0
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		_, err := c.Search(context.Background(), "q", notiontool.SearchOptions{})
+		gt.Value(t, err).NotNil().Required()
+		gt.Number(t, attempts).Equal(3)
 	})
 
 	t.Run("clamps page size and applies defaults", func(t *testing.T) {
@@ -194,6 +386,31 @@ func TestGetPageMarkdown(t *testing.T) {
 		got, err := c.GetPageMarkdown(context.Background(), "page-id")
 		gt.NoError(t, err).Required()
 		gt.Bool(t, got.Truncated).True()
+	})
+
+	t.Run("retries a 429", func(t *testing.T) {
+		attempts := 0
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/pages/page-id/markdown", func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"markdown":"body","truncated":false}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.GetPageMarkdown(context.Background(), "page-id")
+		gt.NoError(t, err).Required()
+		gt.String(t, got.Markdown).Equal("body")
+		gt.Number(t, attempts).Equal(2)
 	})
 
 	t.Run("returns error on non-2xx response", func(t *testing.T) {
