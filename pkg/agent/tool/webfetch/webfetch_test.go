@@ -164,6 +164,23 @@ func TestClientAnalyze(t *testing.T) {
 		_, _, _, err := c.AnalyzeForTest(context.Background(), "body")
 		gt.Error(t, err).Required()
 	})
+
+	t.Run("empty text is rejected without reaching the LLM", func(t *testing.T) {
+		llm := &mock.LLMClientMock{
+			NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+				t.Error("NewSession must not be called for empty text")
+				return nil, nil
+			},
+		}
+		c := webfetch.NewClient(webfetch.ClientConfig{
+			Timeout: 5 * time.Second, MaxBytes: 1024, UserAgent: testUserAgent, LLM: llm,
+		})
+		for _, text := range []string{"", "   \n\t "} {
+			_, _, _, err := c.AnalyzeForTest(context.Background(), text)
+			gt.Error(t, err).Required()
+		}
+		gt.Array(t, llm.NewSessionCalls()).Length(0)
+	})
 }
 
 func TestNewGating(t *testing.T) {
