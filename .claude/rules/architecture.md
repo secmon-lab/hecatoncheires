@@ -487,6 +487,42 @@ Rules for this path:
 - Trace recording is observability: `Open`/`Finish`/event failures are
   non-fatal (`errutil.Handle`) and must never fail the mention turn.
 
+## Agent runtime: a rejected tool call says which argument was wrong
+
+gollem validates a tool call's arguments against the `ToolSpec` before the tool
+runs, and the message it produces names the tool and the expectation but NOT the
+offending parameter: the name is carried as a goerr value on a per-parameter
+error held in an unexported slice outside the `Unwrap` chain, so neither
+`Error()` nor `goerr.Values` renders it, and it is unreachable from this
+application. A model told only "expected array type" for a tool whose `creates` /
+`updates` / `archives` are all arrays cannot tell which one to repair, and
+re-emits the same call — which is what `memo__apply_memo_changes` did in
+production (ARGUS-8S).
+
+`toolArgsFeedbackMiddleware` (`pkg/agent/kernel/middleware.go`) supplies the
+missing half by stating the SHAPE of the arguments that were actually received;
+exactly one of them contradicts the expectation. Four properties a change here
+must preserve:
+
+- **Shape only, never a value.** The error reaches the run timeline and the
+  operator's Sentry as well as the model, and tool arguments carry case content.
+- **It is registered AFTER `toolCallMiddleware`**, so it runs inside the trace
+  bracket and the archive records the same message the model was given.
+- **It wraps, it does not replace.** `errors.Is(err, gollem.ErrToolArgsValidation)`
+  must keep holding, and an error that is not an argument rejection is passed
+  through untouched.
+- **The shape reaches the position gollem can refuse.** gollem stops at the first
+  array element that fails and reports its index as a goerr value that is lost
+  the same way the parameter name is, so a mixed array is listed per index rather
+  than collapsed onto its first entry, and `argShapeMaxDepth` reaches the deepest
+  value a tool spec declares (memo's `creates[] -> object -> fields[] -> object ->
+  values[] -> string`). Raising a tool spec's nesting means raising that bound.
+
+A model's argument mistake still reaches Sentry through the strategies'
+`errutil.Handle`, and that is deliberate: the run recovers, but a model looping
+on the same rejected call is exactly what an operator needs to see. Do not
+silence it — make the feedback good enough that the loop stops.
+
 ## Agent runtime: no duplicated side effects (NON-NEGOTIABLE)
 
 Every `Kernel.Serve` call in this application MUST pass

@@ -151,6 +151,11 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 		agentkit.WithClaimMiddleware(claimMiddleware(d)),
 		agentkit.WithGenerateMiddleware(generateMiddleware()),
 		agentkit.WithToolCallMiddleware(toolCallMiddleware()),
+		// Registered second, so it runs INSIDE the trace bracket: the timeline and
+		// the archive then record the same enriched message the model is given.
+		// Reversing these two is caught by
+		// TestARejectedToolCallTellsTheModelWhatItSent.
+		agentkit.WithToolCallMiddleware(toolArgsFeedbackMiddleware()),
 		agentkit.WithLogger(logging.Default()),
 	)
 	if err != nil {
