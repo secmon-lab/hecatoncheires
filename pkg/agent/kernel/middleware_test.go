@@ -23,6 +23,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
@@ -185,6 +186,7 @@ type probeRuntime struct {
 	agent  agentkit.Agent[struct{}]
 	traces *agentarchive.MemoryTraceRepository
 	llm    *probeLLM
+	repo   interfaces.Repository
 }
 
 // newProbeRuntime builds the Kernel the probe strategy runs on. tool overrides
@@ -209,6 +211,7 @@ func newProbeRuntime(t *testing.T, tool ...gollem.Tool) *probeRuntime {
 	gt.NoError(t, err).Required()
 
 	llm := &probeLLM{}
+	repo := memory.New()
 	k, err := kernel.Build(kernel.Deps{
 		Repo:    agentprocmemory.New(),
 		History: agentarchive.NewMemoryHistoryStore(),
@@ -217,14 +220,14 @@ func newProbeRuntime(t *testing.T, tool ...gollem.Tool) *probeRuntime {
 		Budgets: budgets,
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
-			Repo:      memory.New(),
-			Registry:  testRegistry(),
+			Repo:      repo,
+			Registry:  testRegistry(channelWorkspace()),
 			JiraTools: tools,
 		},
 	})
 	gt.NoError(t, err).Required()
 
-	return &probeRuntime{kernel: k, agent: handle, traces: traces, llm: llm}
+	return &probeRuntime{kernel: k, agent: handle, traces: traces, llm: llm, repo: repo}
 }
 
 // runToCompletion serves until the spawned Process reaches a terminal state.
@@ -385,6 +388,49 @@ func TestAToolsOwnLLMCallIsRecorded(t *testing.T) {
 	}
 	slices.Sort(models)
 	gt.Array(t, models).Equal([]string{probeEmbeddingModelName, probeModelName})
+}
+
+// TestAToolsOwnLLMCallDoesNotBecomeItsParent pins that the TOOL_CALL event points
+// at the LLM_RESPONSE that ASKED for the call.
+//
+// A tool that reaches an LLM itself records an LLM_RESPONSE while it runs, so the
+// most recent response at the moment the tool returns is the tool's own. Reading
+// the parent then makes the tool call point at an event nested inside it, and the
+// run-detail page hangs the row under the wrong call.
+func TestAToolsOwnLLMCallDoesNotBecomeItsParent(t *testing.T) {
+	ctx := context.Background()
+	rt := newProbeRuntime(t, embeddingProbeTool{})
+	seedCase(t, ctx, rt.repo, &model.Case{Title: "parent link target"})
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-probe", JobRunID: "run-probe",
+	}
+	proc := runToCompletion(t, rt, sc)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	events, err := rt.repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-probe"}, "run-probe")
+	gt.NoError(t, err).Required()
+
+	// The two responses are distinguishable by model: the Generate names
+	// probeModelName, the tool's own call names probeEmbeddingModelName.
+	var toolEvents []*model.JobRunEvent
+	byModel := map[string]int64{}
+	for _, ev := range events {
+		switch ev.Kind {
+		case model.JobRunEventKindLLMResponse:
+			byModel[ev.LLMResponse.Model] = ev.Sequence
+		case model.JobRunEventKindToolCall:
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	gt.Number(t, byModel[probeModelName]).GreaterOrEqual(1)
+	gt.Number(t, byModel[probeEmbeddingModelName]).GreaterOrEqual(1)
+
+	gt.Array(t, toolEvents).Length(1).Required()
+	gt.Number(t, toolEvents[0].ParentSequence).Equal(byModel[probeModelName])
 }
 
 // llmCallSpans collects the call data of every llm_call span in a trace.
