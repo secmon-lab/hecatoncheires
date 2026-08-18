@@ -429,6 +429,27 @@ Two properties this relies on, which a change here must preserve:
   `RUN_ERROR` — append into one ordered timeline with nothing shared between
   them. Never reintroduce an in-process counter; it would hand the same number
   out twice.
+- **The model name is read from the provider, not from agentkit.**
+  `agentkit.GenerateResult` reports the tokens but not which model produced them,
+  so `generateMiddleware` installs an `agenttrace.ModelCapture` in the *gollem*
+  trace context for the duration of the call and takes the name off the
+  `trace.LLMCallData` the provider client builds. It must stay a capture rather
+  than the run's real handler: the provider drives the same `StartLLMCall` /
+  `EndLLMCall` pair, so a real handler there records every call twice. An empty
+  `model` on every event is what issue #266 reported.
+- **The claim's handler is published in the gollem trace context while a tool
+  runs** (`toolCallMiddleware`), so a tool that reaches an LLM itself — the
+  knowledge tools' embedding calls, webfetch's page analysis — is recorded as an
+  LLM call nested in its tool span. The pre-agentkit hosts got this from
+  `gollem.WithTrace`, which published the handler for the whole `Execute`; after
+  the migration nothing did, and those calls vanished from the timeline. This
+  cannot duplicate a Generate: an agentkit Generate never runs inside a tool.
+- **A `TOOL_CALL`'s `ParentSequence` is resolved when the tool STARTS**
+  (`Handler.StartToolExec`, held on the span), never when it ends. Because of the
+  bullet above, a tool that reaches an LLM itself records an `LLM_RESPONSE` while
+  it runs, so the most recent response at the end of the tool is the tool's own —
+  an end-time lookup points the row at an event nested inside it. Pinned by
+  `TestAToolsOwnLLMCallDoesNotBecomeItsParent`.
 
 Every production path now goes through the middleware — `tick` included, since it
 spawns onto the same runtime and drives the worker itself. The in-process Job

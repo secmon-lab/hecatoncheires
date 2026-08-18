@@ -173,11 +173,39 @@ func claimTraceMetadata(proc *agentkit.Process, sc Scope) trace.TraceMetadata {
 	return trace.TraceMetadata{Labels: labels}
 }
 
+// promptCacheMiddleware turns provider prompt caching on for every Generate in
+// this application.
+//
+// It is registered once here rather than passed per call because agentkit's
+// GenerateRequest is the only place the setting can be reached: agentkit builds
+// the gollem session itself, so a strategy cannot hand gollem.WithPromptCache to
+// a client the way the pre-agentkit hosts each did. Losing those per-host calls
+// in the migration is what took the cache hit rate on scheduled Job runs from
+// ~80% of input tokens to zero (issue #266); Claude bills a cache read at about
+// a tenth of the base input rate, so this is a cost control, not a nicety.
+//
+// Only the Claude provider acts on the flag — OpenAI and Gemini cache on their
+// own and ignore it — so it is safe to apply unconditionally.
+func promptCacheMiddleware() agentkit.GenerateMiddleware {
+	return func(next agentkit.GenerateHandler) agentkit.GenerateHandler {
+		return func(ctx context.Context, req *agentkit.GenerateRequest) (*agentkit.GenerateResult, error) {
+			req.LLMSessionOptions = append(req.LLMSessionOptions, gollem.WithSessionPromptCache(true))
+			return next(ctx, req)
+		}
+	}
+}
+
 // generateMiddleware records one LLM call onto the claim's trace handler.
 //
 // agentkit builds its own gollem session per Generate and never runs
 // gollem.WithTrace, so the Start/End pair the trace consumers expect has to be
 // driven from here.
+//
+// The model name comes from a ModelCapture installed in the gollem trace context
+// for the duration of the call, because agentkit.GenerateResult does not report
+// which model answered. A capture rather than the run's own handler: the provider
+// drives the same Start/End pair, and giving it the real handler would record the
+// call twice.
 func generateMiddleware() agentkit.GenerateMiddleware {
 	return func(next agentkit.GenerateHandler) agentkit.GenerateHandler {
 		return func(ctx context.Context, req *agentkit.GenerateRequest) (*agentkit.GenerateResult, error) {
@@ -186,14 +214,23 @@ func generateMiddleware() agentkit.GenerateMiddleware {
 				return next(ctx, req)
 			}
 			spanCtx := h.StartLLMCall(ctx)
-			res, err := next(spanCtx, req)
-			h.EndLLMCall(spanCtx, agenttrace.LLMCallData(req, res), err)
+			capture := &agenttrace.ModelCapture{}
+			res, err := next(trace.WithHandler(spanCtx, capture), req)
+			h.EndLLMCall(spanCtx, agenttrace.LLMCallData(req, res, capture.Model()), err)
 			return res, err
 		}
 	}
 }
 
 // toolCallMiddleware records one tool execution onto the claim's trace handler.
+//
+// The claim's handler is also published in the gollem trace context for the
+// duration of the tool, so a tool that talks to an LLM itself — the knowledge
+// tools' embedding calls, webfetch's page analysis — appears on the timeline as
+// an LLM call nested inside its tool span. The pre-agentkit hosts got that for
+// free from gollem.WithTrace, which put the handler in the context for the whole
+// Execute; nothing has done it since the migration (issue #266). No duplicate
+// arises: an agentkit Generate never runs inside a tool.
 func toolCallMiddleware() agentkit.ToolCallMiddleware {
 	return func(next agentkit.ToolCallHandler) agentkit.ToolCallHandler {
 		return func(ctx context.Context, req *agentkit.ToolCallRequest) (map[string]any, error) {
@@ -202,7 +239,7 @@ func toolCallMiddleware() agentkit.ToolCallMiddleware {
 				return next(ctx, req)
 			}
 			spanCtx := h.StartToolExec(ctx, req.Call.Name, req.Call.Arguments)
-			out, err := next(spanCtx, req)
+			out, err := next(trace.WithHandler(spanCtx, h), req)
 			h.EndToolExec(spanCtx, out, err)
 			return out, err
 		}

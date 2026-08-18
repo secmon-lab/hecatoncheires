@@ -130,8 +130,8 @@ func NoDuplicateSideEffects() agentkit.ServeOption {
 }
 
 // Build assembles the Kernel: the tool factory, the claim bracket that carries
-// the request-scoped context and the trace sinks, and the two effect
-// middlewares that record LLM and tool calls.
+// the request-scoped context and the trace sinks, the prompt-cache setting every
+// LLM call runs under, and the effect middlewares that record LLM and tool calls.
 func Build(d Deps) (*agentkit.Kernel, error) {
 	if err := d.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "validate kernel deps")
@@ -149,6 +149,7 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 		// logger for it would file an empty archive on every backoff.
 		agentkit.WithClaimMiddleware(slotGuard(d.Slots)),
 		agentkit.WithClaimMiddleware(claimMiddleware(d)),
+		agentkit.WithGenerateMiddleware(promptCacheMiddleware()),
 		agentkit.WithGenerateMiddleware(generateMiddleware()),
 		agentkit.WithToolCallMiddleware(toolCallMiddleware()),
 		// Registered second, so it runs INSIDE the trace bracket: the timeline and

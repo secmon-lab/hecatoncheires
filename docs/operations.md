@@ -513,11 +513,18 @@ coarse:
 
 Because `planexec` sub-agents run in parallel (up to the plan's per-phase
 fan-out), a `TOOL_CALL`'s `ParentSequence` is best-effort under
-concurrency — it points at the most recent `LLM_RESPONSE` the shared
-handler observed, which may belong to a sibling sub-agent. The timeline
-remains complete and `Sequence`-ordered; only the parent linkage and
-per-agent attribution are approximate. `simple` Jobs are single-threaded
-and therefore exact.
+concurrency — it is the most recent `LLM_RESPONSE` the shared handler had
+observed when that tool STARTED, which may belong to a sibling sub-agent.
+The timeline remains complete and `Sequence`-ordered; only the parent
+linkage and per-agent attribution are approximate. `simple` Jobs are
+single-threaded and therefore exact.
+
+Note that not every `LLM_RESPONSE` is an agent turn. A tool that reaches
+an LLM itself — the knowledge tools' embedding calls, webfetch's page
+analysis — records its own `LLM_REQUEST` / `LLM_RESPONSE` pair while it
+runs, ordered between its `TOOL_CALL`'s start and the `TOOL_CALL` event
+itself. Those rows carry the tool's model (an embedding model, for
+instance), which is how they are told apart.
 
 Combined with `JobRunLog.ExecutorKind`, downstream consumers can filter
 by runtime without a Firestore schema change.

@@ -149,7 +149,7 @@ func TestNoDuplicateSideEffects(t *testing.T) {
 			k, err := kernel.Build(kernel.Deps{
 				Repo:    procRepo,
 				History: agentarchive.NewMemoryHistoryStore(),
-				LLM:     probeLLM(),
+				LLM:     (&probeLLM{}).client(),
 				Trace:   agentarchive.NewMemoryTraceRepository(),
 				Budgets: validBudgets(),
 				Agents:  reg,
