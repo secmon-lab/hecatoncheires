@@ -1,11 +1,5 @@
 package planexec
 
-import (
-	"fmt"
-
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
-)
-
 // Test-only exports. The compiler enforces these never reach the
 // production binary because the file ends in _test.go.
 
@@ -77,18 +71,15 @@ func PlannerSystemPromptForTest(rounds int) (string, error) {
 const PlannerToolRoundsMaxForTest = plannerToolRoundsMax
 
 // PlannerInputsForTest builds the user turn a planning call would send for a
-// state carrying nextInput and `toolResponses` pending tool results, and reports
+// state carrying nextInput, with toolsAnswered saying whether the previous
+// transitions answered the planner's tool calls in the conversation, and reports
 // how many gollem inputs it contains.
 //
-// Zero is the value that matters: gollem appends no user turn for an empty input,
-// so the request would END on the previous model turn and the provider rejects it
-// ("Requests ending with a model turn are not supported").
-func PlannerInputsForTest(nextInput string, toolResponses int) int {
-	st := state{NextInput: nextInput}
-	for i := range toolResponses {
-		st.ToolResponses = append(st.ToolResponses, toolcall.Response{
-			ID: fmt.Sprintf("c%d", i), Name: "probe",
-		})
-	}
-	return len(plannerInput(st))
+// Both outcomes matter, in opposite directions. Zero is required once the calls
+// are answered — the results are the turn the model is waiting on. Zero anywhere
+// else is a broken request: gollem appends no user turn for an empty input, so it
+// would END on the previous model turn ("Requests ending with a model turn are not
+// supported").
+func PlannerInputsForTest(nextInput string, toolsAnswered bool) int {
+	return len(plannerInput(state{NextInput: nextInput, ToolsAnswered: toolsAnswered}))
 }

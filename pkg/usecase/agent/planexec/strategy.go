@@ -13,7 +13,6 @@ import (
 
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
@@ -266,9 +265,10 @@ type state struct {
 	// AfterTool is the phase to return to once PendingCalls is drained — the
 	// planning phase that asked for them.
 	AfterTool string `json:"after_tool,omitempty"`
-	// ToolResponses are the results of the drained PendingCalls, held until the
-	// planning call that follows sends them as ONE user turn.
-	ToolResponses []toolcall.Response `json:"tool_responses,omitempty"`
+	// ToolsAnswered records that the drained PendingCalls were answered in the
+	// conversation, so the planning call that follows continues from it and sends
+	// no input of its own.
+	ToolsAnswered bool `json:"tools_answered,omitempty"`
 	// PlannerToolRounds counts how many times the planner has asked for tools
 	// within one planning phase, so a model that only ever calls tools cannot spin
 	// forever inside a single round.
@@ -406,10 +406,10 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: planner generate")
 	}
-	// The call carried them, so they are now in the conversation. Cleared only
-	// after it succeeded: a failed transition is retried from the checkpoint, and
-	// dropping them earlier would leave its function calls unanswered forever.
-	st.ToolResponses = nil
+	// This call continued from them, so the next one starts a fresh turn. Cleared
+	// only after it succeeded: a failed transition is retried from the checkpoint,
+	// and a retry has to continue from the conversation the same way.
+	st.ToolsAnswered = false
 
 	if next, diverted := s.divertToTools(st, res, phasePlan); diverted {
 		return next, agentkit.Continue[Output[T]](), nil
@@ -431,32 +431,23 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 
 // plannerInput is the user turn a planning call sends.
 //
-// Pending tool results go first and ALL of them go in this one call. That is a
-// provider requirement, not a preference: a model turn holding N function calls
-// must be answered by a single turn holding N function responses, and Gemini
-// rejects the request outright otherwise ("the number of function response parts
-// is equal to the number of function call parts of the function call turn").
-// Sending them one at a time — which is what appending each result to the
-// conversation as its own message does — splits that one turn into N, and every
-// later call in the run is rejected.
+// A call that follows the tool phase sends NOTHING, and that case is checked
+// first. stepPlannerTool answered each call in the conversation, so the model's
+// call turn is already answered and an empty input continues from there. Text
+// would land as a second user turn behind the results, which is not what the
+// model's call is waiting for — and the instruction that would have carried it
+// belongs in the system prompt instead (see plannerPrompt). The state that would
+// mix the two does not arise: divertToTools clears NextInput on the way in.
 //
-// A turn carrying tool results carries NOTHING ELSE. Gemini rejects a turn that
-// mixes function responses with text: it stops recognising the turn as the answer
-// to the model's call and reports the request as "ending with a model turn", which
-// then repeats on every retry. Whatever text was waiting keeps waiting — the
-// results are what the model asked for, and the instruction that would have
-// accompanied them belongs in the system prompt (see plannerPrompt).
-//
-// With no results and no NextInput it sends plannerContinue rather than nothing.
-// Sending nothing is what "continue from the conversation" used to mean, and it is
-// no longer safe either: gollem appends no user turn for an empty input, so the
-// request then ENDS on the previous model turn — the same rejection by a different
-// route. A short continuation keeps the request well-formed without re-asking the
-// original request, which would ask the same question again as though nothing had
-// been learnt.
+// Any other call must send a turn. gollem appends no user content for an empty
+// input, so with no answered calls behind it the request would END on the previous
+// model turn, which a provider rejects outright. With no NextInput either,
+// plannerContinue keeps the request well-formed without re-asking the original
+// request, which would ask the same question again as though nothing had been
+// learnt.
 func plannerInput(st state) []gollem.Input {
-	if inputs := toolcall.Inputs(st.ToolResponses); len(inputs) > 0 {
-		return inputs
+	if st.ToolsAnswered {
+		return nil
 	}
 	if st.NextInput != "" {
 		return []gollem.Input{gollem.Text(st.NextInput)}
@@ -516,14 +507,16 @@ func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from
 	return st, true
 }
 
-// stepPlannerTool runs exactly one tool call the planner asked for and holds the
-// result on the state. The results are sent together by the planning call that
-// follows — see plannerInput for why they cannot be sent one at a time.
+// stepPlannerTool runs exactly one tool call the planner asked for and answers it
+// in the conversation.
 //
-// It uses the primitive CallTool rather than the session's, because the session's
-// writes each result into the conversation as its own message, which is precisely
-// the split the provider rejects. The conversation is advanced once, by the next
-// Generate, with every result in that one turn.
+// It goes through the session's CallTool, which appends the result into the
+// trailing tool message when there is one. That is what keeps the N results of a
+// parallel call turn in ONE turn, which is the only shape a provider accepts for
+// them — a result per turn is rejected outright ("the number of function response
+// parts is equal to the number of function call parts of the function call turn"),
+// and once the conversation holds the split every later call in the run is
+// rejected too.
 //
 // A tool that fails is not a transition failure: the failure is recorded as this
 // call's response, so the planner gets to react to it on its next call and the
@@ -539,8 +532,7 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 	call := st.PendingCalls[0]
 	st.PendingCalls = st.PendingCalls[1:]
 	if call != nil {
-		out, err := sys.CallTool(ctx, *call)
-		if err != nil {
+		if _, err := sys.Session().CallTool(ctx, *call); err != nil {
 			if errors.Is(err, agentkit.ErrLimitExceeded) {
 				return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err,
 					"planexec: planner tool call refused by the budget",
@@ -553,17 +545,16 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 				goerr.V("tool", call.Name), goerr.V("call_id", call.ID)),
 				"planexec: planner tool call")
 		}
-		st.ToolResponses = append(st.ToolResponses, toolcall.New(*call, out, err))
+		// Answered either way: a failed call is recorded in the conversation as an
+		// error result, which is what the planner reacts to on its next call.
+		st.ToolsAnswered = true
 	}
 
+	// A planner that has spent its allowance is told so in the SYSTEM prompt of the
+	// call this returns to (see plannerPrompt), not here: that call continues from
+	// the results and sends no user turn that could carry the instruction.
 	if len(st.PendingCalls) == 0 {
 		st.Phase = st.AfterTool
-		// If the planner has now spent its allowance, say so on the way back:
-		// withholding the tools is not possible, so the instruction is the only
-		// lever. It rides along with the results in the same turn.
-		if st.PlannerToolRounds >= plannerToolRoundsMax {
-			st.NextInput = plannerToolBudgetNotice
-		}
 	}
 	return st, agentkit.Continue[Output[T]](), nil
 }
@@ -649,7 +640,7 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: replanner generate")
 	}
-	st.ToolResponses = nil // see stepPlan: cleared only once the call that carried them succeeded
+	st.ToolsAnswered = false // see stepPlan: cleared only once the call that continued from them succeeded
 
 	if next, diverted := s.divertToTools(st, res, phaseReplan); diverted {
 		return next, agentkit.Continue[Output[T]](), nil
@@ -798,16 +789,27 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		userPrompt = rendered
 	}
 	// A terminal call that has been diverting to tools has to be told to stop, the
-	// same way a planning call is. It cannot arrive through NextInput: the branch
-	// above re-renders the prompt whenever there is no rejection to feed back, so
-	// the notice would be dropped exactly when it is needed.
-	if st.PlannerToolRounds >= plannerToolRoundsMax {
-		userPrompt = plannerToolBudgetNotice + "\n\n" + userPrompt
-	}
-
+	// same way a planning call is. plannerPrompt carries that notice in the SYSTEM
+	// prompt, which reaches this call whether or not it sends a user turn — so it
+	// must not be prepended to userPrompt as well, or the same instruction arrives
+	// twice on the calls that do send one.
 	prompt, err := s.plannerPrompt(st)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
+	}
+
+	// A terminal call reached straight from a tool phase sends no user turn: its
+	// answered calls are the turn the model is waiting on, for the reason
+	// plannerInput gives. The prompt travels in the SYSTEM prompt instead of being
+	// dropped, because this can be the ONLY terminal call the run makes — a budget
+	// notice sends plan / replan straight here without another planning call — and
+	// without it the model is never told to write the answer, nor given the
+	// observation trail to write it from.
+	var input []gollem.Input
+	if st.ToolsAnswered {
+		prompt += "\n\n" + userPrompt
+	} else {
+		input = []gollem.Input{gollem.Text(userPrompt)}
 	}
 
 	opts := []agentkit.GenerateOption{
@@ -824,23 +826,11 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		opts = append(opts, agentkit.WithSchema(schema))
 	}
 
-	// Pending tool results are reported here too — a planning phase that asked for
-	// tools can reach the terminal output without another planning call, since the
-	// budget notice routes plan / replan straight to final, and leaving those calls
-	// unanswered makes the provider reject this request and every one after it.
-	//
-	// They go ALONE when present, for the reason plannerInput gives: a turn holding
-	// function responses may hold nothing else. The prompt is not lost — it is
-	// re-rendered on the next transition, which is where it can be sent.
-	input := toolcall.Inputs(st.ToolResponses)
-	if len(input) == 0 {
-		input = []gollem.Input{gollem.Text(userPrompt)}
-	}
 	res, err := sys.Session().Generate(ctx, input, opts...)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: final generate")
 	}
-	st.ToolResponses = nil
+	st.ToolsAnswered = false
 
 	// The model may look something up before it can write the answer, and the
 	// terminal call is no exception: agentkit's managed session declares the
@@ -1130,9 +1120,9 @@ func (s *strategy[T]) plannerPrompt(st state) (string, error) {
 	if err != nil {
 		return "", goerr.Wrap(err, "planexec: render the planner prompt")
 	}
-	// The tool allowance is spent: say so here rather than as a user turn. The turn
-	// that would carry it is the one reporting the tool results, and that turn may
-	// hold nothing but function responses — see plannerInput.
+	// The tool allowance is spent: say so here rather than as a user turn. The call
+	// that has to hear it is the one following the tool phase, and that call sends
+	// no user turn at all — it continues from the answered calls, see plannerInput.
 	if st.PlannerToolRounds >= plannerToolRoundsMax {
 		prompt += "\n\n" + plannerToolBudgetNotice
 	}

@@ -2,6 +2,7 @@ package react_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,22 +78,28 @@ func scriptedLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient,
 	return client, &n
 }
 
-// scriptedLLMRecordingInputs is scriptedLLM plus the inputs each Generate saw,
-// so a test can assert HOW tool results were reported, not only that the run
-// finished.
-func scriptedLLMRecordingInputs(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() [][]gollem.Input) {
+// scriptedLLMRecordingConversation is scriptedLLM plus the conversation each
+// Generate was seeded with, so a test can assert HOW tool results reached the
+// model, not only that the run finished. It grows the history by one message per
+// call, so a later call is seeded with the conversation the run actually built.
+func scriptedLLMRecordingConversation(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() [][]gollem.Message) {
 	t.Helper()
 	var (
 		mu   sync.Mutex
-		seen [][]gollem.Input
+		seen [][]gollem.Message
 		n    atomic.Int32
 	)
 	client := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			cfg := gollem.NewSessionConfig(opts...)
+			var seeded []gollem.Message
+			if h := cfg.History(); h != nil {
+				seeded = h.Messages
+			}
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					mu.Lock()
-					seen = append(seen, input)
+					seen = append(seen, seeded)
 					mu.Unlock()
 					i := int(n.Add(1)) - 1
 					if i >= len(responses) {
@@ -101,28 +108,44 @@ func scriptedLLMRecordingInputs(t *testing.T, responses ...*gollem.Response) (go
 					return responses[i], nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
-					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+					grown := make([]gollem.Message, len(seeded), len(seeded)+1)
+					copy(grown, seeded)
+					grown = append(grown, gollem.Message{Role: gollem.RoleAssistant})
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI,
+						Version: gollem.HistoryVersion, Messages: grown}, nil
 				},
 			}, nil
 		},
 	}
-	return client, func() [][]gollem.Input {
+	return client, func() [][]gollem.Message {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make([][]gollem.Input, len(seen))
+		out := make([][]gollem.Message, len(seen))
 		copy(out, seen)
 		return out
 	}
 }
 
-// toolResponsesIn picks the function responses out of one Generate's inputs, in
-// arrival order.
-func toolResponsesIn(input []gollem.Input) []gollem.FunctionResponse {
-	var out []gollem.FunctionResponse
-	for _, in := range input {
-		if r, ok := in.(gollem.FunctionResponse); ok {
-			out = append(out, r)
-		}
+// trailingToolResponses reports the results the conversation's LAST message
+// carries, in order — empty unless that message is a tool message.
+//
+// Only the trailing message counts: a provider reads the results as the answer to
+// the model turn immediately before them, so results that ended up anywhere else
+// did not answer the call they belong to.
+func trailingToolResponses(t *testing.T, messages []gollem.Message) []gollem.ToolResponseContent {
+	t.Helper()
+	if len(messages) == 0 {
+		return nil
+	}
+	last := messages[len(messages)-1]
+	if last.Role != gollem.RoleTool {
+		return nil
+	}
+	out := make([]gollem.ToolResponseContent, 0, len(last.Contents))
+	for _, c := range last.Contents {
+		resp, err := c.GetToolResponseContent()
+		gt.NoError(t, err).Required()
+		out = append(out, *resp)
 	}
 	return out
 }
@@ -238,14 +261,14 @@ func TestOneToolCallPerTransition(t *testing.T) {
 	gt.Array(t, out.Texts).Equal([]string{"done"})
 }
 
-// A model turn asking for several tools at once is answered by ONE call carrying
-// every result, in the order asked. Reporting them one at a time is what a
+// A model turn asking for several tools at once is answered by ONE turn carrying
+// every result, in the order asked. Answering them one turn at a time is what a
 // provider rejects ("the number of function response parts is equal to the number
 // of function call parts of the function call turn"), and once the conversation
 // holds that split every later call in the run is rejected too.
 func TestParallelToolResultsAreReportedInOneTurn(t *testing.T) {
 	tool := &recordingTool{name: "probe__ping"}
-	llm, inputs := scriptedLLMRecordingInputs(t,
+	llm, conversations := scriptedLLMRecordingConversation(t,
 		callResponse(
 			&gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{"n": float64(1)}},
 			&gollem.FunctionCall{ID: "c2", Name: "probe__ping", Arguments: map[string]any{"n": float64(2)}},
@@ -258,17 +281,17 @@ func TestParallelToolResultsAreReportedInOneTurn(t *testing.T) {
 	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "run three"})
 	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
 
-	seen := inputs()
+	seen := conversations()
 	gt.Array(t, seen).Length(2).Required()
-	// The opening call reports nothing; the one after the tool phase reports all
-	// three.
-	gt.Array(t, toolResponsesIn(seen[0])).Length(0)
-	answers := toolResponsesIn(seen[1])
+	// The opening call has nothing behind it; the one after the tool phase is
+	// answered by a single turn holding all three results.
+	gt.Array(t, trailingToolResponses(t, seen[0])).Length(0)
+	answers := trailingToolResponses(t, seen[1])
 	gt.Array(t, answers).Length(3).Required()
-	gt.Value(t, answers[0].ID).Equal("c1")
-	gt.Value(t, answers[1].ID).Equal("c2")
-	gt.Value(t, answers[2].ID).Equal("c3")
-	gt.Value(t, answers[0].Data).Equal(map[string]any{"ok": true})
+	gt.Value(t, answers[0].ToolCallID).Equal("c1")
+	gt.Value(t, answers[1].ToolCallID).Equal("c2")
+	gt.Value(t, answers[2].ToolCallID).Equal("c3")
+	gt.Value(t, answers[0].Response).Equal(map[string]any{"ok": true})
 }
 
 // TestFailingToolIsReportedToTheModel pins that a tool error does not fail the
@@ -276,7 +299,7 @@ func TestParallelToolResultsAreReportedInOneTurn(t *testing.T) {
 // behaved.
 func TestFailingToolIsReportedToTheModel(t *testing.T) {
 	tool := &recordingTool{name: "probe__ping", err: goerr.New("backend unavailable")}
-	llm, inputs := scriptedLLMRecordingInputs(t,
+	llm, conversations := scriptedLLMRecordingConversation(t,
 		callResponse(&gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{}}),
 		textResponse("the backend is down"),
 	)
@@ -289,13 +312,13 @@ func TestFailingToolIsReportedToTheModel(t *testing.T) {
 
 	// The failure reaches the model as this call's answer, so the call is
 	// answered and the failure is what the model reacts to.
-	seen := inputs()
+	seen := conversations()
 	gt.Array(t, seen).Length(2).Required()
-	answers := toolResponsesIn(seen[1])
+	answers := trailingToolResponses(t, seen[1])
 	gt.Array(t, answers).Length(1).Required()
-	gt.Value(t, answers[0].ID).Equal("c1")
-	gt.Value(t, answers[0].Error).NotNil()
-	gt.String(t, answers[0].Error.Error()).Contains("backend unavailable")
+	gt.Value(t, answers[0].ToolCallID).Equal("c1")
+	gt.Bool(t, answers[0].IsError).True()
+	gt.String(t, fmt.Sprint(answers[0].Response["error"])).Contains("backend unavailable")
 
 	out, err := react.DecodeOutput(proc.Output)
 	gt.NoError(t, err).Required()
@@ -393,7 +416,7 @@ func TestTokenBudgetsStopTheRun(t *testing.T) {
 }
 
 // call is what one Generate was told: the text of its inputs, the system prompt
-// in force for it, and the tool-call ids it answered.
+// in force for it, and the tool-call ids the conversation answers going into it.
 type call struct {
 	text         string
 	systemPrompt string
@@ -401,8 +424,14 @@ type call struct {
 }
 
 // inputRecordingLLM is scriptedLLM plus a record of what each Generate received,
-// so a test can assert what the model was actually told and in which turn.
-func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMClient, func() []call) {
+// so a test can assert what the model was actually told and in which turn. Like
+// scriptedLLMRecordingConversation it grows the history by one message per call,
+// because the answered calls are read off the conversation.
+//
+// A script entry may be an `error` instead of a `*gollem.Response`, which fails
+// that call — the runtime then retries the transition from its checkpoint, and the
+// next entry answers the retry.
+func inputRecordingLLM(t *testing.T, responses ...any) (gollem.LLMClient, func() []call) {
 	t.Helper()
 	var mu sync.Mutex
 	var seen []call
@@ -413,20 +442,24 @@ func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMC
 			// The system prompt is a session-level setting, so it is read here and
 			// attributed to the calls this session makes.
 			cfg := gollem.NewSessionConfig(opts...)
+			var seeded []gollem.Message
+			if h := cfg.History(); h != nil {
+				seeded = h.Messages
+			}
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					rec := call{systemPrompt: cfg.SystemPrompt()}
 					var b strings.Builder
 					for _, in := range input {
-						switch v := in.(type) {
-						case gollem.Text:
-							b.WriteString(string(v))
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
 							b.WriteString("\n")
-						case gollem.FunctionResponse:
-							rec.answered = append(rec.answered, v.ID)
 						}
 					}
 					rec.text = b.String()
+					for _, resp := range trailingToolResponses(t, seeded) {
+						rec.answered = append(rec.answered, resp.ToolCallID)
+					}
 					mu.Lock()
 					seen = append(seen, rec)
 					mu.Unlock()
@@ -435,10 +468,21 @@ func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMC
 					if i >= len(responses) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
 					}
-					return responses[i], nil
+					switch scripted := responses[i].(type) {
+					case error:
+						return nil, scripted
+					case *gollem.Response:
+						return scripted, nil
+					default:
+						return nil, goerr.New("unsupported script entry", goerr.V("call_index", i))
+					}
 				},
 				HistoryFunc: func() (*gollem.History, error) {
-					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+					grown := make([]gollem.Message, len(seeded), len(seeded)+1)
+					copy(grown, seeded)
+					grown = append(grown, gollem.Message{Role: gollem.RoleAssistant})
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI,
+						Version: gollem.HistoryVersion, Messages: grown}, nil
 				},
 			}, nil
 		},
@@ -450,6 +494,48 @@ func inputRecordingLLM(t *testing.T, responses ...*gollem.Response) (gollem.LLMC
 		copy(out, seen)
 		return out
 	}
+}
+
+// A Generate that FAILS after a tool round is retried from the checkpoint, and the
+// retry must send the same shape: no input, with the results still answering the
+// model's calls exactly once.
+//
+// This pins where ToolsAnswered is cleared. Clearing it before the call, or on the
+// error path, would make the retry send a continuation text while the conversation
+// already answers the model — and the results are in the conversation whatever the
+// retry does, so sending them "again" is not an option either.
+func TestAnsweredToolCallsSurviveAFailedGenerate(t *testing.T) {
+	tool := &recordingTool{name: "probe__ping"}
+	llm, inputs := inputRecordingLLM(t,
+		callResponse(
+			&gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{}},
+			&gollem.FunctionCall{ID: "c2", Name: "probe__ping", Arguments: map[string]any{}},
+		),
+		// The call that continues from the answered round fails; agentkit retries the
+		// whole transition from the last checkpoint, which the tool phase left.
+		goerr.New("the provider is briefly unavailable"),
+		textResponse("done"),
+	)
+	rt := newRuntime(t, llm, generousBudget(), tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "run both"})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The tools ran once, in the transitions that committed before the failure.
+	gt.Array(t, tool.Calls()).Length(2)
+
+	seen := inputs()
+	gt.Array(t, seen).Length(3).Required()
+	// The failed call and the retry continue from the same answered round, and
+	// neither adds a turn of its own.
+	gt.Value(t, seen[1].answered).Equal([]string{"c1", "c2"})
+	gt.Value(t, seen[2].answered).Equal([]string{"c1", "c2"})
+	gt.String(t, seen[1].text).Equal("")
+	gt.String(t, seen[2].text).Equal("")
+
+	out, err := react.DecodeOutput(proc.Output)
+	gt.NoError(t, err).Required()
+	gt.Array(t, out.Texts).Equal([]string{"done"})
 }
 
 // TestBudgetNoticeReachesTheModel pins that crossing the notice ratio TELLS the
@@ -479,8 +565,8 @@ func TestBudgetNoticeReachesTheModel(t *testing.T) {
 	gt.Bool(t, strings.Contains(seen[0].systemPrompt, "close to its budget")).False()
 	// The last call is past the notice threshold and must carry both the
 	// limiter's own message and the instruction derived from it — in the system
-	// prompt, because its user turn is reporting a tool result and a turn holding
-	// function responses may hold nothing else.
+	// prompt, because that call sends no user turn at all: it continues from the
+	// tool result the conversation already carries.
 	gt.String(t, seen[2].systemPrompt).Contains("close to its budget")
 	gt.String(t, seen[2].systemPrompt).Contains("do not call any more tools")
 	gt.String(t, seen[2].systemPrompt).Contains("nearly exhausted")

@@ -29,7 +29,6 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolcall"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
@@ -71,10 +70,10 @@ type state struct {
 	// Pending are the tool calls the model asked for and this run has not made
 	// yet. They are consumed one per transition.
 	Pending []*gollem.FunctionCall `json:"pending,omitempty"`
-	// ToolResponses are the results of the drained Pending calls, held until the
-	// next Generate reports them as ONE turn.
-	ToolResponses []toolcall.Response `json:"tool_responses,omitempty"`
-	Texts         []string            `json:"texts,omitempty"`
+	// ToolsAnswered records that the drained Pending calls were answered in the
+	// conversation, so the next Generate continues from it and sends no input.
+	ToolsAnswered bool     `json:"tools_answered,omitempty"`
+	Texts         []string `json:"texts,omitempty"`
 }
 
 // Option configures the strategy.
@@ -150,20 +149,21 @@ func (s *strategy) Step(ctx context.Context, sys agentkit.Syscalls, st state) (s
 
 // stepGenerate makes the one LLM call this transition is allowed.
 func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output], error) {
-	// Pending tool results go in this one call, and go ALONE — see package toolcall
-	// for why they cannot be reported one at a time, and why a turn holding them
-	// may hold nothing else.
+	// A call that follows the tool phase sends NOTHING: stepTool answered each call
+	// in the conversation, and an empty input continues from it — which is the shape
+	// a provider requires, since the results already answer the model's call turn.
+	// Text here would land as a second user turn behind them, which is not what the
+	// model's call is waiting for.
 	//
-	// With no results and an empty prompt it still sends a turn: gollem appends no
-	// user content for an empty input, so the request would END on the previous
-	// model turn and the provider rejects that outright.
-	input := toolcall.Inputs(st.ToolResponses)
-	if len(input) == 0 {
-		text := st.Prompt
-		if text == "" {
-			text = continueInstruction
-		}
-		input = []gollem.Input{gollem.Text(text)}
+	// Anything else must send a turn: with no answered calls behind it, gollem
+	// appends no user content for an empty input, so the request would END on the
+	// previous model turn and the provider rejects that outright.
+	var input []gollem.Input
+	switch {
+	case st.Prompt != "":
+		input = []gollem.Input{gollem.Text(st.Prompt)}
+	case !st.ToolsAnswered:
+		input = []gollem.Input{gollem.Text(continueInstruction)}
 	}
 
 	// A budget that is close to its ceiling has to be TOLD to the model, not
@@ -189,10 +189,10 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	if err != nil {
 		return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: generate")
 	}
-	// The call carried them, so they are now in the conversation. Cleared only
-	// after it succeeded: a failed transition is retried from the checkpoint, and
-	// dropping them earlier would leave its function calls unanswered forever.
-	st.ToolResponses = nil
+	// This call continued from them, so the next one starts a fresh turn. Cleared
+	// only after it succeeded: a failed transition is retried from the checkpoint,
+	// and a retry has to continue from the conversation the same way.
+	st.ToolsAnswered = false
 
 	st.Prompt = ""
 	st.Texts = append(st.Texts, res.Texts...)
@@ -221,10 +221,15 @@ func noticeInstruction(msg string) string {
 	return msg + "\nThis run is close to its budget. Answer now from what you already have, and do not call any more tools."
 }
 
-// stepTool runs exactly one pending tool call and holds the result on the state.
-// The results are reported together by the next Generate — see package toolcall
-// for why they cannot be reported one at a time, and why this uses the primitive
-// CallTool rather than the session's.
+// stepTool runs exactly one pending tool call and answers it in the conversation.
+//
+// It goes through the session's CallTool, which appends the result into the
+// trailing tool message when there is one. That is what keeps the N results of a
+// parallel call turn in ONE turn, which is the only shape a provider accepts for
+// them — a result per turn is rejected outright ("the number of function response
+// parts is equal to the number of function call parts of the function call turn"),
+// and once the conversation holds the split every later call in the run is
+// rejected too.
 //
 // A tool that fails is not a transition failure: the failure is recorded as this
 // call's response, so the call is still answered and the model gets to react to
@@ -253,8 +258,7 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		return st, agentkit.Continue[Output](), nil
 	}
 
-	out, err := sys.CallTool(ctx, *call)
-	if err != nil {
+	if _, err := sys.Session().CallTool(ctx, *call); err != nil {
 		if errors.Is(err, agentkit.ErrLimitExceeded) {
 			return st, agentkit.Decision[Output]{}, goerr.Wrap(err, "react: tool call refused by the budget",
 				goerr.V("tool", call.Name))
@@ -266,7 +270,9 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		errutil.Handle(ctx, goerr.Wrap(err, "react: tool call",
 			goerr.V("tool", call.Name), goerr.V("call_id", call.ID)), "react: tool call")
 	}
-	st.ToolResponses = append(st.ToolResponses, toolcall.New(*call, out, err))
+	// Answered either way: a failed call is recorded in the conversation as an error
+	// result, which is what the model reacts to on its next turn.
+	st.ToolsAnswered = true
 
 	if len(st.Pending) == 0 {
 		st.Phase = phaseGenerate
