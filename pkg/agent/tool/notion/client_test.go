@@ -545,3 +545,187 @@ func TestGetPageMarkdown(t *testing.T) {
 		gt.Value(t, err).NotNil()
 	})
 }
+
+func TestGetDatabase(t *testing.T) {
+	t.Run("converts the API response into Database", func(t *testing.T) {
+		var capturedMethod, capturedPath, capturedAuth, capturedNotionVersion string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/databases/00000000-0000-0000-0000-000000000002",
+			func(w http.ResponseWriter, r *http.Request) {
+				capturedMethod = r.Method
+				capturedPath = r.URL.Path
+				capturedAuth = r.Header.Get("Authorization")
+				capturedNotionVersion = r.Header.Get("Notion-Version")
+
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"object": "database",
+					"id": "00000000-0000-0000-0000-000000000002",
+					"title": [{"type": "text", "plain_text": "Runbooks"}],
+					"url": "https://www.notion.so/Runbooks-0002",
+					"last_edited_time": "2026-04-02T09:00:00Z",
+					"data_sources": [
+						{"id": "ds-1", "name": "Active"},
+						{"id": "ds-2", "name": "Archived"}
+					]
+				}`))
+			})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.GetDatabase(context.Background(), "00000000-0000-0000-0000-000000000002")
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedMethod).Equal(http.MethodGet)
+		gt.String(t, capturedPath).Equal("/v1/databases/00000000-0000-0000-0000-000000000002")
+		gt.String(t, capturedAuth).Equal("Bearer secret-token")
+		gt.String(t, capturedNotionVersion).Equal("2026-03-11")
+
+		gt.String(t, got.ID).Equal("00000000-0000-0000-0000-000000000002")
+		gt.String(t, got.Title).Equal("Runbooks")
+		gt.String(t, got.URL).Equal("https://www.notion.so/Runbooks-0002")
+		gt.Bool(t, got.LastEdited.Equal(time.Date(2026, 4, 2, 9, 0, 0, 0, time.UTC))).True()
+		gt.Array(t, got.DataSources).Length(2).Required()
+		gt.String(t, got.DataSources[0].ID).Equal("ds-1")
+		gt.String(t, got.DataSources[0].Name).Equal("Active")
+		gt.String(t, got.DataSources[1].ID).Equal("ds-2")
+		gt.String(t, got.DataSources[1].Name).Equal("Archived")
+	})
+
+	t.Run("states the status and the upstream reason on a non-2xx response", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/databases/missing", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"object":"error","status":404,"code":"object_not_found","message":"database not found"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.GetDatabase(context.Background(), "missing")
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("404")
+		gt.String(t, err.Error()).Contains("object_not_found")
+		gt.String(t, err.Error()).Contains("database not found")
+	})
+
+	t.Run("returns error when databaseID is empty", func(t *testing.T) {
+		c, err := notiontool.NewClient("secret-token")
+		gt.NoError(t, err).Required()
+		_, err = c.GetDatabase(context.Background(), "")
+		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestQueryDataSource(t *testing.T) {
+	t.Run("converts the row pages into SearchItems", func(t *testing.T) {
+		var capturedMethod, capturedPath, capturedNotionVersion, capturedBody string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedPath = r.URL.Path
+			capturedNotionVersion = r.Header.Get("Notion-Version")
+
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"object": "list",
+				"has_more": true,
+				"next_cursor": "cursor-row-2",
+				"results": [
+					{
+						"object": "page",
+						"id": "00000000-0000-0000-0000-0000000000a1",
+						"last_edited_time": "2026-05-01T08:00:00Z",
+						"properties": {
+							"Name": {
+								"id": "title",
+								"type": "title",
+								"title": [{"type": "text", "plain_text": "Restart the ingest worker"}]
+							}
+						},
+						"url": "https://www.notion.so/Restart-the-ingest-worker-00a1"
+					}
+				]
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			PageSize:    50,
+			StartCursor: "cursor-row-1",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedMethod).Equal(http.MethodPost)
+		gt.String(t, capturedPath).Equal("/v1/data_sources/ds-1/query")
+		gt.String(t, capturedNotionVersion).Equal("2026-03-11")
+		gt.Bool(t, strings.Contains(capturedBody, `"page_size":50`)).True()
+		gt.Bool(t, strings.Contains(capturedBody, `"start_cursor":"cursor-row-1"`)).True()
+
+		gt.Bool(t, got.HasMore).True()
+		gt.String(t, got.NextCursor).Equal("cursor-row-2")
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].ID).Equal("00000000-0000-0000-0000-0000000000a1")
+		gt.String(t, got.Items[0].Type).Equal("page")
+		gt.String(t, got.Items[0].Title).Equal("Restart the ingest worker")
+		gt.String(t, got.Items[0].URL).Equal("https://www.notion.so/Restart-the-ingest-worker-00a1")
+		gt.Bool(t, got.Items[0].LastEdited.Equal(time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC))).True()
+	})
+
+	t.Run("clamps the page size to 100", func(t *testing.T) {
+		var capturedBody string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[]}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{PageSize: 500})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, strings.Contains(capturedBody, `"page_size":100`)).True()
+		gt.Array(t, got.Items).Length(0)
+	})
+
+	t.Run("states the status and the upstream reason on a non-2xx response", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-gone/query", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"object":"error","status":400,"code":"validation_error","message":"data source not found"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.QueryDataSource(context.Background(), "ds-gone", notiontool.QueryOptions{})
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("400")
+		gt.String(t, err.Error()).Contains("validation_error")
+		gt.String(t, err.Error()).Contains("data source not found")
+	})
+
+	t.Run("returns error when dataSourceID is empty", func(t *testing.T) {
+		c, err := notiontool.NewClient("secret-token")
+		gt.NoError(t, err).Required()
+		_, err = c.QueryDataSource(context.Background(), "", notiontool.QueryOptions{})
+		gt.Value(t, err).NotNil()
+	})
+}

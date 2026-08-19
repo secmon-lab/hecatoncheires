@@ -321,7 +321,7 @@ func cmdServe() *cli.Command {
 			// Initialize Notion services if token is provided. Two clients are
 			// constructed off the same token: pkg/service/notion drives
 			// Source/Compile, and pkg/agent/tool/notion drives the agent's
-			// notion__search / notion__get_page tools.
+			// notion__search / notion__get_page / notion__get_database tools.
 			if notionToken != "" {
 				notionSvc, err := notion.New(notionToken)
 				if err != nil {

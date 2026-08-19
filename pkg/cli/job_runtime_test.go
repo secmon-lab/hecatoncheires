@@ -138,6 +138,7 @@ var readToolNames = []string{
 	"slack__search_messages",
 	"notion__search",
 	"notion__get_page",
+	"notion__get_database",
 	"jira_list_projects",
 	"jira_search_issues",
 	"jira_get_issues",

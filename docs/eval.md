@@ -221,7 +221,7 @@ from the eval job tool set — action creation is the primary observable.)
 | Tool | Mode | Notes |
 |------|------|-------|
 | `slack_search` | sim + live | |
-| `notion_search` | sim + live | |
+| `notion_search` | sim + live | One key covers all three Notion tools: `notion__search`, `notion__get_page` and `notion__get_database`. |
 | `github_search` | **live-only** | simulating it needs a production interface extraction, deferred |
 | `jira_search` | **live-only** | wraps the external gollem-dev/tools/jira ToolSet, which has no simulatable interface seam either |
 | `webfetch` | **live-only** | real HTTP GET + LLM injection screening; the eval LLM does the screening |
@@ -267,6 +267,43 @@ interactively; it knows this schema and validates the result with
 repo as a marketplace. Good checks come from **real failures** — write atomic yes/no
 questions, balance positive and negative cases, and cover both the case content
 and tool usage.
+
+### Checking that a Notion database is read with the right tool
+
+`notion__search` reports databases as well as pages, and only `notion__get_database`
+can read one — passing a database id to `notion__get_page` fails with
+`400 validation_error: … is a database, not a page`. That is what a production
+agent did (ARGUS-91), so it is worth a check.
+
+Describe a database in the tool background. The simulator asks its LLM for typed
+hits, so a background naming a database produces a hit typed `database`:
+
+```toml
+[tools.notion_search]
+background = """
+Notion holds a database titled "Runbooks" whose rows are one runbook per service,
+and a page titled "Portal Incident Response" describing the escalation path.
+"""
+```
+
+Hits are numbered per kind (`sim-page-1`, `sim-database-1`, …), so the trajectory
+shows which kind an id came from. Each client call is recorded under its own name
+— `notion_search`, `notion_get_page`, `notion_get_database`, and
+`notion_query_data_source` for the row query a `notion__get_database` call makes
+after reading the database — so a check can name the one it means:
+
+```toml
+[[expect.checks]]
+id       = "database-read-with-database-tool"
+question = "Did the agent call notion_get_database for the Runbooks database?"
+
+[[expect.checks]]
+id       = "no-database-id-sent-to-page-tool"
+question = "Did the agent avoid passing a sim-database-* id to notion_get_page?"
+```
+
+Scenario files are yours, not repo assets — this repo tracks none. Keep them in
+your own directory and run them with `hecatoncheires eval <dir>`.
 
 ## Design notes & limitations
 

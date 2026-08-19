@@ -493,7 +493,7 @@ type jobRuntimeDeps struct {
 	// guard takes over).
 	SlackSearch    slacktool.SearchService    // slack__search_messages
 	SlackRetriever slacktool.MessageRetriever // slack__get_messages via User token
-	NotionTool     notiontool.Client          // notion__search / notion__get_page
+	NotionTool     notiontool.Client          // notion__search / notion__get_page / notion__get_database
 
 	// JiraTools carries the already-expanded Jira read tools (see
 	// pkg/agent/tool/jira). Unlike NotionTool this is not a client type:
@@ -778,8 +778,9 @@ func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case,
 		Search:    deps.SlackSearch,
 		Retriever: deps.SlackRetriever,
 	})...)
-	// Notion read-only tools (notion__search / notion__get_page). New returns no
-	// tool when the client is nil, so this is safe in deployments without Notion.
+	// Notion read-only tools (notion__search / notion__get_page /
+	// notion__get_database). New returns no tool when the client is nil, so this
+	// is safe in deployments without Notion.
 	out = append(out, notiontool.New(notiontool.Deps{Client: deps.NotionTool})...)
 	out = append(out, webfetch.New(deps.WebFetch)...)
 	// Jira read tools (jira_list_projects / jira_search_issues / jira_get_issues).

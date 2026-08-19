@@ -33,11 +33,24 @@ type Client interface {
 
 	// GetPageMarkdown retrieves a page's content rendered as Notion-flavored Markdown.
 	GetPageMarkdown(ctx context.Context, pageID string) (*PageMarkdown, error)
+
+	// GetDatabase retrieves a database's metadata and the data sources it holds.
+	GetDatabase(ctx context.Context, databaseID string) (*Database, error)
+
+	// QueryDataSource lists the pages held by one data source of a database.
+	QueryDataSource(ctx context.Context, dataSourceID string, opts QueryOptions) (*QueryResult, error)
 }
 
 // markdownAPIVersion is the minimum Notion-Version that exposes the
 // GET /v1/pages/{id}/markdown endpoint.
 const markdownAPIVersion = "2026-03-11"
+
+// databaseAPIVersion pins the database and data source endpoints to a version
+// past Notion's 2025-09-03 split, where a database no longer holds its rows
+// directly: GET /v1/databases/{id} reports only the id and name of each data
+// source, and the rows come from POST /v1/data_sources/{id}/query. Held at the
+// markdown endpoint's version so the agent-facing reads move together.
+const databaseAPIVersion = "2026-03-11"
 
 // searchAPIVersion pins POST /v1/search to the response shape searchResponse is
 // written against. Notion changes the payload between versions, so the pin is
@@ -444,4 +457,141 @@ func (c *client) GetPageMarkdown(ctx context.Context, pageID string) (*PageMarkd
 		Markdown:  decoded.Markdown,
 		Truncated: decoded.Truncated,
 	}, nil
+}
+
+// databaseResponse decodes only what the database tool surfaces. Narrowed for
+// the same reason as searchResponse: a field Notion adds or retypes later must
+// not fail the whole read.
+type databaseResponse struct {
+	ID             string                `json:"id"`
+	URL            string                `json:"url"`
+	Title          []richText            `json:"title"`
+	LastEditedTime time.Time             `json:"last_edited_time"`
+	DataSources    []dataSourceRefObject `json:"data_sources"`
+}
+
+// dataSourceRefObject is one entry of a database's data_sources array.
+type dataSourceRefObject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// GetDatabase fetches a database's metadata via GET /v1/databases/{id}.
+func (c *client) GetDatabase(ctx context.Context, databaseID string) (*Database, error) {
+	if databaseID == "" {
+		return nil, goerr.New("databaseID is required")
+	}
+
+	// PathEscape for the same reason as GetPageMarkdown: the id arrives from LLM
+	// tool args, so guard against characters that would escape the /v1/databases/
+	// scope.
+	path := fmt.Sprintf("/v1/databases/%s", url.PathEscape(databaseID))
+
+	resp, err := c.doJSON(ctx, http.MethodGet, path, databaseAPIVersion, nil)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call notion database endpoint", goerr.V("databaseID", databaseID))
+	}
+	defer safe.Close(ctx, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, newAPIError(ctx, "database", resp, goerr.V("databaseID", databaseID))
+	}
+
+	var decoded databaseResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode notion database response", goerr.V("databaseID", databaseID))
+	}
+
+	out := &Database{
+		ID:          decoded.ID,
+		Title:       plainText(decoded.Title),
+		URL:         decoded.URL,
+		LastEdited:  decoded.LastEditedTime,
+		DataSources: make([]DataSourceRef, 0, len(decoded.DataSources)),
+	}
+	for _, ds := range decoded.DataSources {
+		out.DataSources = append(out.DataSources, DataSourceRef(ds))
+	}
+	return out, nil
+}
+
+// dataSourceQueryRequest is the POST /v1/data_sources/{id}/query body. Only the
+// pagination keys are sent: the tool lists rows in Notion's default order and
+// leaves the choice of which row to open to the agent, so neither filter nor
+// sorts has a caller.
+type dataSourceQueryRequest struct {
+	StartCursor string `json:"start_cursor,omitempty"`
+	PageSize    int    `json:"page_size,omitempty"`
+}
+
+// dataSourceQueryResponse decodes POST /v1/data_sources/{id}/query. Its results
+// are page objects, so searchObject and convertSearchItem already model them.
+type dataSourceQueryResponse struct {
+	Results    []searchObject `json:"results"`
+	HasMore    bool           `json:"has_more"`
+	NextCursor string         `json:"next_cursor"`
+}
+
+// QueryDataSource lists a data source's rows via POST /v1/data_sources/{id}/query.
+func (c *client) QueryDataSource(ctx context.Context, dataSourceID string, opts QueryOptions) (*QueryResult, error) {
+	if dataSourceID == "" {
+		return nil, goerr.New("dataSourceID is required")
+	}
+
+	pageSize := opts.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	encoded, err := json.Marshal(&dataSourceQueryRequest{
+		StartCursor: opts.StartCursor,
+		PageSize:    pageSize,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to encode notion data source query request",
+			goerr.V("dataSourceID", dataSourceID),
+		)
+	}
+
+	path := fmt.Sprintf("/v1/data_sources/%s/query", url.PathEscape(dataSourceID))
+
+	resp, err := c.doJSON(ctx, http.MethodPost, path, databaseAPIVersion, encoded)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call notion data source query endpoint",
+			goerr.V("dataSourceID", dataSourceID),
+			goerr.V("page_size", pageSize),
+		)
+	}
+	defer safe.Close(ctx, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, newAPIError(ctx, "data source query", resp,
+			goerr.V("dataSourceID", dataSourceID),
+			goerr.V("page_size", pageSize),
+		)
+	}
+
+	var decoded dataSourceQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode notion data source query response",
+			goerr.V("dataSourceID", dataSourceID),
+		)
+	}
+
+	out := &QueryResult{
+		Items:      make([]SearchItem, 0, len(decoded.Results)),
+		HasMore:    decoded.HasMore,
+		NextCursor: decoded.NextCursor,
+	}
+	for _, obj := range decoded.Results {
+		item, ok := convertSearchItem(obj)
+		if !ok {
+			continue
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, nil
 }

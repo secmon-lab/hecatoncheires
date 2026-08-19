@@ -38,3 +38,37 @@ type PageMarkdown struct {
 	Markdown  string
 	Truncated bool
 }
+
+// Database is the response of GetDatabase.
+type Database struct {
+	ID         string
+	Title      string
+	URL        string
+	LastEdited time.Time
+	// DataSources are the row collections this database holds. Notion's
+	// 2025-09-03 API split moved the rows out of the database object itself, so
+	// listing a database's contents means querying one of these.
+	DataSources []DataSourceRef
+}
+
+// DataSourceRef names one data source of a database.
+type DataSourceRef struct {
+	ID   string
+	Name string
+}
+
+// QueryOptions configures a QueryDataSource call.
+type QueryOptions struct {
+	// PageSize is the maximum number of rows to return. Clamped to [1, 100]; defaults to 20 when zero.
+	PageSize int
+	// StartCursor is the pagination cursor returned by a previous call. Empty starts from the beginning.
+	StartCursor string
+}
+
+// QueryResult is the response of a QueryDataSource call. A data source's rows
+// are pages, so each carries the same shape as a search hit.
+type QueryResult struct {
+	Items      []SearchItem
+	HasMore    bool
+	NextCursor string
+}

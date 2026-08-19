@@ -770,7 +770,7 @@ The AI agent will:
 | `core__*` (actions) + `case__*` (case edits) | Always (a case context exists). |
 | `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with the `search:read` scope. See [docs/slack.md](slack.md#user-token-scopes). |
 | `slack__get_messages`, `slack__post_message` | `HECATONCHEIRES_SLACK_BOT_TOKEN`. |
-| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN`. See [docs/integrations.md](integrations.md). |
+| `notion__search`, `notion__get_page`, `notion__get_database` | `HECATONCHEIRES_NOTION_API_TOKEN`. See [docs/integrations.md](integrations.md). |
 | `github__*` | The `--github-app-*` flags. See [docs/integrations.md](integrations.md). |
 | `jira_*` | The `--jira-*` flags (`HECATONCHEIRES_JIRA_BASE_URL` / `_EMAIL` / `_API_TOKEN`). See [docs/integrations.md](integrations.md#jira). |
 | `webfetch` | A configured web-fetch client. |

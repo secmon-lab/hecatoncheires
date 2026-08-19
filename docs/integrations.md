@@ -18,6 +18,7 @@ Hecatoncheires integrates with Notion to surface Notion content to the AI agent 
 
 - `notion__search` — search pages and databases shared with the integration.
 - `notion__get_page` — retrieve a page's content as Notion-flavored Markdown.
+- `notion__get_database` — list the pages (rows) held by a database.
 
 This document covers the Notion setup needed for those tools.
 
@@ -66,7 +67,7 @@ When the token is configured, you should see:
 Notion service enabled
 ```
 
-in the server logs at startup. The two agent tool registrations (`notion__search`, `notion__get_page`) light up automatically when the agent runs.
+in the server logs at startup. The three agent tool registrations (`notion__search`, `notion__get_page`, `notion__get_database`) light up automatically when the agent runs.
 
 If the token is omitted, the Notion-backed agent tools are silently skipped and the server logs:
 
@@ -78,8 +79,15 @@ Notion API token not configured, Source features will be limited
 
 | Tool | Endpoint | Notes |
 |------|----------|-------|
-| `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
+| `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Each hit carries `read_tool`, naming the tool that reads it (`notion__get_page` or `notion__get_database`). Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
 | `notion__get_page` | `GET /v1/pages/{page_id}/markdown` | Returns Notion-flavored ("enhanced") Markdown rendered server-side by Notion. Requires `Notion-Version: 2026-03-11` (sent automatically by `pkg/agent/tool/notion/client.go`). |
+| `notion__get_database` | `GET /v1/databases/{database_id}` then `POST /v1/data_sources/{data_source_id}/query` | Two calls, because Notion's 2025-09-03 API split moved a database's rows into data sources: the first reports the data sources, the second lists one of their rows. Also sends `Notion-Version: 2026-03-11`. |
+
+#### About databases and data sources
+
+`notion__search` reports databases alongside pages, but `notion__get_page` reads pages only — Notion answers a database id there with `400 validation_error: … is a database, not a page`. `notion__get_database` is what closes that gap: it returns the database's rows as `id` / `title` / `url` entries, and the agent then opens whichever row it needs with `notion__get_page`. Each search hit also carries `read_tool` naming the tool that reads it, so the routing is data the agent can follow rather than only prose in the tool descriptions.
+
+Since Notion's 2025-09-03 API version, a database does not hold its rows directly; it holds one or more **data sources** that do. Almost every database has exactly one, and the tool queries it without being asked. When a database has several, the tool returns no rows and reports the `data_sources` list instead, so the agent can call again with `data_source_id` set to the one it wants.
 
 #### About the Markdown Content API
 
@@ -104,6 +112,8 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 | Agent never offers `notion__search` | `HECATONCHEIRES_NOTION_API_TOKEN` not set, or the value is empty | Set the token; restart the server. |
 | `notion__get_page` returns `non-2xx` with status 404 | Page is not shared with the integration | Open the page in Notion → **Share → Add connections** → select your integration. |
 | `notion__search` returns no results despite knowing pages exist | Pages have not been shared with the integration | Same as above — sharing is per-tree, not workspace-wide. |
+| `notion__get_page` returns `400 validation_error: … is a database, not a page` | A database id from `notion__search` was passed to the page tool | Pass it to `notion__get_database` instead; the tool descriptions steer the agent there. |
+| `notion__get_database` returns no rows and a `message` about `data_source_id` | The database holds several data sources | Call again with `data_source_id` set to one of the ids listed under `data_sources`. |
 | Markdown response has `truncated: true` and ends with `<unknown>` blocks | Page exceeds Notion's render limits, or blocks reference unshared child pages | Split the page, or share the referenced child pages with the integration. |
 | Agent gets a "validation_error: invalid Notion-Version" | Running against a Notion enterprise tenant that pins a lower API version | This is unlikely under default Notion plans; contact Notion support if the response references a different `notion-version` constraint. |
 
