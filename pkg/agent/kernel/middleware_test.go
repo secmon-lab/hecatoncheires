@@ -3,6 +3,7 @@ package kernel_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -623,9 +624,17 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 	var calls atomic.Int32
 	var reported atomic.Value
 	llm := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The rejection reaches the model through the conversation, which is
+			// where the strategy answers the call, so it is read off the history this
+			// session was seeded with rather than off the inputs.
+			cfg := gollem.NewSessionConfig(opts...)
+			var seeded []gollem.Message
+			if h := cfg.History(); h != nil {
+				seeded = h.Messages
+			}
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, inputs []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					if calls.Add(1) == 1 {
 						return &gollem.Response{
 							FunctionCalls: []*gollem.FunctionCall{{
@@ -647,15 +656,26 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 							InputToken: 10, OutputToken: 5,
 						}, nil
 					}
-					for _, in := range inputs {
-						if res, ok := in.(gollem.FunctionResponse); ok && res.Error != nil {
-							reported.Store(res.Error.Error())
+					for _, msg := range seeded {
+						if msg.Role != gollem.RoleTool {
+							continue
+						}
+						for _, content := range msg.Contents {
+							res, cerr := content.GetToolResponseContent()
+							if cerr != nil || !res.IsError {
+								continue
+							}
+							reported.Store(fmt.Sprint(res.Response["error"]))
 						}
 					}
 					return &gollem.Response{Texts: []string{"done"}, InputToken: 3, OutputToken: 2}, nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
-					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+					grown := make([]gollem.Message, len(seeded), len(seeded)+1)
+					copy(grown, seeded)
+					grown = append(grown, gollem.Message{Role: gollem.RoleAssistant})
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI,
+						Version: gollem.HistoryVersion, Messages: grown}, nil
 				},
 			}, nil
 		},

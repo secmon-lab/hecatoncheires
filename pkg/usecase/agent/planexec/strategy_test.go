@@ -601,40 +601,57 @@ func (t *recordingTool) calls() []map[string]any {
 // toolCallingPlanner answers the i-th Generate with replies[i]: either a JSON plan
 // or, when the entry is a tool name, a request to call it.
 type toolCallingPlanner struct {
-	mu      sync.Mutex
-	replies []any // string (JSON), *gollem.FunctionCall, or []*gollem.FunctionCall
+	mu sync.Mutex
+	// replies[i] answers the i-th Generate: a string (JSON or prose), a
+	// *gollem.FunctionCall, a []*gollem.FunctionCall, or an error the call fails
+	// with (which the runtime retries from the checkpoint).
+	replies []any
 	n       atomic.Int32
 	inputs  []string
+	// systemPrompts[i] is the system prompt the i-th Generate ran under, which is
+	// where an instruction reaches a call that sends no user turn.
+	systemPrompts []string
 	// respIDs[i] is the tool-call ids the i-th Generate was answered with, in the
 	// order they arrived. Recorded per call because a turn's responses must all
 	// reach ONE call.
 	respIDs [][]string
 }
 
+// client answers the i-th Generate with replies[i] and grows the conversation by
+// one message per call, so the history a later call is seeded with is the one the
+// run actually built.
+//
+// The answers are read off that history rather than off the inputs: the results
+// reach the model through the conversation, which is where the session's CallTool
+// appends them.
 func (p *toolCallingPlanner) client() gollem.LLMClient {
 	return &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			cfg := gollem.NewSessionConfig(opts...)
+			var seeded []gollem.Message
+			if h := cfg.History(); h != nil {
+				seeded = h.Messages
+			}
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					var b strings.Builder
-					var ids []string
 					for _, in := range input {
-						switch v := in.(type) {
-						case gollem.Text:
-							b.WriteString(string(v))
-						case gollem.FunctionResponse:
-							ids = append(ids, v.ID)
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
 						}
 					}
 					i := int(p.n.Add(1)) - 1
 					p.mu.Lock()
 					p.inputs = append(p.inputs, b.String())
-					p.respIDs = append(p.respIDs, ids)
+					p.systemPrompts = append(p.systemPrompts, cfg.SystemPrompt())
+					p.respIDs = append(p.respIDs, trailingToolResponseIDs(seeded))
 					p.mu.Unlock()
 					if i >= len(p.replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
 					}
 					switch reply := p.replies[i].(type) {
+					case error:
+						return nil, reply
 					case *gollem.FunctionCall:
 						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{reply},
 							InputToken: 5, OutputToken: 3}, nil
@@ -647,11 +664,40 @@ func (p *toolCallingPlanner) client() gollem.LLMClient {
 					}
 				},
 				HistoryFunc: func() (*gollem.History, error) {
-					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+					grown := make([]gollem.Message, len(seeded), len(seeded)+1)
+					copy(grown, seeded)
+					grown = append(grown, gollem.Message{Role: gollem.RoleAssistant})
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI,
+						Version: gollem.HistoryVersion, Messages: grown}, nil
 				},
 			}, nil
 		},
 	}
+}
+
+// trailingToolResponseIDs reports the tool-call ids the conversation's LAST
+// message answers, in order — empty unless that message is a tool message.
+//
+// Only the trailing message counts: a provider reads the results as the answer to
+// the model turn immediately before them, so results that ended up anywhere else
+// did not answer the call they belong to.
+func trailingToolResponseIDs(messages []gollem.Message) []string {
+	if len(messages) == 0 {
+		return nil
+	}
+	last := messages[len(messages)-1]
+	if last.Role != gollem.RoleTool {
+		return nil
+	}
+	var ids []string
+	for _, c := range last.Contents {
+		resp, err := c.GetToolResponseContent()
+		if err != nil {
+			continue
+		}
+		ids = append(ids, resp.ToolCallID)
+	}
+	return ids
 }
 
 func (p *toolCallingPlanner) seen() []string {
@@ -659,6 +705,14 @@ func (p *toolCallingPlanner) seen() []string {
 	defer p.mu.Unlock()
 	out := make([]string, len(p.inputs))
 	copy(out, p.inputs)
+	return out
+}
+
+func (p *toolCallingPlanner) systemSeen() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.systemPrompts))
+	copy(out, p.systemPrompts)
 	return out
 }
 
@@ -817,6 +871,54 @@ func TestParallelPlannerToolCallsAreAnsweredInOneTurn(t *testing.T) {
 	}
 }
 
+// A planning call that FAILS after a tool round is retried from the checkpoint,
+// and the retry must send the same shape: no user turn, with the results still
+// answering the model's calls exactly once.
+//
+// This pins where ToolsAnswered is cleared. Clearing it before the call, or on
+// the error path, would make the retry send a text turn while the conversation
+// already answers the model — and the results are in the conversation whatever
+// the retry does, so sending them "again" is not an option either.
+func TestAnsweredToolCallsSurviveAFailedPlanningCall(t *testing.T) {
+	lookup := &recordingTool{name: "get_workspace"}
+	planner := &toolCallingPlanner{replies: []any{
+		[]*gollem.FunctionCall{
+			{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
+			{ID: "c2", Name: "get_workspace", Arguments: map[string]any{"id": "ws-2"}},
+		},
+		// The planning call that reports them fails; agentkit retries the whole
+		// transition from the last checkpoint, which is the one the tool phase left.
+		goerr.New("the provider is briefly unavailable"),
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Answered.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{lookup}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The tools ran once, in the transitions that committed before the failure.
+	gt.Array(t, lookup.calls()).Length(2)
+
+	answered := planner.answeredWith()
+	seen := planner.seen()
+	gt.Number(t, len(answered)).GreaterOrEqual(3).Required()
+	// The failed call and the retry both continue from the same answered round.
+	gt.Value(t, answered[1]).Equal([]string{"c1", "c2"})
+	gt.Value(t, answered[2]).Equal([]string{"c1", "c2"})
+	gt.String(t, seen[1]).Equal("")
+	gt.String(t, seen[2]).Equal("")
+	// Once that call succeeds the flag is gone: the next planning call sends a turn
+	// again rather than an empty request.
+	gt.Array(t, answered[3]).Length(0)
+	gt.String(t, seen[3]).NotEqual("")
+}
+
 // A single value the planner sent for an array-typed argument reaches the tool as
 // the batch of one it meant. gollem refuses the whole call otherwise, before the
 // tool runs, and a model answering that refusal re-emits the same call.
@@ -884,6 +986,15 @@ func TestPlannerToolResultsReachTheTerminalCall(t *testing.T) {
 	gt.Array(t, answered).Length(2).Required()
 	gt.Array(t, answered[0]).Length(0)
 	gt.Value(t, answered[1]).Equal([]string{"c1", "c2"})
+
+	// This is the ONLY terminal call the run makes, so the final prompt has to
+	// reach it — in the SYSTEM prompt, since the call sends no user turn. Without
+	// it the model is never told to write the user-visible answer, nor given the
+	// observation trail to write it from, and the run answers whatever the planner
+	// conversation happened to leave it on.
+	gt.String(t, planner.seen()[1]).Equal("")
+	gt.String(t, planner.systemSeen()[1]).Contains("Produce the final response for the user")
+	gt.String(t, planner.systemSeen()[1]).Contains("no investigations were run before the loop exited")
 }
 
 // The terminal call may itself ask for a tool: agentkit declares the claim's tools
@@ -949,7 +1060,7 @@ func TestTerminalCallIsToldWhenItsToolAllowanceIsSpent(t *testing.T) {
 	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
 	gt.String(t, out.Text).Contains("Answered at last")
 
-	// Every call was answered, and each answering turn carried the result alone.
+	// Every call was answered, and each answering call sent no user turn of its own.
 	gt.Array(t, lookup.calls()).Length(4)
 	answered := planner.answeredWith()
 	gt.Array(t, answered).Length(8).Required()
@@ -957,6 +1068,15 @@ func TestTerminalCallIsToldWhenItsToolAllowanceIsSpent(t *testing.T) {
 		gt.Array(t, answered[i]).Length(1)
 		gt.String(t, planner.seen()[i]).Equal("")
 	}
+
+	// The instruction therefore has to arrive in the system prompt, and it arrives
+	// exactly once — the same notice in the user turn as well would say it twice on
+	// every call that does send one.
+	spent := planner.systemSeen()[7]
+	gt.String(t, spent).Contains("Do not call any more tools")
+	gt.Number(t, strings.Count(spent, "Do not call any more tools")).Equal(1)
+	// The first terminal call is still within the allowance, so it is not nagged.
+	gt.Bool(t, contains(planner.systemSeen()[3], "Do not call any more tools")).False()
 }
 
 // A SUB-AGENT'S SPEND IS CHARGED TO ITS PARENT, and lands in one jump at the
@@ -1038,24 +1158,22 @@ func TestAParentIsStoppedByItsChildrensSpend(t *testing.T) {
 	gt.Number(t, proc.Metrics.Steps).GreaterOrEqual(int64(cfg.MaxSteps))
 }
 
-// A planning call always sends a user turn, and a turn reporting tool results
-// reports nothing else.
+// A planning call sends exactly one user turn, except the one following the tool
+// phase, which sends none.
 //
-// Both halves were learnt from live rejections. Sending nothing used to mean
-// "continue from the conversation" and stopped being safe once tool results left
-// the conversation: gollem appends no user turn for an empty input, so the request
-// ENDS on the previous model turn. Mixing text into a results turn fails the same
-// way, because the provider stops recognising it as the answer to the model's
-// call. Both surface as "Requests ending with a model turn are not supported".
+// Both halves were learnt from live rejections, and they pull in opposite
+// directions. An empty input adds no user content, so a call that sends nothing
+// with no answered calls behind it ENDS on the previous model turn. A call that
+// does have them is the answer to the model's tool call, and text sent with it
+// stops the provider recognising it as that answer. Both surface as "Requests
+// ending with a model turn are not supported".
 func TestAPlanningCallSendsOneWellFormedTurn(t *testing.T) {
 	// Nothing to report and nothing to say: still one turn.
-	gt.Number(t, planexec.PlannerInputsForTest("", 0)).Equal(1)
-	// Tool results are the whole turn.
-	gt.Number(t, planexec.PlannerInputsForTest("", 3)).Equal(3)
-	// Text waits when results are pending: 3 results, not 3 results + text.
-	gt.Number(t, planexec.PlannerInputsForTest("here are the observations", 3)).Equal(3)
-	// With nothing pending, the text is the turn.
-	gt.Number(t, planexec.PlannerInputsForTest("here are the observations", 0)).Equal(1)
+	gt.Number(t, planexec.PlannerInputsForTest("", false)).Equal(1)
+	// The answered calls are the turn; this call adds nothing to them.
+	gt.Number(t, planexec.PlannerInputsForTest("", true)).Equal(0)
+	// Text is the turn when no answered calls are waiting.
+	gt.Number(t, planexec.PlannerInputsForTest("here are the observations", false)).Equal(1)
 }
 
 // countingProgress counts how many NEW messages were posted, which is the thing

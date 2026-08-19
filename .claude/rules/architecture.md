@@ -553,9 +553,10 @@ gollem validates. Three properties a change here must preserve:
 
 - **It runs at the strategy, not as a middleware.** A `ToolCallMiddleware` cannot
   see the `ToolSpec` (agentkit resolves it inside `toolCallBase`, after the
-  chain), so the coercion sits at the two `Syscalls.CallTool` sites — `react`'s
-  `stepTool` and `planexec`'s `stepPlannerTool` — which is also where
-  `sys.Tools()` is at hand. A third strategy must call it too.
+  chain), so the coercion sits at the two sites that answer a model's call —
+  `react`'s `stepTool` and `planexec`'s `stepPlannerTool`, both calling
+  `Session().CallTool` — which is also where `sys.Tools()` is at hand. A third
+  strategy must call it too.
 - **Only the array case, and only what already contradicts the spec.** Any other
   mismatch is still a rejection explained by `toolArgsFeedbackMiddleware`;
   inventing a reading for one would hide a real mistake behind a wrong guess.
@@ -670,54 +671,77 @@ that the number of function response parts is equal to the number of function ca
 parts of the function call turn" — and once the conversation holds the wrong shape
 every later call in the run is rejected, so the turn dies with no answer.
 
-The obvious implementation violates this. `agentkit.Session().CallTool` appends
-each result to the conversation as its own message (`session.go`), and gollem's
-Gemini adapter maps one message to one turn (`llm/gemini/convert_message.go`,
-`convertMessagesToGemini` — it does not coalesce consecutive tool messages). So a
-Strategy that answers a parallel call turn one result at a time splits the one
-required turn into N. The pre-agentkit loop never hit this because it passed all
-results into one `Generate`, which gollem packs into one turn.
+Since agentkit v0.3.0 and gollem v0.28.2 the grouping is done for us, at both
+layers: `agentkit.Session().CallTool` appends a result into the TRAILING tool
+message when there is one rather than starting a new message (`session.go`), and
+gollem's Claude and Gemini converters merge a run of consecutive tool messages
+into one provider turn (`internal/convert`, `MergeConsecutiveToolMessages`).
+Grouping by run is exact rather than convenient: a further tool call cannot appear
+without an assistant message between, so consecutive tool messages always answer
+the same call turn.
 
 Both Strategies therefore do the same thing, and a new one must too:
 
-- Run each call through the **primitive** `Syscalls.CallTool`, which executes the
-  tool (Limit, Metrics and trace unchanged — the session's CallTool calls it
-  internally) without touching the conversation.
-- Hold the results on the checkpointed state as `toolcall.Response`
-  (`pkg/agent/toolcall`), which survives the JSON round trip a checkpoint makes.
-  A FAILED tool is held too: the call still has to be answered, and the failure is
-  what the model reacts to.
-- Report all of them as the inputs of the next `Generate`, then clear them —
-  **after** that call succeeded, since a failed transition is retried from the
-  checkpoint and dropping them earlier leaves its calls unanswered forever.
+- Answer each call the MODEL asked for through **`Syscalls.Session().CallTool`**,
+  one per transition, which runs the tool and appends its result to the managed
+  conversation. A FAILED call is answered too — agentkit records the failure as an
+  error result, which is what the model reacts to on its next turn. (For a call the
+  Strategy makes on its own initiative there is no matching `tool_use`, so that one
+  goes through the primitive `Syscalls.CallTool` instead.)
+- Send **no input at all** on the call that follows the tool phase. The answered
+  calls are the turn the model is waiting on; an input would land as a second user
+  turn behind them. This is tracked as a `ToolsAnswered` flag on the checkpointed
+  state, cleared only after that call succeeded, because a failed transition is
+  retried from the checkpoint and has to continue the same way.
+- Do NOT run the calls through the primitive `Syscalls.CallTool` and hold their
+  results on the state to send as the next `Generate`'s inputs. That was the
+  previous design, from before the grouping existed upstream; it buys nothing now
+  and leaves the committed conversation a transition behind what actually ran.
 
 This does not change the transition split: one transition is still one LLM call or
-one tool call. What changes is only where the result is kept until it is reported.
+one tool call.
 
 Pinned by `TestParallelToolResultsAreReportedInOneTurn` (react) and
-`TestParallelPlannerToolCallsAreAnsweredInOneTurn` (planexec).
+`TestParallelPlannerToolCallsAreAnsweredInOneTurn` (planexec). Both read the
+answers off the CONVERSATION each call was seeded with, not off its inputs — which
+is where a regression to per-turn results or to unanswered calls would show.
 
 **Two consequences, both learnt from live rejections.** Both surface as the same
 unhelpful message — "Requests ending with a model turn are not supported" — and
 both repeat on every retry, so a run that hits either produces nothing.
 
-1. **A turn carrying function responses carries NOTHING ELSE.** Mixing text into it
-   makes the provider stop recognising it as the answer to the model's call, so it
-   reports the request as ending on the model turn. Whatever text was waiting keeps
-   waiting; an instruction that must reach the model NOW goes in the system prompt
-   for that call, which is rebuilt per call from the state. That is where planexec's
-   tool-allowance notice and react's budget notice live — the notices fire exactly
-   when a turn is likely to be reporting results, which is why they cannot be
-   inputs.
-2. **A call must never send an empty input.** gollem appends no user content for
-   one (`llm/gemini/client.go`, `len(parts) > 0`), so the request ends on the
-   previous model turn. "Send nothing and continue from the conversation" was safe
-   while results lived in the conversation and is not any more: planexec's
-   `plannerInput` and react's `stepGenerate` send a short continuation instead.
+1. **The call answering a tool round carries NOTHING ELSE.** Text sent with the
+   results makes the provider stop recognising them as the answer to the model's
+   call, so it reports the request as ending on the model turn. Whatever text was
+   waiting keeps waiting; anything that must reach the model NOW goes in the system
+   prompt for that call, which is rebuilt per call from the state. That is where
+   planexec's tool-allowance notice and react's budget notice live — the notices
+   fire exactly when a call is likely to be answering a tool round, which is why
+   they cannot be inputs — and it is also where planexec's FINAL prompt goes when
+   the terminal call answers one, since a budget notice can make that the only
+   terminal call the run ever makes. "Waiting keeps waiting" is only correct for
+   text a LATER call will send anyway; text that has no later call must be moved,
+   not dropped.
+   The notice has exactly ONE route: `plannerPrompt` puts it in the system prompt
+   of every planning and terminal call. Do not also prepend it to a user prompt —
+   that says it twice on the calls that send one, and silently drops it on the
+   calls that do not.
+2. **A call must never send an empty input UNLESS the conversation already answers
+   the model's last turn.** gollem appends no user content for an empty input
+   (`llm/gemini/client.go`, `len(parts) > 0`), so with nothing behind it the request
+   ends on the previous model turn. After a tool phase the opposite holds — the
+   results are behind it, and sending nothing is the correct and documented way to
+   continue. planexec's `plannerInput` and react's `stepGenerate` decide exactly
+   that, and fall back to a short continuation for every other case.
 
 Pinned by `TestAPlanningCallSendsOneWellFormedTurn`,
-`TestTheToolAllowanceIsToldInTheSystemPrompt` (planexec) and
-`TestBudgetNoticeReachesTheModel` (react).
+`TestTheToolAllowanceIsToldInTheSystemPrompt`,
+`TestTerminalCallIsToldWhenItsToolAllowanceIsSpent`,
+`TestPlannerToolResultsReachTheTerminalCall` (planexec) and
+`TestBudgetNoticeReachesTheModel` (react). The clear-only-after-success half is
+pinned by `TestAnsweredToolCallsSurviveAFailedPlanningCall` (planexec) and
+`TestAnsweredToolCallsSurviveAFailedGenerate` (react), which fail the call that
+continues from an answered round and check the retry sends the same shape.
 
 ## Budget
 
@@ -740,7 +764,7 @@ Three consequences to keep in mind:
   notice is expected to skip further fan-out and head for its terminal output;
   planexec does exactly that. The notice reaches the model through the SYSTEM
   prompt, never as an input — see § "a parallel tool-call turn is answered in ONE
-  call" for why a turn reporting tool results can carry nothing else.
+  call" for why the call answering a tool round sends no user turn to carry it.
 - **A sub-agent's spend is charged to its parent as well as to itself.** A child
   gets its own Process and its own ceiling (the Task tier of
   `agentkernel.Budgets`), AND agentkit folds the finished child's whole `Metrics`
