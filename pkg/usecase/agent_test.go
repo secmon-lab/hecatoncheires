@@ -365,6 +365,30 @@ func waitForUpdate(t *testing.T, m *agentTestSlackService, channelID, ts string)
 	}
 }
 
+// waitForJobRuns blocks until the case carries at least want run summaries.
+//
+// Waiting on the reply is NOT enough to observe them: casebound's onFinish posts
+// the answer first and only then finishes the run log, and the summary doc
+// ListByCase reads is materialised inside that step by JobRun().RecordRun. A test
+// that reads the summary straight after the post sees the window between the two
+// whenever the runner is loaded enough to let the test win the race.
+func waitForJobRuns(t *testing.T, ctx context.Context, repo interfaces.Repository, workspaceID string, caseID int64, want int) []*model.JobRun {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := repo.JobRun().ListByCase(ctx, workspaceID, caseID)
+		gt.NoError(t, err).Required()
+		if len(got) >= want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			gt.Array(t, got).Length(want).Required()
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // waitForPosts blocks until the mock has recorded at least want messages. The
 // reply arrives from the worker goroutine, so there is nothing to join on.
 func waitForPosts(t *testing.T, m *agentTestSlackService, want int) []agentPostedMessage {
@@ -460,8 +484,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		// The Sequence numbers come from the repository, not from an in-process
 		// counter, which is what lets a run that moves between instances keep one
 		// ordered timeline.
-		runs, err := repo.JobRun().ListByCase(ctx, "ws-test", 1)
-		gt.NoError(t, err).Required()
+		runs := waitForJobRuns(t, ctx, repo, "ws-test", 1, 1)
 		gt.Array(t, runs).Length(1).Required()
 		events, err := repo.JobRunEvent().List(ctx,
 			model.JobRunKey{WorkspaceID: "ws-test", CaseID: 1, JobID: runs[0].JobID},
