@@ -157,6 +157,11 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 		// Reversing these two is caught by
 		// TestARejectedToolCallTellsTheModelWhatItSent.
 		agentkit.WithToolCallMiddleware(toolArgsFeedbackMiddleware()),
+		// Registered inside both of the above for the same reason: the timeline and
+		// the archive must record the enriched message the model was given. The two
+		// feedback middlewares cover disjoint error classes — argument rejections
+		// against everything else — so neither renders into the other's output.
+		agentkit.WithToolCallMiddleware(toolErrorValuesMiddleware()),
 		agentkit.WithLogger(logging.Default()),
 	)
 	if err != nil {

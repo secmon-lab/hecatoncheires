@@ -2,8 +2,11 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/masq"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/agenttrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
@@ -293,6 +297,150 @@ func (e *toolArgsFeedbackError) Error() string {
 }
 
 func (e *toolArgsFeedbackError) Unwrap() error { return e.cause }
+
+// toolErrorValuesMiddleware states the goerr values a failed tool call carried,
+// so the model can tell WHY the call failed rather than only that it did.
+//
+// goerr renders a chain as "message: message: message" and keeps everything
+// attached with goerr.V outside that string, reachable only through
+// goerr.Values. The diagnostic half of a tool failure lives there: a rejected
+// Jira search reaches the model as "Jira API returned non-2xx", while the reason
+// Jira gave — "Error in the JQL Query: Expecting either 'OR' or 'AND' but got
+// '...'" — sits in a `body` value the model never sees (ARGUS-96). A model told
+// only that its search failed re-emits the same broken query, exactly as the
+// unattributed argument rejection did in ARGUS-8S.
+//
+// An argument rejection is deliberately left alone: toolArgsFeedbackMiddleware
+// already supplies that error's missing half, and the only value agentkit
+// attaches there is the tool name gollem's own message already states.
+//
+// It wraps rather than replaces, so errors.Is against a sentinel the caller
+// discriminates on — gollem.ErrToolArgsValidation, agentkit.ErrLimitExceeded,
+// which react's stepTool must still recognise to stop the run — keeps holding.
+func toolErrorValuesMiddleware() agentkit.ToolCallMiddleware {
+	return func(next agentkit.ToolCallHandler) agentkit.ToolCallHandler {
+		return func(ctx context.Context, req *agentkit.ToolCallRequest) (map[string]any, error) {
+			out, err := next(ctx, req)
+			if err == nil || errors.Is(err, gollem.ErrToolArgsValidation) {
+				return out, err
+			}
+			values := describeErrorValues(goerr.Values(err))
+			if values == "" {
+				return out, err
+			}
+			return out, &toolErrorValuesError{cause: err, values: values}
+		}
+	}
+}
+
+// toolErrorValuesError appends a failed tool call's goerr values to its message.
+//
+// goerr.Wrap cannot express this: it renders as "message: cause", which would
+// put the values BEFORE the failure they explain, and the whole string is read
+// by a model.
+type toolErrorValuesError struct {
+	cause  error
+	values string
+}
+
+func (e *toolErrorValuesError) Error() string {
+	return e.cause.Error() + "\nThe failure reported:\n" + e.values
+}
+
+func (e *toolErrorValuesError) Unwrap() error { return e.cause }
+
+// errorValueMaxLen bounds one rendered value. The API errors this exists to
+// surface state their reason in the first line or two, while the same field can
+// also hold a proxy's HTML error page — the jira toolset caps its own body
+// snippet at 4096 bytes, which is already far past anything a model can act on.
+const errorValueMaxLen = 512
+
+// errorValuesMaxLen bounds the whole rendered block. An error accumulates values
+// from every goerr.Wrap on the way up, and a tool that walks a batch can attach
+// one per item.
+const errorValuesMaxLen = 2048
+
+// secretValueKeyPattern names the value keys whose content must never be
+// rendered. Unlike the logger's sink, this line is sent to the LLM provider and
+// reproduced in the Slack thread, so a key that merely SOUNDS like a credential
+// is redacted: a false positive costs one diagnostic, a false negative puts a
+// credential at a third party. Case-insensitive because this codebase writes
+// both snake_case and camelCase value keys.
+var secretValueKeyPattern = regexp.MustCompile(`(?i)(token|secret|password|passwd|credential|api[-_]?key|authorization|cookie)`)
+
+// errorValueRedactor applies the project's redaction policy plus the key-name
+// rule above. The policy is shared with the logger (logging.RedactOptions) so a
+// value marked secret for one sink is secret for the other; the key-name rule is
+// additional because a goerr value key is not a struct field and carries no tag.
+var errorValueRedactor = masq.New(append(logging.RedactOptions(),
+	masq.WithCensor(func(fieldName string, _ any, _ string) bool {
+		return secretValueKeyPattern.MatchString(fieldName)
+	}))...)
+
+// describeErrorValues renders the values attached to an error chain as indented
+// "key=value" lines in sorted order, so the same failure always reads the same
+// way. goerr.Values already merges the whole chain, an outer wrap overriding an
+// inner one under the same key.
+//
+// One value per line rather than a comma-separated list: the values that matter
+// here are API error bodies and queries, which contain commas and equals signs
+// of their own, and a line break is the one separator they cannot forge.
+func describeErrorValues(values map[string]any) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, "  "+key+"="+renderErrorValue(key, values[key]))
+	}
+
+	rendered := strings.Join(lines, "\n")
+	if len(rendered) > errorValuesMaxLen {
+		// runtrace.Truncate rather than a plain slice: cutting at a byte offset
+		// splits a multi-byte character, and the broken rune reaches the model,
+		// the run timeline and Sentry alike.
+		rendered = runtrace.Truncate(rendered, errorValuesMaxLen) + "..."
+	}
+	return rendered
+}
+
+// renderErrorValue redacts v under its own key and renders what survives.
+//
+// A single-line string is rendered as itself. The alternative — JSON for
+// everything — escapes the quotes of the JSON error body that is the whole point
+// of surfacing these values, and hands the model an escaped document to unpick.
+// A string carrying a line break would break the one-value-per-line layout
+// instead, so that one is JSON-encoded, as is every non-string value.
+func renderErrorValue(key string, v any) string {
+	redacted := errorValueRedactor(nil, slog.Any(key, v)).Value.Any()
+
+	out := ""
+	if s, ok := redacted.(string); ok && !strings.ContainsAny(s, "\n\r") {
+		out = s
+	} else {
+		encoded, err := json.Marshal(redacted)
+		if err != nil {
+			// A value that does not marshal (a channel, a func, a cyclic
+			// structure) still says something about the failure, so it is
+			// described by type rather than dropped. Never by %v: that would
+			// render the very content the marshaler refused to look at.
+			return fmt.Sprintf("<%T>", redacted)
+		}
+		out = string(encoded)
+	}
+
+	if len(out) > errorValueMaxLen {
+		return runtrace.Truncate(out, errorValueMaxLen) + "..."
+	}
+	return out
+}
 
 // argShapeMaxDepth bounds how far describeValue descends. Six levels reach the
 // deepest value a tool spec in this application declares — memo's creates[] ->

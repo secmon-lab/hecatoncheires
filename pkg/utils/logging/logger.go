@@ -49,12 +49,26 @@ func isTerminal(w io.Writer) bool {
 	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
-func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Logger {
-	filter := masq.New(
+// RedactOptions returns this project's redaction policy: the `masq:"secret"`
+// struct tag, the `secret_` field prefix, and the Authorization field name (a
+// header map key cannot carry a struct tag).
+//
+// It is exported because the logger is no longer the only consumer. The agent
+// runtime renders a failed tool call's goerr values into the message the model
+// is given (pkg/agent/kernel, toolErrorValuesMiddleware), which sends them to
+// the LLM provider — so it has to redact by the same policy. Two independently
+// maintained lists would drift, and the half that drifts is the one nobody
+// notices until a value is already at a third party.
+func RedactOptions() []masq.Option {
+	return []masq.Option{
 		masq.WithTag("secret"),
 		masq.WithFieldPrefix("secret_"),
 		masq.WithFieldName("Authorization"),
-	)
+	}
+}
+
+func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Logger {
+	filter := masq.New(RedactOptions()...)
 
 	attrHook := hooks.GoErr(hooks.WithStackTrace(stacktrace))
 
