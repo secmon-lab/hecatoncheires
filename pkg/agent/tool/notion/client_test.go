@@ -683,6 +683,35 @@ func TestQueryDataSource(t *testing.T) {
 		gt.Bool(t, got.Items[0].LastEdited.Equal(time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC))).True()
 	})
 
+	t.Run("skips a row whose object type is neither page nor database", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"object": "list",
+				"has_more": false,
+				"next_cursor": null,
+				"results": [
+					{"object": "block", "id": "00000000-0000-0000-0000-0000000000b1", "url": "https://www.notion.so/00b1"},
+					{"object": "page", "id": "00000000-0000-0000-0000-0000000000b2", "url": "https://www.notion.so/00b2"}
+				]
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+
+		// Same contract as the search path: the unrecognised entry is reported
+		// through errutil.Handle and dropped, and the rest of the rows still
+		// reach the caller.
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].ID).Equal("00000000-0000-0000-0000-0000000000b2")
+		gt.String(t, got.Items[0].Type).Equal("page")
+	})
+
 	t.Run("clamps the page size to 100", func(t *testing.T) {
 		var capturedBody string
 
