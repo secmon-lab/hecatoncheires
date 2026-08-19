@@ -407,11 +407,24 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
 
 ## LLM prompt caching
 
-Every gollem agent and standalone session this codebase creates opts into
-gollem's prompt cache (`gollem.WithPromptCache(true)` /
-`gollem.WithSessionPromptCache(true)`). There is no CLI flag or environment
-variable — it is on unconditionally, because it is a pure cost optimization
-with no behavioural difference in the model's output.
+Every LLM call this codebase makes opts into gollem's prompt cache. There is no
+CLI flag or environment variable — it is on unconditionally, because it is a pure
+cost optimization with no behavioural difference in the model's output.
+
+It is applied in two places, because there are two ways a call is made:
+
+- **Agent runs** go through agentkit, which builds the gollem session itself, so
+  no host can hand `gollem.WithPromptCache` to a client. `promptCacheMiddleware`
+  (`pkg/agent/kernel/middleware.go`) appends `gollem.WithSessionPromptCache(true)`
+  to every `GenerateRequest` instead — one registration on the Kernel covers every
+  agent, and there is exactly one place a Kernel is built.
+- **Standalone sessions** outside the agent runtime (the webfetch analyze call,
+  the assist log summary, the eval harness) pass the gollem option directly where
+  they build the session.
+
+Losing the first of those is what issue #266 reported: the agentkit migration
+dropped the per-host `gollem.WithPromptCache(true)` calls, and the cache hit rate
+on scheduled Job runs went from ~80% of input tokens to zero.
 
 What it changes, per provider:
 

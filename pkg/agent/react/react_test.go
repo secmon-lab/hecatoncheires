@@ -25,14 +25,17 @@ import (
 // executed, not merely how many times something happened.
 type recordingTool struct {
 	name string
-	err  error
+	// params is the declared parameter set. Nil for a tool whose arguments are
+	// not what the test is about.
+	params map[string]*gollem.Parameter
+	err    error
 
 	mu    sync.Mutex
 	calls []map[string]any
 }
 
 func (t *recordingTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{Name: t.name, Description: "test tool"}
+	return gollem.ToolSpec{Name: t.name, Description: "test tool", Parameters: t.params}
 }
 
 func (t *recordingTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
@@ -323,6 +326,43 @@ func TestFailingToolIsReportedToTheModel(t *testing.T) {
 	out, err := react.DecodeOutput(proc.Output)
 	gt.NoError(t, err).Required()
 	gt.Array(t, out.Texts).Equal([]string{"the backend is down"})
+}
+
+// A single value sent for an array-typed argument reaches the tool as the batch
+// of one the model meant. gollem validates arguments against the spec before the
+// tool runs and refuses the whole call otherwise; a model answering that refusal
+// in production re-emitted the same call, so the writes it carried were never
+// applied while the run still reported success.
+func TestASingleValueForAnArrayArgumentStillReachesTheTool(t *testing.T) {
+	tool := &recordingTool{
+		name: "memo__apply_memo_changes",
+		params: map[string]*gollem.Parameter{
+			"archives": {Type: gollem.TypeArray, Items: &gollem.Parameter{Type: gollem.TypeString}},
+		},
+	}
+	llm, conversations := scriptedLLMRecordingConversation(t,
+		callResponse(&gollem.FunctionCall{
+			ID:        "c1",
+			Name:      "memo__apply_memo_changes",
+			Arguments: map[string]any{"archives": "memo-1"},
+		}),
+		textResponse("archived"),
+	)
+	rt := newRuntime(t, llm, generousBudget(), tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "archive that memo"})
+
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	got := tool.Calls()
+	gt.Array(t, got).Length(1).Required()
+	gt.Value(t, got[0]["archives"]).Equal([]any{"memo-1"})
+
+	seen := conversations()
+	gt.Array(t, seen).Length(2).Required()
+	answers := trailingToolResponses(t, seen[1])
+	gt.Array(t, answers).Length(1).Required()
+	gt.Bool(t, answers[0].IsError).False()
 }
 
 // TestTextsAccumulateAcrossRounds pins that a model narrating between tool calls

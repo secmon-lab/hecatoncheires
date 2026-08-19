@@ -151,8 +151,9 @@ func TestLLMCallData(t *testing.T) {
 		CacheCreationInputTokens: 20,
 	}
 
-	got := agenttrace.LLMCallData(req, res)
+	got := agenttrace.LLMCallData(req, res, "claude-opus-4-6")
 
+	gt.String(t, got.Model).Equal("claude-opus-4-6")
 	gt.Value(t, got.InputTokens).Equal(120)
 	gt.Value(t, got.OutputTokens).Equal(34)
 	gt.Value(t, got.CacheReadInputTokens).Equal(100)
@@ -179,7 +180,7 @@ func TestLLMCallDataWithoutResult(t *testing.T) {
 		SystemPrompt: "you are the case agent",
 	}
 
-	got := agenttrace.LLMCallData(req, nil)
+	got := agenttrace.LLMCallData(req, nil, "")
 
 	gt.String(t, got.Request.SystemPrompt).Equal("you are the case agent")
 	gt.Array(t, got.Request.Messages).Length(1).Required()
@@ -192,7 +193,7 @@ func TestLLMCallDataWithoutResult(t *testing.T) {
 // TestLLMCallDataWithNilRequest pins that the converter cannot panic on the
 // degenerate input a middleware could hand it.
 func TestLLMCallDataWithNilRequest(t *testing.T) {
-	got := agenttrace.LLMCallData(nil, nil)
+	got := agenttrace.LLMCallData(nil, nil, "")
 	gt.Value(t, got).NotNil()
 	gt.String(t, got.Request.SystemPrompt).Equal("")
 	gt.Array(t, got.Request.Messages).Length(0)

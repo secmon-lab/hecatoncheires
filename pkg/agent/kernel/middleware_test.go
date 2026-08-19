@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
@@ -130,16 +132,39 @@ func (probeTool) Run(context.Context, map[string]any) (map[string]any, error) {
 	return map[string]any{"pong": true}, nil
 }
 
-// probeLLM returns a client whose single session answers with a fixed text.
-func probeLLM() gollem.LLMClient {
+// probeModelName is what the probe client claims to have called, standing in for
+// the model a real provider names on its trace data.
+const probeModelName = "probe-model-1"
+
+// probeLLM is a client whose single session answers with a fixed text. It records
+// the session settings agentkit derived, and reports its model the way a real
+// provider client does — through the trace handler in the context, which is the
+// only channel that carries the name.
+type probeLLM struct {
+	mu          sync.Mutex
+	promptCache []bool
+}
+
+func (p *probeLLM) client() gollem.LLMClient {
 	return &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			cfg := gollem.NewSessionConfig(opts...)
+			p.mu.Lock()
+			p.promptCache = append(p.promptCache, cfg.PromptCache())
+			p.mu.Unlock()
+
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					if h := trace.HandlerFrom(ctx); h != nil {
+						callCtx := h.StartLLMCall(ctx)
+						h.EndLLMCall(callCtx, &trace.LLMCallData{Model: probeModelName}, nil)
+					}
 					return &gollem.Response{
-						Texts:       []string{"probe answer"},
-						InputToken:  11,
-						OutputToken: 7,
+						Texts:                   []string{"probe answer"},
+						InputToken:              11,
+						OutputToken:             7,
+						CacheReadInputToken:     5,
+						CacheCreationInputToken: 3,
 					}, nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
@@ -150,14 +175,31 @@ func probeLLM() gollem.LLMClient {
 	}
 }
 
+// promptCacheFlags returns the prompt-cache setting of every session built so far.
+func (p *probeLLM) promptCacheFlags() []bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.promptCache)
+}
+
 type probeRuntime struct {
 	kernel *agentkit.Kernel
 	agent  agentkit.Agent[struct{}]
 	traces *agentarchive.MemoryTraceRepository
+	llm    *probeLLM
+	repo   interfaces.Repository
 }
 
-func newProbeRuntime(t *testing.T) *probeRuntime {
+// newProbeRuntime builds the Kernel the probe strategy runs on. tool overrides
+// what probe__ping resolves to, so a test can substitute a tool that does
+// something other than answer.
+func newProbeRuntime(t *testing.T, tool ...gollem.Tool) *probeRuntime {
 	t.Helper()
+
+	tools := []gollem.Tool{probeTool{}}
+	if len(tool) > 0 {
+		tools = tool
+	}
 
 	traces := agentarchive.NewMemoryTraceRepository()
 	budgets := kernel.Budgets{
@@ -169,22 +211,24 @@ func newProbeRuntime(t *testing.T) *probeRuntime {
 	handle, err := agentkit.Register(reg, "probe", 1, probeStrategy{limiter: budgets.Root.Limiter()})
 	gt.NoError(t, err).Required()
 
+	llm := &probeLLM{}
+	repo := memory.New()
 	k, err := kernel.Build(kernel.Deps{
 		Repo:    agentprocmemory.New(),
 		History: agentarchive.NewMemoryHistoryStore(),
-		LLM:     probeLLM(),
+		LLM:     llm.client(),
 		Trace:   traces,
 		Budgets: budgets,
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
-			Repo:      memory.New(),
-			Registry:  testRegistry(),
-			JiraTools: []gollem.Tool{probeTool{}},
+			Repo:      repo,
+			Registry:  testRegistry(channelWorkspace()),
+			JiraTools: tools,
 		},
 	})
 	gt.NoError(t, err).Required()
 
-	return &probeRuntime{kernel: k, agent: handle, traces: traces}
+	return &probeRuntime{kernel: k, agent: handle, traces: traces, llm: llm, repo: repo}
 }
 
 // runToCompletion serves until the spawned Process reaches a terminal state.
@@ -263,6 +307,154 @@ func TestEffectMiddlewareRecordsTheTrace(t *testing.T) {
 	gt.Bool(t, kinds["tool_exec"]).True()
 }
 
+// TestPromptCacheIsOnForEveryGenerate pins that every session agentkit builds
+// asks the provider for prompt caching.
+//
+// The pre-agentkit hosts each passed gollem.WithPromptCache to the client they
+// built; agentkit builds the session itself, so the setting has only one place
+// left to come from. Losing it took the cache hit rate on scheduled Job runs from
+// ~80% of input tokens to zero, and a cache read bills at roughly a tenth of the
+// base input rate.
+func TestPromptCacheIsOnForEveryGenerate(t *testing.T) {
+	rt := newProbeRuntime(t)
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	gt.Array(t, rt.llm.promptCacheFlags()).Equal([]bool{true})
+}
+
+// TestTheRecordedLLMCallNamesTheModel pins that the model a provider reports
+// reaches the recorded call.
+//
+// agentkit.GenerateResult carries the tokens but not the model, so the name has
+// to be taken from the trace callback the provider client drives — and taken
+// without letting that client record the call a second time. An empty model on
+// every event is what the run-detail page and the cost aggregations showed after
+// the migration.
+func TestTheRecordedLLMCallNamesTheModel(t *testing.T) {
+	rt := newProbeRuntime(t)
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	ids := rt.traces.TraceIDs(string(proc.RootID))
+	gt.Array(t, ids).Length(1).Required()
+
+	calls := llmCallSpans(rt.traces.Load(string(proc.RootID), ids[0]))
+	// Exactly one: the provider's own Start/End pair must not add a second span.
+	gt.Array(t, calls).Length(1).Required()
+	gt.String(t, calls[0].Model).Equal(probeModelName)
+	gt.Value(t, calls[0].CacheReadInputTokens).Equal(5)
+	gt.Value(t, calls[0].CacheCreationInputTokens).Equal(3)
+}
+
+// probeEmbeddingModelName is what the tool below claims to have called, standing
+// in for the embedding model a knowledge tool reaches.
+const probeEmbeddingModelName = "probe-embedding-1"
+
+// embeddingProbeTool stands in for a tool that talks to an LLM itself — the
+// knowledge tools' embedding calls, webfetch's page analysis. gollem's clients
+// find the handler in the context and nowhere else, so a tool whose context
+// carries none is a tool whose LLM calls are invisible.
+type embeddingProbeTool struct{}
+
+func (embeddingProbeTool) Spec() gollem.ToolSpec { return probeTool{}.Spec() }
+
+func (embeddingProbeTool) Run(ctx context.Context, _ map[string]any) (map[string]any, error) {
+	h := trace.HandlerFrom(ctx)
+	if h == nil {
+		return nil, goerr.New("no trace handler reached the tool")
+	}
+	callCtx := h.StartLLMCall(ctx)
+	h.EndLLMCall(callCtx, &trace.LLMCallData{Model: probeEmbeddingModelName, InputTokens: 4}, nil)
+	return map[string]any{"pong": true}, nil
+}
+
+// TestAToolsOwnLLMCallIsRecorded pins that a tool reaching an LLM directly still
+// appears on the trace.
+//
+// The pre-agentkit hosts got this from gollem.WithTrace, which published the
+// handler for the whole Execute; after the migration nothing published it, so the
+// knowledge tools' embedding calls stopped being recorded at all.
+func TestAToolsOwnLLMCallIsRecorded(t *testing.T) {
+	rt := newProbeRuntime(t, embeddingProbeTool{})
+	proc := runToCompletion(t, rt, kernel.Scope{ToolSets: []string{agent.ToolSetJira}})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	ids := rt.traces.TraceIDs(string(proc.RootID))
+	gt.Array(t, ids).Length(1).Required()
+
+	var models []string
+	for _, call := range llmCallSpans(rt.traces.Load(string(proc.RootID), ids[0])) {
+		models = append(models, call.Model)
+	}
+	slices.Sort(models)
+	gt.Array(t, models).Equal([]string{probeEmbeddingModelName, probeModelName})
+}
+
+// TestAToolsOwnLLMCallDoesNotBecomeItsParent pins that the TOOL_CALL event points
+// at the LLM_RESPONSE that ASKED for the call.
+//
+// A tool that reaches an LLM itself records an LLM_RESPONSE while it runs, so the
+// most recent response at the moment the tool returns is the tool's own. Reading
+// the parent then makes the tool call point at an event nested inside it, and the
+// run-detail page hangs the row under the wrong call.
+func TestAToolsOwnLLMCallDoesNotBecomeItsParent(t *testing.T) {
+	ctx := context.Background()
+	rt := newProbeRuntime(t, embeddingProbeTool{})
+	seedCase(t, ctx, rt.repo, &model.Case{Title: "parent link target"})
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-probe", JobRunID: "run-probe",
+	}
+	proc := runToCompletion(t, rt, sc)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	events, err := rt.repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-probe"}, "run-probe")
+	gt.NoError(t, err).Required()
+
+	// The two responses are distinguishable by model: the Generate names
+	// probeModelName, the tool's own call names probeEmbeddingModelName.
+	var toolEvents []*model.JobRunEvent
+	byModel := map[string]int64{}
+	for _, ev := range events {
+		switch ev.Kind {
+		case model.JobRunEventKindLLMResponse:
+			byModel[ev.LLMResponse.Model] = ev.Sequence
+		case model.JobRunEventKindToolCall:
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	gt.Number(t, byModel[probeModelName]).GreaterOrEqual(1)
+	gt.Number(t, byModel[probeEmbeddingModelName]).GreaterOrEqual(1)
+
+	gt.Array(t, toolEvents).Length(1).Required()
+	gt.Number(t, toolEvents[0].ParentSequence).Equal(byModel[probeModelName])
+}
+
+// llmCallSpans collects the call data of every llm_call span in a trace.
+func llmCallSpans(tr *trace.Trace) []*trace.LLMCallData {
+	var out []*trace.LLMCallData
+	var walk func(spans []*trace.Span)
+	walk = func(spans []*trace.Span) {
+		for _, s := range spans {
+			if s == nil {
+				continue
+			}
+			if s.Kind == trace.SpanKindLLMCall && s.LLMCall != nil {
+				out = append(out, s.LLMCall)
+			}
+			walk(s.Children)
+		}
+	}
+	if tr != nil && tr.RootSpan != nil {
+		walk([]*trace.Span{tr.RootSpan})
+	}
+	return out
+}
+
 // TestClaimTraceIDIsPerClaim pins that the archive id identifies one CLAIM, not
 // one Process. trace.Repository.Save overwrites by id, and a claim that dies
 // before committing is reclaimed at the same transition count — so the id has to
@@ -288,6 +480,8 @@ func TestTokensAreMeteredOntoTheProcess(t *testing.T) {
 
 	gt.Value(t, proc.Metrics.InputTokens).Equal(int64(11))
 	gt.Value(t, proc.Metrics.OutputTokens).Equal(int64(7))
+	gt.Value(t, proc.Metrics.CacheReadInputTokens).Equal(int64(5))
+	gt.Value(t, proc.Metrics.CacheCreationInputTokens).Equal(int64(3))
 	gt.Value(t, proc.Metrics.LLMCalls).Equal(int64(1))
 	gt.Value(t, proc.Metrics.ToolCalls).Equal(int64(1))
 }
@@ -447,12 +641,15 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 								ID:   "c1",
 								Name: "probe__ping",
 								// Two of the three arrays are well formed; targets is a
-								// stringified array. gollem reports one "expected array
-								// type" for the call and names no parameter, so only the
-								// shape can attribute it to targets.
+								// number. gollem reports one "expected array type" for the
+								// call and names no parameter, so only the shape can
+								// attribute it to targets. A number rather than a
+								// stringified array: the latter is now decoded by
+								// toolargs.Coerce before gollem sees it, and this test is
+								// about the mismatches that still reach a rejection.
 								Arguments: map[string]any{
 									"items":    []any{"a", "b"},
-									"targets":  `["c","d"]`,
+									"targets":  float64(42),
 									"archives": []any{"e"},
 								},
 							}},
@@ -544,7 +741,7 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 	// targets contradicts the expectation — which is the attribution gollem's
 	// own message cannot make.
 	gt.String(t, told).Contains(
-		"The arguments received were: archives=array[1] of string, items=array[2] of string, targets=string")
+		"The arguments received were: archives=array[1] of string, items=array[2] of string, targets=number")
 
 	// The run timeline records the SAME message the model was given. This is what
 	// pins the middleware order: registered outside the trace bracket instead of

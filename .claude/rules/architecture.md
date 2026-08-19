@@ -429,6 +429,27 @@ Two properties this relies on, which a change here must preserve:
   `RUN_ERROR` — append into one ordered timeline with nothing shared between
   them. Never reintroduce an in-process counter; it would hand the same number
   out twice.
+- **The model name is read from the provider, not from agentkit.**
+  `agentkit.GenerateResult` reports the tokens but not which model produced them,
+  so `generateMiddleware` installs an `agenttrace.ModelCapture` in the *gollem*
+  trace context for the duration of the call and takes the name off the
+  `trace.LLMCallData` the provider client builds. It must stay a capture rather
+  than the run's real handler: the provider drives the same `StartLLMCall` /
+  `EndLLMCall` pair, so a real handler there records every call twice. An empty
+  `model` on every event is what issue #266 reported.
+- **The claim's handler is published in the gollem trace context while a tool
+  runs** (`toolCallMiddleware`), so a tool that reaches an LLM itself — the
+  knowledge tools' embedding calls, webfetch's page analysis — is recorded as an
+  LLM call nested in its tool span. The pre-agentkit hosts got this from
+  `gollem.WithTrace`, which published the handler for the whole `Execute`; after
+  the migration nothing did, and those calls vanished from the timeline. This
+  cannot duplicate a Generate: an agentkit Generate never runs inside a tool.
+- **A `TOOL_CALL`'s `ParentSequence` is resolved when the tool STARTS**
+  (`Handler.StartToolExec`, held on the span), never when it ends. Because of the
+  bullet above, a tool that reaches an LLM itself records an `LLM_RESPONSE` while
+  it runs, so the most recent response at the end of the tool is the tool's own —
+  an end-time lookup points the row at an event nested inside it. Pinned by
+  `TestAToolsOwnLLMCallDoesNotBecomeItsParent`.
 
 Every production path now goes through the middleware — `tick` included, since it
 spawns onto the same runtime and drives the worker itself. The in-process Job
@@ -522,6 +543,29 @@ A model's argument mistake still reaches Sentry through the strategies'
 `errutil.Handle`, and that is deliberate: the run recovers, but a model looping
 on the same rejected call is exactly what an operator needs to see. Do not
 silence it — make the feedback good enough that the loop stops.
+
+Better feedback did not stop that loop, though: the model re-emitted the same
+`memo__apply_memo_changes` call, so the memo writes were never applied while the
+run still reported success. `toolargs.Coerce` (`pkg/agent/toolargs`) closes the
+one case that needs no guessing — a single value sent for an array-typed
+argument, which reads as the batch of one the model meant — by wrapping it before
+gollem validates. Three properties a change here must preserve:
+
+- **It runs at the strategy, not as a middleware.** A `ToolCallMiddleware` cannot
+  see the `ToolSpec` (agentkit resolves it inside `toolCallBase`, after the
+  chain), so the coercion sits at the two sites that answer a model's call —
+  `react`'s `stepTool` and `planexec`'s `stepPlannerTool`, both calling
+  `Session().CallTool` — which is also where `sys.Tools()` is at hand. A third
+  strategy must call it too.
+- **Only the array case, and only what already contradicts the spec.** Any other
+  mismatch is still a rejection explained by `toolArgsFeedbackMiddleware`;
+  inventing a reading for one would hide a real mistake behind a wrong guess.
+- **The call held on the checkpointed state is not mutated.** `Coerce` returns a
+  new arguments map, so a replayed transition coerces the same original again.
+
+What remains open is the run's own visibility: a rejection the model cannot
+repair is still absorbed as that call's response, so the turn completes
+successfully with the work undone, and only the Sentry report says otherwise.
 
 ## Agent runtime: no duplicated side effects (NON-NEGOTIABLE)
 

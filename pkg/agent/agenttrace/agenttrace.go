@@ -17,8 +17,13 @@ import (
 // LLMCallData builds the span payload for one Generate. res may be nil when the
 // call failed, in which case the request side is still recorded — a failed call
 // is exactly the one an operator wants the prompt for.
-func LLMCallData(req *agentkit.GenerateRequest, res *agentkit.GenerateResult) *trace.LLMCallData {
+//
+// model is passed in rather than read off res because agentkit.GenerateResult
+// does not carry it; only the provider client knows which model answered. See
+// ModelCapture for where the caller gets it.
+func LLMCallData(req *agentkit.GenerateRequest, res *agentkit.GenerateResult, model string) *trace.LLMCallData {
 	data := &trace.LLMCallData{
+		Model: model,
 		Request: &trace.LLMRequest{
 			Messages: Messages(historyOf(req), inputOf(req)),
 			Tools:    toolSpecs(req),

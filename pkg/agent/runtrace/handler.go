@@ -54,6 +54,12 @@ type handlerSpan struct {
 	// Tool-only.
 	toolName string
 	toolArgs map[string]any
+	// parentSeq is the LLM_RESPONSE this tool call carries out, resolved when
+	// the execution STARTS. It cannot be read at the end: a tool that reaches an
+	// LLM itself (the knowledge tools' embedding calls, webfetch's page
+	// analysis) records a response of its own while it runs, and the tool call
+	// would then point at an event nested inside itself.
+	parentSeq int64
 }
 
 // Handler is a gollem trace.Handler that appends one JobRunEvent per LLM call
@@ -293,21 +299,31 @@ func AddRunTotals(log *model.JobRunLog, h *Handler) {
 }
 
 // StartToolExec caches the tool name + args + start timestamp on a
-// context-scoped span. No event is appended yet; we need the result before we
-// can emit a complete TOOL_CALL.
+// context-scoped span, together with the LLM_RESPONSE the call answers. No event
+// is appended yet; we need the result before we can emit a complete TOOL_CALL.
+//
+// The parent is resolved HERE rather than at the end. A tool that reaches an LLM
+// itself records an LLM_RESPONSE of its own while it runs, and the last response
+// seen by then is that one — so an end-time lookup would point the tool call at
+// an event nested inside it.
 func (h *Handler) StartToolExec(ctx context.Context, toolName string, args map[string]any) context.Context {
+	h.mu.Lock()
+	parentSeq := h.parentSequenceLocked(ctx)
+	h.mu.Unlock()
+
 	return context.WithValue(ctx, handlerSpanKey{}, &handlerSpan{
 		kind:      "tool",
 		startedAt: h.clock(),
 		toolName:  toolName,
 		toolArgs:  args,
+		parentSeq: parentSeq,
 	})
 }
 
 // EndToolExec appends a single TOOL_CALL event with ParentSequence pointing at
-// the most recent LLM_RESPONSE seen by this handler. The event's OccurredAt is
-// the execution's completion time; its measured duration is the
-// StartedAt/EndedAt pair inside ToolCallPayload.
+// the LLM_RESPONSE that asked for the call. The event's OccurredAt is the
+// execution's completion time; its measured duration is the StartedAt/EndedAt
+// pair inside ToolCallPayload.
 func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err error) {
 	span := spanFromContext(ctx)
 	endedAt := h.clock()
@@ -315,10 +331,19 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 	var startedAt time.Time
 	var toolName string
 	var args map[string]any
+	var parentSeq int64
 	if span != nil && span.kind == "tool" {
 		startedAt = span.startedAt
 		toolName = span.toolName
 		args = span.toolArgs
+		parentSeq = span.parentSeq
+	} else {
+		// No span to read: the Start hook never ran, or something replaced the
+		// span in the context. Resolve the parent now — late is better than
+		// unset, which JobRunEvent.Validate rejects outright.
+		h.mu.Lock()
+		parentSeq = h.parentSequenceLocked(ctx)
+		h.mu.Unlock()
 	}
 	if startedAt.IsZero() {
 		startedAt = endedAt
@@ -327,7 +352,7 @@ func (h *Handler) EndToolExec(ctx context.Context, result map[string]any, err er
 
 	ev := h.baseEvent(model.JobRunEventKindToolCall, endedAt)
 	h.mu.Lock()
-	ev.ParentSequence = h.parentSequenceLocked(ctx)
+	ev.ParentSequence = parentSeq
 	// Counted here rather than at Start so a tool that never returned (the
 	// process died mid-execution) is not billed as a completed step.
 	h.totals.ToolCalls++
