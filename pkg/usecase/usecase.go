@@ -145,7 +145,8 @@ func WithSlackMessageRetriever(svc slacktool.MessageRetriever) Option {
 }
 
 // WithNotionToolClient configures the agent-tool Notion client.
-// When set, the agent gains the notion__search and notion__get_page tools.
+// When set, the agent gains the notion__search, notion__get_page and
+// notion__get_database tools.
 func WithNotionToolClient(c notiontool.Client) Option {
 	return func(uc *UseCases) {
 		uc.notionTool = c
@@ -369,7 +370,7 @@ func (uc *UseCases) SlackMessageRetriever() slacktool.MessageRetriever {
 
 // NotionToolClient returns the agent-tool Notion client (nil when no Notion
 // token was configured). Exposed so the Job runtime wiring can bind
-// notion__search / notion__get_page into the Job tool set.
+// notion__search / notion__get_page / notion__get_database into the Job tool set.
 func (uc *UseCases) NotionToolClient() notiontool.Client {
 	return uc.notionTool
 }

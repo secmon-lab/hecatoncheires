@@ -54,7 +54,7 @@ type toolCatalogEntry struct {
 func ToolCatalog() []toolCatalogEntry {
 	return []toolCatalogEntry{
 		{Name: toolsim.ToolSlackSearch, Description: "Search Slack messages", ReadOnly: true, Simulatable: true},
-		{Name: toolsim.ToolNotionSearch, Description: "Search Notion pages", ReadOnly: true, Simulatable: true},
+		{Name: toolsim.ToolNotionSearch, Description: "Search Notion, read a page's Markdown, and list a database's rows (one key covers all three Notion tools)", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolGitHubSearch, Description: "Search GitHub issues/PRs (live-only in v1)", ReadOnly: true, Simulatable: false},
 		{Name: toolsim.ToolJiraSearch, Description: "List Jira projects and search/fetch issues (live-only in v1)", ReadOnly: true, Simulatable: false},
 		{Name: toolsim.ToolWebFetch, Description: "Fetch a URL and return its content as Markdown, screened for prompt injection (live-only)", ReadOnly: true, Simulatable: false},
