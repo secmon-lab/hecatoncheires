@@ -469,6 +469,30 @@ Each event is one of:
 | `TOOL_CALL`     | One per tool execution. `ParentSequence` points at the LLM_RESPONSE whose tool_use spawned it. Captures `ToolName`, `ArgumentsJSON`, `ResultJSON`, `IsError`, `ErrorMessage`, `StartedAt`, `EndedAt`. |
 | `RUN_ERROR`     | Emitted by `JobRunner.Run` when the agent loop fails. Captures `Stage` (`prepare` / `execute` / `finish`) and `Message`. |
 
+**A failed `TOOL_CALL`'s `ErrorMessage` carries the diagnostic detail, not
+just the message chain.** Below the `a: b: c` chain the agent runtime appends
+a `The failure reported:` block listing the values the error carried — for an
+HTTP-backed tool that is the status, the endpoint, the request the tool
+actually sent, and the API's own response body. It is the same string the
+model was given, so what you read here is exactly what the agent had to work
+with when it decided what to do next. A rejected tool **argument** instead
+gets a `The arguments received were:` line naming the shape of each argument
+sent.
+
+Values whose key names a credential (`token`, `secret`, `password`,
+`credential`, `api_key`, `authorization`, `cookie`, in any casing) are shown
+as `[REDACTED]`, as are fields covered by the logger's redaction policy. This
+block reaches the LLM provider and the Slack thread as well as this page, so
+the redaction is deliberately broad — a value you expected to see and that
+reads as `[REDACTED]` was matched by name, not lost.
+
+The redaction matches value **names**, not the text inside them, so it is a
+backstop rather than a boundary: a secret in the middle of an upstream response
+body would pass through it. What keeps such content out is each tool choosing
+what it attaches to its errors (`.claude/rules/architecture.md`, "a failed tool
+call says why it failed"). If you see something here that should not have left
+the deployment, the fix belongs at that tool, not at this rendering.
+
 **`OccurredAt` is a completion timestamp, not a call start.** Both the
 `LLM_REQUEST` and the `LLM_RESPONSE` of one call carry the same value —
 the moment the handler observed the call finish — so the gap between the

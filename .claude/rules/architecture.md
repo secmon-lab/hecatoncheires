@@ -567,6 +567,70 @@ What remains open is the run's own visibility: a rejection the model cannot
 repair is still absorbed as that call's response, so the turn completes
 successfully with the work undone, and only the Sentry report says otherwise.
 
+## Agent runtime: a failed tool call says why it failed
+
+The same gap exists one layer out, for a tool that ran and failed. A strategy
+answers the call with `err.Error()` (`pkg/agent/toolcall`), and goerr renders a
+chain as `message: message: message` while keeping everything attached with
+`goerr.V` outside that string. So the diagnostic half of a failure never reached
+the model: a Jira search rejected for a malformed JQL came back as "Jira API
+returned non-2xx", while Jira's own "Error in the JQL Query: Expecting either
+'OR' or 'AND' but got ..." sat in a `body` value only Sentry saw (ARGUS-96).
+A model that cannot see why its query was refused re-emits the same query.
+
+`toolErrorValuesMiddleware` (`pkg/agent/kernel/middleware.go`) renders
+`goerr.Values(err)` — which merges the whole chain — as indented `key=value`
+lines appended to the message. Five properties a change here must preserve:
+
+- **It is registered AFTER `toolCallMiddleware`**, so it runs inside the trace
+  bracket and the timeline and archive record the same message the model was
+  given. Pinned by `TestAFailedToolCallTellsTheModelWhyItFailed`.
+- **It wraps, it does not replace.** `errors.Is` must keep holding for every
+  sentinel a caller discriminates on — `agentkit.ErrLimitExceeded` above all,
+  which `react`'s `stepTool` reads to stop a run at a closed budget.
+- **An argument rejection is left alone.** `toolArgsFeedbackMiddleware` owns that
+  error class, and the only value agentkit attaches there is the tool name
+  gollem's message already states. The two middlewares cover disjoint classes.
+- **Values are redacted before rendering, by the project's own policy plus a
+  key-name rule.** This line goes to the LLM provider and into the Slack thread,
+  not just to an operator's sink, so the shared policy (`logging.RedactOptions`,
+  the `masq:"secret"` tag and the `Authorization` field name) is applied and any
+  key whose NAME reads as a credential is redacted outright. A false positive
+  costs one diagnostic; a false negative puts a credential at a third party.
+  Extend the policy in `logging.RedactOptions` so both sinks move together.
+- **One value per line, single-line strings rendered raw.** The values that
+  matter are API error bodies and queries, full of commas and quotes of their
+  own; JSON-encoding them hands the model an escaped document to unpick, and a
+  comma-separated list gives it no reliable separator. Both bounds
+  (`errorValueMaxLen`, `errorValuesMaxLen`) cut on a rune boundary via
+  `runtrace.Truncate`, because a broken rune would reach the model, the run
+  timeline and Sentry alike.
+
+Note what this does NOT change: the failure still reaches Sentry through the
+strategies' `errutil.Handle`, for the same reason the argument rejection does.
+
+**What it DID change, and the rule that follows: on a tool-call path there is no
+longer such a thing as an operator-only diagnostic.** A value attached with
+`goerr.V` to an error a tool returns is shown to the model, sent to the LLM
+provider, and reproduced in the Slack thread. So:
+
+- **Do not attach anything the model must not see.** Attach an identifier, a
+  status, a size, a shape — not a credential, and not content that some other
+  control was supposed to gate.
+- **Check the site's comments when you change what it attaches.** Two places had
+  written down the opposite assumption in prose and were relying on it:
+  `pkg/agent/tool/notion/client.go` said in as many words that `err.Error()` is
+  "the whole of what the agent is told", and `pkg/agent/tool/webfetch`'s analyze
+  attached the screening model's raw output — which echoes the fetched page back
+  inside its `markdown` field — so a screening reply that failed to parse handed
+  the outer model the very body the screen exists to gate. That one is a control
+  bypass, not a leak of diagnostics, and it is why this rule is stated positively
+  rather than left implicit. Pinned by the analyze test in
+  `pkg/agent/tool/webfetch/webfetch_test.go`.
+- **The redaction is a backstop, not the boundary.** It matches value KEY names
+  and the nested fields `logging.RedactOptions` covers; it does not read inside a
+  string. A secret in the middle of a response body would pass through it.
+
 ## Agent runtime: no duplicated side effects (NON-NEGOTIABLE)
 
 Every `Kernel.Serve` call in this application MUST pass

@@ -237,8 +237,9 @@ func readErrorBody(ctx context.Context, body io.Reader) string {
 }
 
 // apiErrorDetailLimit bounds how much of the upstream explanation is repeated in
-// the error message. The whole body still travels as a goerr value; this is the
-// part a model reads, and a long one pushes the rest of its context out.
+// the error message. The whole body still travels as a goerr value; this bounds
+// the copy every consumer of the message sees, and a long one pushes the rest of
+// a model's context out.
 const apiErrorDetailLimit = 512
 
 // notionErrorBody is the error payload Notion returns on every non-2xx response.
@@ -248,12 +249,19 @@ type notionErrorBody struct {
 }
 
 // newAPIError reports a non-2xx Notion response. The status and Notion's own
-// error code are put IN the message rather than only in goerr values because
-// that message is the whole of what the agent is told: a failed tool call is
-// rendered into its function response as err.Error() (pkg/agent/toolcall), which
-// drops goerr values. Told only "returned non-2xx", neither the model nor an
-// operator reading the recorded event can tell a page that does not exist from
-// one the integration cannot see, or either from a rate limit.
+// error code are put IN the message rather than only in goerr values, so the
+// message stands on its own for every consumer: Search and GetPageMarkdown are
+// exported, and a caller that renders only err.Error() and is told "returned
+// non-2xx" cannot tell a page that does not exist from one the integration
+// cannot see, or either from a rate limit.
+//
+// The values below are NOT operator-only. A failed tool call's goerr values are
+// rendered into the function response the calling agent reads (pkg/agent/kernel,
+// toolErrorValuesMiddleware), so everything attached here is also shown to the
+// model — do not attach anything it must not see. That leaves the body's copy in
+// the message overlapping this one by up to apiErrorDetailLimit; the overlap is
+// accepted rather than removed from either side, because the message must stay
+// self-contained and the value must stay untruncated for the operator.
 func newAPIError(ctx context.Context, endpoint string, resp *http.Response, opts ...goerr.Option) error {
 	body := readErrorBody(ctx, resp.Body)
 

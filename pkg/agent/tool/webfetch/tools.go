@@ -106,6 +106,14 @@ func (t *fetchTool) Run(ctx context.Context, args map[string]any) (map[string]an
 		return nil, goerr.Wrap(err, "failed to analyze body", goerr.V("url", rawURL))
 	}
 	if result.Malicious {
+		// reason reaches the calling agent, because a failed tool call's goerr
+		// values are rendered into its function response (pkg/agent/kernel,
+		// toolErrorValuesMiddleware). That is intended: it is the screening
+		// model's own short verdict, bounded by analyzeSchema, not the page it
+		// judged — and an agent that can say WHY a fetch was refused can tell the
+		// user. The page body itself never takes this path; a page able to write
+		// through the screener's verdict could also have bought a benign one,
+		// which passes the whole body through.
 		return nil, goerr.New("indirect prompt injection detected in fetched body",
 			goerr.V("url", rawURL), goerr.V("reason", result.Reason))
 	}

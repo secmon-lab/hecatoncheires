@@ -914,6 +914,355 @@ func longMultibyteArgsWant() string {
 	return full[:cut] + "..."
 }
 
+// jiraFailureBody is the response Jira returns for a JQL it cannot parse. The
+// jira toolset attaches it to the error as a goerr value and states only "Jira
+// API returned non-2xx" in the message, so this string is the whole of what
+// tells the model its query was malformed rather than its search empty.
+const jiraFailureBody = `{"errorMessages":["Error in the JQL Query: Expecting either 'OR' or 'AND' but got 'x'. (line 1, character 42)"],"errors":{}}`
+
+// jiraFailureTool reproduces the error shape of the real Jira search wrapper
+// (pkg/agent/tool/jira over gollem-dev/tools/jira): three goerr layers whose
+// messages say nothing actionable, with the API's own explanation, the status
+// and the offending query attached as values.
+type jiraFailureTool struct{}
+
+func (jiraFailureTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "probe__ping",
+		Description: "search jira issues",
+		Parameters: map[string]*gollem.Parameter{
+			"jql": {Type: gollem.TypeString, Description: "the JQL query"},
+		},
+	}
+}
+
+func (jiraFailureTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
+	eb := goerr.NewBuilder(
+		goerr.V("status", 400),
+		goerr.V("url", "https://example.atlassian.net/rest/api/3/search/jql"),
+	)
+	err := eb.New("Jira API returned non-2xx", goerr.V("body", jiraFailureBody))
+	err2 := goerr.Wrap(err, "failed to search jira issues", goerr.V("jql", args["jql"]))
+	return nil, goerr.Wrap(err2, "jira tool run failed", goerr.V("tool", "probe__ping"))
+}
+
+// TestAFailedToolCallTellsTheModelWhyItFailed drives a real Kernel through a tool
+// that fails the way the Jira search does, and pins that the reason reaches the
+// model rather than only the message chain.
+//
+// goerr renders a chain as "message: message: message" and keeps everything
+// attached with goerr.V out of that string, so the model was told "Jira API
+// returned non-2xx" while the parser error naming the broken character sat in a
+// value it never saw (ARGUS-96). A model that cannot see why its query was
+// refused re-emits the same query.
+func TestAFailedToolCallTellsTheModelWhyItFailed(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	seedCase(t, ctx, repo, &model.Case{Title: "tool failure feedback target"})
+
+	const sentJQL = `project = "MEDNAVI" AND (text ~ \"remoco\")`
+
+	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	reg := agentkit.NewRegistry()
+	handle, err := react.Register(reg, kernel.AgentCaseChannel, 1, cfg.Limiter(),
+		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
+	gt.NoError(t, err).Required()
+
+	var calls atomic.Int32
+	var reported atomic.Value
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, inputs []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					if calls.Add(1) == 1 {
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{{
+								ID:        "c1",
+								Name:      "probe__ping",
+								Arguments: map[string]any{"jql": sentJQL},
+							}},
+							InputToken: 10, OutputToken: 5,
+						}, nil
+					}
+					for _, in := range inputs {
+						if res, ok := in.(gollem.FunctionResponse); ok && res.Error != nil {
+							reported.Store(res.Error.Error())
+						}
+					}
+					return &gollem.Response{Texts: []string{"done"}, InputToken: 3, OutputToken: 2}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+
+	k, err := kernel.Build(kernel.Deps{
+		Repo:    agentprocmemory.New(),
+		History: agentarchive.NewMemoryHistoryStore(),
+		LLM:     llm,
+		Trace:   agentarchive.NewMemoryTraceRepository(),
+		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Agents:  reg,
+		Tools: kernel.ToolDeps{
+			Repo:      repo,
+			Registry:  testRegistry(channelWorkspace()),
+			JiraTools: []gollem.Tool{jiraFailureTool{}},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-values", JobRunID: "run-values",
+	}
+
+	serveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() {
+		served <- k.Serve(serveCtx, agentkit.WithPollInterval(5*time.Millisecond))
+	}()
+
+	pid, err := handle.Spawn(ctx, k, react.Input{SystemPrompt: "be helpful", Prompt: "search it"},
+		agentkit.WithMetadata(sc.Metadata()))
+	gt.NoError(t, err).Required()
+
+	for {
+		proc, gerr := k.GetProcess(serveCtx, pid)
+		gt.NoError(t, gerr).Required()
+		if proc.Status.Terminal() {
+			// The failure is fed back, not fatal: the run reaches its answer.
+			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+			break
+		}
+		select {
+		case <-serveCtx.Done():
+			gt.NoError(t, serveCtx.Err()).Required()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-served
+
+	told, ok := reported.Load().(string)
+	gt.Bool(t, ok).True().Required()
+
+	// goerr's half: the message chain, which on its own says only that a request
+	// failed.
+	gt.String(t, told).Contains("jira tool run failed: failed to search jira issues: Jira API returned non-2xx")
+	// The half this middleware adds. The parser error names the character it
+	// stopped on, which is what lets the model repair the query rather than
+	// re-emit it, and the query it actually sent is beside it.
+	gt.String(t, told).Contains("The failure reported:")
+	gt.String(t, told).Contains("  body=" + jiraFailureBody)
+	gt.String(t, told).Contains("  status=400")
+	gt.String(t, told).Contains("  jql=" + sentJQL)
+	// The JSON body is rendered as itself. Encoding it would escape every quote
+	// in the document the model has to read.
+	gt.Bool(t, strings.Contains(told, `\"errorMessages\"`)).False()
+
+	// The run timeline records the SAME message the model was given. This is what
+	// pins the middleware order: registered outside the trace bracket instead of
+	// inside it, the timeline would keep the bare message chain and an operator
+	// reading the run could not tell a malformed query from an empty result.
+	events, err := repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-values"}, "run-values")
+	gt.NoError(t, err).Required()
+
+	var toolEvents []*model.JobRunEvent
+	for _, ev := range events {
+		if ev.Kind == model.JobRunEventKindToolCall {
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	gt.Array(t, toolEvents).Length(1).Required()
+	gt.Bool(t, toolEvents[0].ToolCall.IsError).True()
+	gt.String(t, toolEvents[0].ToolCall.ErrorMessage).Equal(told)
+}
+
+// TestToolErrorValuesLeavesEveryOtherOutcomeAlone pins what the middleware must
+// NOT touch: a success, a failure carrying nothing to report, an argument
+// rejection (whose missing half is toolArgsFeedbackMiddleware's to supply), and
+// the sentinels callers discriminate on — react's stepTool stops the run on
+// ErrLimitExceeded and would spend past a closed budget if the wrapper hid it.
+//
+// None of these is reachable through a Kernel, so the middleware is driven
+// directly here.
+func TestToolErrorValuesLeavesEveryOtherOutcomeAlone(t *testing.T) {
+	ctx := context.Background()
+	req := &agentkit.ToolCallRequest{
+		Call: gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{"items": "x"}},
+	}
+	handlerFor := func(out map[string]any, err error) agentkit.ToolCallHandler {
+		return kernel.ToolErrorValuesHandlerForTest(
+			func(context.Context, *agentkit.ToolCallRequest) (map[string]any, error) {
+				return out, err
+			})
+	}
+
+	t.Run("a successful call is passed through unchanged", func(t *testing.T) {
+		want := map[string]any{"pong": true}
+		out, err := handlerFor(want, nil)(ctx, req)
+		gt.NoError(t, err)
+		gt.Value(t, out).Equal(want)
+	})
+
+	t.Run("a failure carrying no values is passed through unchanged", func(t *testing.T) {
+		cause := goerr.New("the backend refused the write")
+		_, err := handlerFor(nil, cause)(ctx, req)
+		gt.Value(t, err).Equal(cause)
+	})
+
+	t.Run("an argument rejection is left to the argument-feedback middleware", func(t *testing.T) {
+		// agentkit attaches the tool name to a rejected call, so this error DOES
+		// carry a value — and it is the one thing gollem's own message already
+		// states. Rendering it would add a redundant line to the feedback the
+		// other middleware is about to write.
+		spec := probeTool{}.Spec()
+		cause := goerr.Wrap(spec.ValidateArgs(req.Call.Arguments), "validate tool args",
+			goerr.V("tool", req.Call.Name))
+		_, err := handlerFor(nil, cause)(ctx, req)
+		gt.Value(t, err).Equal(cause)
+	})
+
+	t.Run("a sentinel survives the wrapper", func(t *testing.T) {
+		cause := goerr.Wrap(agentkit.ErrLimitExceeded, "tool call refused",
+			goerr.V("tool", req.Call.Name))
+		_, err := handlerFor(nil, cause)(ctx, req)
+		gt.Error(t, err).Is(agentkit.ErrLimitExceeded)
+		gt.String(t, err.Error()).Contains("  tool=probe__ping")
+	})
+}
+
+// secretBearingValue is a struct attached to an error whose credential field
+// carries the project's redaction tag. It exists to pin that the tag is honoured
+// on this path too, not only in the logger.
+type secretBearingValue struct {
+	Endpoint string            `json:"endpoint"`
+	APIToken string            `json:"api_token" masq:"secret"`
+	Headers  map[string]string `json:"headers"`
+}
+
+// TestFailedToolValuesAreRenderedWithoutSecrets pins the wording of the reported
+// lines and, more importantly, what never appears in them. This line is sent to
+// the LLM provider and reproduced in the Slack thread, so a value that looks like
+// a credential is redacted even at the cost of a diagnostic.
+func TestFailedToolValuesAreRenderedWithoutSecrets(t *testing.T) {
+	testCases := map[string]struct {
+		values map[string]any
+		want   string
+	}{
+		"no values at all render nothing, so the message is left untouched": {
+			values: map[string]any{},
+			want:   "",
+		},
+		"keys are sorted so one failure always reads the same way": {
+			values: map[string]any{"status": 400, "body": "bad request", "attempt": 2},
+			want:   "  attempt=2\n  body=bad request\n  status=400",
+		},
+		"a single-line string is rendered as itself, everything else as JSON": {
+			values: map[string]any{
+				"jql":     `project = "X" AND text ~ "y"`,
+				"missing": nil,
+				"fields":  []any{"summary", "status"},
+				"page":    map[string]any{"size": 10},
+			},
+			want: "  fields=[\"summary\",\"status\"]\n" +
+				"  jql=project = \"X\" AND text ~ \"y\"\n" +
+				"  missing=null\n" +
+				`  page={"size":10}`,
+		},
+		"a string carrying a line break is encoded so it cannot forge a line": {
+			values: map[string]any{"body": "first\nsecond"},
+			want:   `  body="first\nsecond"`,
+		},
+		"a key that names a credential is redacted whatever its casing": {
+			values: map[string]any{
+				"apiToken":   "t-1234567890",
+				"API_KEY":    "k-1234567890",
+				"password":   "hunter2",
+				"credential": "c-1234567890",
+				"cookie":     "session=abc",
+				"url":        "https://example.atlassian.net/rest/api/3/search/jql",
+			},
+			want: "  API_KEY=[REDACTED]\n" +
+				"  apiToken=[REDACTED]\n" +
+				"  cookie=[REDACTED]\n" +
+				"  credential=[REDACTED]\n" +
+				"  password=[REDACTED]\n" +
+				"  url=https://example.atlassian.net/rest/api/3/search/jql",
+		},
+		"the project's redaction policy reaches inside a value": {
+			values: map[string]any{"request": secretBearingValue{
+				Endpoint: "https://example.com/v1",
+				APIToken: "t-1234567890",
+				Headers:  map[string]string{"Authorization": "Bearer b-1234567890", "Accept": "application/json"},
+			}},
+			want: `  request={"endpoint":"https://example.com/v1","api_token":"[REDACTED]",` +
+				`"headers":{"Accept":"application/json","Authorization":"[REDACTED]"}}`,
+		},
+		"one oversized value is cut without pushing the others out": {
+			values: map[string]any{"body": strings.Repeat("e", kernel.ErrorValueMaxLenForTest+50), "status": 500},
+			want: "  body=" + strings.Repeat("e", kernel.ErrorValueMaxLenForTest) + "...\n" +
+				"  status=500",
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			got := kernel.DescribeErrorValuesForTest(tc.values)
+			gt.String(t, got).Equal(tc.want)
+			gt.Bool(t, utf8.ValidString(got)).True()
+		})
+	}
+
+	t.Run("the whole rendering is cut on a rune boundary, not a byte offset", func(t *testing.T) {
+		values, want := longMultibyteErrorValues()
+		got := kernel.DescribeErrorValuesForTest(values)
+		gt.String(t, got).Equal(want)
+		gt.Bool(t, utf8.ValidString(got)).True()
+	})
+}
+
+// longMultibyteErrorValues builds values whose rendering overruns the total bound
+// with a multi-byte character straddling the cut, and returns what
+// describeErrorValues must produce for them: the untruncated rendering, cut back
+// to the last rune boundary at or before the bound, with the marker appended.
+//
+// A non-ASCII value is ordinary input here — a Jira parser error quotes the term
+// it stopped on, and this deployment's users search in Japanese — so cutting at a
+// byte offset would put a broken rune in front of the model, the run timeline and
+// Sentry alike.
+func longMultibyteErrorValues() (map[string]any, string) {
+	values := map[string]any{}
+	keys := make([]string, 0, 12)
+	for i := range 12 {
+		key := "body" + strconv.Itoa(i)
+		// One rune short of the per-value bound, so the cut this case is about is
+		// the TOTAL one rather than a per-value one.
+		values[key] = strings.Repeat("あ", (kernel.ErrorValueMaxLenForTest-1)/3)
+		keys = append(keys, key)
+	}
+	// Sorted by KEY, the way the renderer does it. Sorting the rendered lines
+	// instead orders body10 before body1, because '0' sorts below '='.
+	slices.Sort(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, "  "+key+"="+values[key].(string))
+	}
+	full := strings.Join(lines, "\n")
+
+	cut := kernel.ErrorValuesMaxLenForTest
+	for cut > 0 && !utf8.RuneStart(full[cut]) {
+		cut--
+	}
+	return values, full[:cut] + "..."
+}
+
 // spanKinds collects the span kinds recorded in a trace, at any depth.
 func spanKinds(t *trace.Trace) map[string]bool {
 	out := map[string]bool{}

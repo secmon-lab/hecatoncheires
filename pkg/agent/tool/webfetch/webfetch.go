@@ -171,8 +171,16 @@ func (c *Client) analyze(ctx context.Context, text string) (*analyzeResult, erro
 	raw := strings.TrimSpace(resp.Texts[0])
 	var result analyzeResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		// The screening model's own output is NOT attached, only its size. That
+		// output carries the fetched page back inside its markdown field, and a
+		// failed tool call's goerr values are now rendered into the function
+		// response the calling agent reads (pkg/agent/kernel,
+		// toolErrorValuesMiddleware). Attaching it would hand the outer model the
+		// very body this call exists to screen, on the one path where the screen
+		// reached no verdict — which is the path an injected page has the most
+		// reason to steer towards.
 		return nil, goerr.Wrap(err, "failed to parse LLM response as JSON for webfetch analyze",
-			goerr.V("raw", resp.Texts))
+			goerr.V("response_parts", len(resp.Texts)), goerr.V("response_bytes", len(raw)))
 	}
 
 	return &result, nil
