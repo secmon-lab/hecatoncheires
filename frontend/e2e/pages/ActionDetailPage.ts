@@ -189,9 +189,19 @@ export class ActionDetailPage extends BasePage {
     await expect(this.commentRowByBody(body)).toBeVisible({ timeout: 10000 });
   }
 
-  /** Rewrite an existing comment, located by its current body text. */
+  /**
+   * Rewrite an existing comment, located by its current body text.
+   *
+   * The row is re-located by its own test id before the edit starts: opening
+   * the editor replaces the rendered body with a textarea, so a locator that
+   * filters on the old body text stops matching the moment the new text is
+   * typed — and the save button inside it becomes unreachable.
+   */
   async editComment(currentBody: string, nextBody: string): Promise<void> {
-    const row = this.commentRowByBody(currentBody);
+    const testId = await this.commentRowByBody(currentBody).getAttribute('data-testid');
+    expect(testId).not.toBeNull();
+    const row = this.page.getByTestId(testId as string);
+
     await row.locator('[data-testid^="action-comment-edit-"]').click();
     const textarea = row.locator('textarea');
     await textarea.waitFor({ state: 'visible', timeout: 5000 });
@@ -213,9 +223,16 @@ export class ActionDetailPage extends BasePage {
     await this.page.getByTestId(`activity-tab-${tab}`).click();
   }
 
-  /** Whether the comment with the given body shows the "edited" marker. */
+  /**
+   * Whether the comment with the given body shows the "edited" marker. Matched
+   * exactly so a body that happens to contain the word does not read as edited
+   * (playwright.config.ts pins the browser locale to en-US, so the marker is
+   * the English string).
+   */
   async isCommentEdited(body: string): Promise<boolean> {
-    return await this.commentRowByBody(body).getByText('edited').isVisible();
+    return await this.commentRowByBody(body)
+      .getByText('edited', { exact: true })
+      .isVisible();
   }
 
   /**
