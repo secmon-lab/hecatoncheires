@@ -946,6 +946,33 @@ func (jiraFailureTool) Run(_ context.Context, args map[string]any) (map[string]a
 	return nil, goerr.Wrap(err2, "jira tool run failed", goerr.V("tool", "probe__ping"))
 }
 
+// failedToolResponse returns the error text of the first failed tool result the
+// conversation's LAST message carries, or "" when that message is not a tool
+// message or holds no failure. A tool failure reaches the model as a tool
+// response with IsError set and the message under the "error" key.
+func failedToolResponse(t *testing.T, messages []gollem.Message) string {
+	t.Helper()
+	if len(messages) == 0 {
+		return ""
+	}
+	last := messages[len(messages)-1]
+	if last.Role != gollem.RoleTool {
+		return ""
+	}
+	for _, c := range last.Contents {
+		resp, err := c.GetToolResponseContent()
+		gt.NoError(t, err).Required()
+		if !resp.IsError {
+			continue
+		}
+		if msg, ok := resp.Response["error"].(string); ok {
+			return msg
+		}
+		return fmt.Sprint(resp.Response["error"])
+	}
+	return ""
+}
+
 // TestAFailedToolCallTellsTheModelWhyItFailed drives a real Kernel through a tool
 // that fails the way the Jira search does, and pins that the reason reaches the
 // model rather than only the message chain.
@@ -968,12 +995,23 @@ func TestAFailedToolCallTellsTheModelWhyItFailed(t *testing.T) {
 		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
 	gt.NoError(t, err).Required()
 
+	// The failure is observed on the CONVERSATION the terminal call is seeded
+	// with, not on that call's inputs: agentkit answers a tool call by appending
+	// its result to the managed conversation and then sends no user turn (see
+	// .claude/rules/architecture.md § "a parallel tool-call turn is answered in
+	// ONE call"). Reading it off `inputs` would observe an always-empty slice
+	// and pass regardless of what the model was told.
 	var calls atomic.Int32
 	var reported atomic.Value
 	llm := &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			cfg := gollem.NewSessionConfig(opts...)
+			var seeded []gollem.Message
+			if h := cfg.History(); h != nil {
+				seeded = h.Messages
+			}
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, inputs []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					if calls.Add(1) == 1 {
 						return &gollem.Response{
 							FunctionCalls: []*gollem.FunctionCall{{
@@ -984,15 +1022,17 @@ func TestAFailedToolCallTellsTheModelWhyItFailed(t *testing.T) {
 							InputToken: 10, OutputToken: 5,
 						}, nil
 					}
-					for _, in := range inputs {
-						if res, ok := in.(gollem.FunctionResponse); ok && res.Error != nil {
-							reported.Store(res.Error.Error())
-						}
+					if failure := failedToolResponse(t, seeded); failure != "" {
+						reported.Store(failure)
 					}
 					return &gollem.Response{Texts: []string{"done"}, InputToken: 3, OutputToken: 2}, nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
-					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+					grown := make([]gollem.Message, len(seeded), len(seeded)+1)
+					copy(grown, seeded)
+					grown = append(grown, gollem.Message{Role: gollem.RoleAssistant})
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI,
+						Version: gollem.HistoryVersion, Messages: grown}, nil
 				},
 			}, nil
 		},
