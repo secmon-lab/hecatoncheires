@@ -31,6 +31,7 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
 	Action() ActionResolver
+	ActionComment() ActionCommentResolver
 	ActionEvent() ActionEventResolver
 	Case() CaseResolver
 	Memo() MemoResolver
@@ -49,6 +50,7 @@ type ComplexityRoot struct {
 		AssigneeID     func(childComplexity int) int
 		Case           func(childComplexity int) int
 		CaseID         func(childComplexity int) int
+		Comments       func(childComplexity int, limit *int, cursor *string) int
 		CreatedAt      func(childComplexity int) int
 		Description    func(childComplexity int) int
 		DueDate        func(childComplexity int) int
@@ -62,6 +64,22 @@ type ComplexityRoot struct {
 		Title          func(childComplexity int) int
 		UpdatedAt      func(childComplexity int) int
 		WorkspaceID    func(childComplexity int) int
+	}
+
+	ActionComment struct {
+		ActionID  func(childComplexity int) int
+		Author    func(childComplexity int) int
+		AuthorID  func(childComplexity int) int
+		Body      func(childComplexity int) int
+		CreatedAt func(childComplexity int) int
+		Edited    func(childComplexity int) int
+		ID        func(childComplexity int) int
+		UpdatedAt func(childComplexity int) int
+	}
+
+	ActionCommentConnection struct {
+		Items      func(childComplexity int) int
+		NextCursor func(childComplexity int) int
 	}
 
 	ActionConfig struct {
@@ -396,6 +414,7 @@ type ComplexityRoot struct {
 		BulkArchiveActions      func(childComplexity int, workspaceID string, ids []int) int
 		CloseCase               func(childComplexity int, workspaceID string, id int) int
 		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
+		CreateActionComment     func(childComplexity int, workspaceID string, input graphql1.CreateActionCommentInput) int
 		CreateCase              func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
 		CreateCaseImport        func(childComplexity int, workspaceID string, input graphql1.CreateCaseImportInput) int
 		CreateDraft             func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
@@ -406,6 +425,7 @@ type ComplexityRoot struct {
 		CreateNotionPageSource  func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
 		CreateSlackSource       func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
 		CreateTag               func(childComplexity int, workspaceID string, name *string) int
+		DeleteActionComment     func(childComplexity int, workspaceID string, input graphql1.DeleteActionCommentInput) int
 		DeleteActionStep        func(childComplexity int, workspaceID string, input graphql1.DeleteActionStepInput) int
 		DeleteCase              func(childComplexity int, workspaceID string, id int) int
 		DeleteKnowledge         func(childComplexity int, workspaceID string, id string) int
@@ -426,6 +446,7 @@ type ComplexityRoot struct {
 		UnarchiveMemo           func(childComplexity int, workspaceID string, caseID int, id string) int
 		UnassignCase            func(childComplexity int, workspaceID string, id int, userIDs []string) int
 		UpdateAction            func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
+		UpdateActionComment     func(childComplexity int, workspaceID string, input graphql1.UpdateActionCommentInput) int
 		UpdateCase              func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateCaseAgentSettings func(childComplexity int, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) int
 		UpdateCaseStatus        func(childComplexity int, workspaceID string, input graphql1.UpdateCaseStatusInput) int
@@ -617,8 +638,12 @@ type ActionResolver interface {
 
 	Messages(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 	Events(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.ActionEventConnection, error)
+	Comments(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.ActionCommentConnection, error)
 	Steps(ctx context.Context, obj *graphql1.Action) ([]*graphql1.ActionStep, error)
 	StepProgress(ctx context.Context, obj *graphql1.Action) (*graphql1.ActionStepProgress, error)
+}
+type ActionCommentResolver interface {
+	Author(ctx context.Context, obj *graphql1.ActionComment) (*graphql1.SlackUser, error)
 }
 type ActionEventResolver interface {
 	Actor(ctx context.Context, obj *graphql1.ActionEvent) (*graphql1.SlackUser, error)
@@ -669,6 +694,9 @@ type MutationResolver interface {
 	SetActionStepDone(ctx context.Context, workspaceID string, input graphql1.SetActionStepDoneInput) (*graphql1.ActionStep, error)
 	RenameActionStep(ctx context.Context, workspaceID string, input graphql1.RenameActionStepInput) (*graphql1.ActionStep, error)
 	DeleteActionStep(ctx context.Context, workspaceID string, input graphql1.DeleteActionStepInput) (bool, error)
+	CreateActionComment(ctx context.Context, workspaceID string, input graphql1.CreateActionCommentInput) (*graphql1.ActionComment, error)
+	UpdateActionComment(ctx context.Context, workspaceID string, input graphql1.UpdateActionCommentInput) (*graphql1.ActionComment, error)
+	DeleteActionComment(ctx context.Context, workspaceID string, input graphql1.DeleteActionCommentInput) (bool, error)
 	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
 	CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error)
 	CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
@@ -793,6 +821,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Action.CaseID(childComplexity), true
+	case "Action.comments":
+		if e.ComplexityRoot.Action.Comments == nil {
+			break
+		}
+
+		args, err := ec.field_Action_comments_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Action.Comments(childComplexity, args["limit"].(*int), args["cursor"].(*string)), true
 	case "Action.createdAt":
 		if e.ComplexityRoot.Action.CreatedAt == nil {
 			break
@@ -881,6 +920,68 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Action.WorkspaceID(childComplexity), true
+
+	case "ActionComment.actionID":
+		if e.ComplexityRoot.ActionComment.ActionID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.ActionID(childComplexity), true
+	case "ActionComment.author":
+		if e.ComplexityRoot.ActionComment.Author == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.Author(childComplexity), true
+	case "ActionComment.authorID":
+		if e.ComplexityRoot.ActionComment.AuthorID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.AuthorID(childComplexity), true
+	case "ActionComment.body":
+		if e.ComplexityRoot.ActionComment.Body == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.Body(childComplexity), true
+	case "ActionComment.createdAt":
+		if e.ComplexityRoot.ActionComment.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.CreatedAt(childComplexity), true
+	case "ActionComment.edited":
+		if e.ComplexityRoot.ActionComment.Edited == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.Edited(childComplexity), true
+	case "ActionComment.id":
+		if e.ComplexityRoot.ActionComment.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.ID(childComplexity), true
+	case "ActionComment.updatedAt":
+		if e.ComplexityRoot.ActionComment.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionComment.UpdatedAt(childComplexity), true
+
+	case "ActionCommentConnection.items":
+		if e.ComplexityRoot.ActionCommentConnection.Items == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionCommentConnection.Items(childComplexity), true
+	case "ActionCommentConnection.nextCursor":
+		if e.ComplexityRoot.ActionCommentConnection.NextCursor == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ActionCommentConnection.NextCursor(childComplexity), true
 
 	case "ActionConfig.closed":
 		if e.ComplexityRoot.ActionConfig.Closed == nil {
@@ -2272,6 +2373,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.CreateAction(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateActionInput)), true
+	case "Mutation.createActionComment":
+		if e.ComplexityRoot.Mutation.CreateActionComment == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createActionComment_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.CreateActionComment(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateActionCommentInput)), true
 	case "Mutation.createCase":
 		if e.ComplexityRoot.Mutation.CreateCase == nil {
 			break
@@ -2382,6 +2494,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.CreateTag(childComplexity, args["workspaceId"].(string), args["name"].(*string)), true
+	case "Mutation.deleteActionComment":
+		if e.ComplexityRoot.Mutation.DeleteActionComment == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteActionComment_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.DeleteActionComment(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.DeleteActionCommentInput)), true
 	case "Mutation.deleteActionStep":
 		if e.ComplexityRoot.Mutation.DeleteActionStep == nil {
 			break
@@ -2597,6 +2720,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.UpdateAction(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateActionInput)), true
+	case "Mutation.updateActionComment":
+		if e.ComplexityRoot.Mutation.UpdateActionComment == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateActionComment_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.UpdateActionComment(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateActionCommentInput)), true
 	case "Mutation.updateCase":
 		if e.ComplexityRoot.Mutation.UpdateCase == nil {
 			break
@@ -3584,6 +3718,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputAddActionStepInput,
+		ec.unmarshalInputCreateActionCommentInput,
 		ec.unmarshalInputCreateActionInput,
 		ec.unmarshalInputCreateCaseImportInput,
 		ec.unmarshalInputCreateCaseInput,
@@ -3594,11 +3729,13 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputCreateNotionDBSourceInput,
 		ec.unmarshalInputCreateNotionPageSourceInput,
 		ec.unmarshalInputCreateSlackSourceInput,
+		ec.unmarshalInputDeleteActionCommentInput,
 		ec.unmarshalInputDeleteActionStepInput,
 		ec.unmarshalInputFieldValueInput,
 		ec.unmarshalInputRenameActionStepInput,
 		ec.unmarshalInputSetActionStepDoneInput,
 		ec.unmarshalInputSubmitDraftInput,
+		ec.unmarshalInputUpdateActionCommentInput,
 		ec.unmarshalInputUpdateActionInput,
 		ec.unmarshalInputUpdateCaseAgentSettingsInput,
 		ec.unmarshalInputUpdateCaseInput,
@@ -3966,6 +4103,10 @@ type Action {
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
   events(limit: Int, cursor: String): ActionEventConnection!
+  # Web-UI-authored comments on this Action, newest first. Separate from
+  # ` + "`" + `messages` + "`" + `, which are Slack thread replies ingested from the Action's
+  # Slack thread.
+  comments(limit: Int, cursor: String): ActionCommentConnection!
   # ActionStep listing under this Action, ordered by createdAt asc.
   steps: [ActionStep!]!
   # Aggregate progress over the Action's steps. Both fields are 0 when the
@@ -4129,6 +4270,28 @@ type ActionEventConnection {
   nextCursor: String!
 }
 
+# ActionComment is a comment written on an Action from the Web UI. It is never
+# reproduced as a Slack message; creating one only announces it in the Action's
+# Slack thread with a deep link and a short excerpt.
+type ActionComment {
+  id: String!
+  actionID: Int!
+  authorID: String!
+  author: SlackUser
+  # body is Markdown source. Clients render it through the shared Markdown
+  # renderer, which does not enable raw HTML.
+  body: String!
+  createdAt: Time!
+  updatedAt: Time!
+  # edited mirrors updatedAt > createdAt.
+  edited: Boolean!
+}
+
+type ActionCommentConnection {
+  items: [ActionComment!]!
+  nextCursor: String!
+}
+
 # Inputs
 input CreateCaseInput {
   title: String!
@@ -4235,6 +4398,22 @@ input RenameActionStepInput {
 input DeleteActionStepInput {
   actionId: Int!
   stepId: String!
+}
+
+input CreateActionCommentInput {
+  actionId: Int!
+  body: String!
+}
+
+input UpdateActionCommentInput {
+  actionId: Int!
+  commentId: String!
+  body: String!
+}
+
+input DeleteActionCommentInput {
+  actionId: Int!
+  commentId: String!
 }
 
 # Slack User
@@ -4593,6 +4772,13 @@ type Mutation {
   setActionStepDone(workspaceId: String!, input: SetActionStepDoneInput!): ActionStep!
   renameActionStep(workspaceId: String!, input: RenameActionStepInput!): ActionStep!
   deleteActionStep(workspaceId: String!, input: DeleteActionStepInput!): Boolean!
+
+  # Action Comments — Web-UI-authored comments on an Action. Creating one posts
+  # a link-and-excerpt notification into the Action's Slack thread; editing and
+  # deleting are silent. Only the author may edit or delete their own comment.
+  createActionComment(workspaceId: String!, input: CreateActionCommentInput!): ActionComment!
+  updateActionComment(workspaceId: String!, input: UpdateActionCommentInput!): ActionComment!
+  deleteActionComment(workspaceId: String!, input: DeleteActionCommentInput!): Boolean!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
@@ -4964,12 +5150,46 @@ func (ec *executionContext) childFields_Action(ctx context.Context, field graphq
 		return ec.fieldContext_Action_messages(ctx, field)
 	case "events":
 		return ec.fieldContext_Action_events(ctx, field)
+	case "comments":
+		return ec.fieldContext_Action_comments(ctx, field)
 	case "steps":
 		return ec.fieldContext_Action_steps(ctx, field)
 	case "stepProgress":
 		return ec.fieldContext_Action_stepProgress(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
+}
+
+func (ec *executionContext) childFields_ActionComment(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_ActionComment_id(ctx, field)
+	case "actionID":
+		return ec.fieldContext_ActionComment_actionID(ctx, field)
+	case "authorID":
+		return ec.fieldContext_ActionComment_authorID(ctx, field)
+	case "author":
+		return ec.fieldContext_ActionComment_author(ctx, field)
+	case "body":
+		return ec.fieldContext_ActionComment_body(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_ActionComment_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_ActionComment_updatedAt(ctx, field)
+	case "edited":
+		return ec.fieldContext_ActionComment_edited(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ActionComment", field.Name)
+}
+
+func (ec *executionContext) childFields_ActionCommentConnection(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "items":
+		return ec.fieldContext_ActionCommentConnection_items(ctx, field)
+	case "nextCursor":
+		return ec.fieldContext_ActionCommentConnection_nextCursor(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ActionCommentConnection", field.Name)
 }
 
 func (ec *executionContext) childFields_ActionConfig(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -5936,6 +6156,28 @@ func (ec *executionContext) childFields___Type(ctx context.Context, field graphq
 
 // region    ***************************** args.gotpl *****************************
 
+func (ec *executionContext) field_Action_comments_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "cursor",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["cursor"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Action_events_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6194,6 +6436,28 @@ func (ec *executionContext) field_Mutation_closeCase_args(ctx context.Context, r
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_createActionComment_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (graphql1.CreateActionCommentInput, error) {
+			return ec.unmarshalNCreateActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionCommentInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_createAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6433,6 +6697,28 @@ func (ec *executionContext) field_Mutation_createTag_args(ctx context.Context, r
 		return nil, err
 	}
 	args["name"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_deleteActionComment_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (graphql1.DeleteActionCommentInput, error) {
+			return ec.unmarshalNDeleteActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐDeleteActionCommentInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
@@ -6853,6 +7139,28 @@ func (ec *executionContext) field_Mutation_unassignCase_args(ctx context.Context
 		return nil, err
 	}
 	args["userIDs"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateActionComment_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (graphql1.UpdateActionCommentInput, error) {
+			return ec.unmarshalNUpdateActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionCommentInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
@@ -8403,6 +8711,50 @@ func (ec *executionContext) fieldContext_Action_events(ctx context.Context, fiel
 	return fc, nil
 }
 
+func (ec *executionContext) _Action_comments(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Action_comments(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Action().Comments(ctx, obj, fc.Args["limit"].(*int), fc.Args["cursor"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.ActionCommentConnection) graphql.Marshaler {
+			return ec.marshalNActionCommentConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionCommentConnection(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Action_comments(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Action",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ActionCommentConnection(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Action_comments_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Action_steps(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -8465,6 +8817,254 @@ func (ec *executionContext) fieldContext_Action_stepProgress(_ context.Context, 
 		},
 	}
 	return fc, nil
+}
+
+func (ec *executionContext) _ActionComment_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_actionID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_actionID(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ActionID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_actionID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_authorID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_authorID(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AuthorID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_authorID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_author(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_author(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.ActionComment().Author(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.SlackUser) graphql.Marshaler {
+			return ec.marshalOSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_author(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionComment",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_SlackUser(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionComment_body(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_body(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Body, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_body(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_updatedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _ActionComment_edited(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionComment) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionComment_edited(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Edited, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionComment_edited(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionComment", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _ActionCommentConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionCommentConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionCommentConnection_items(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*graphql1.ActionComment) graphql.Marshaler {
+			return ec.marshalNActionComment2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionCommentᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionCommentConnection_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionCommentConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ActionComment(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionCommentConnection_nextCursor(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionCommentConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ActionCommentConnection_nextCursor(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.NextCursor, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ActionCommentConnection_nextCursor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ActionCommentConnection", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _ActionConfig_initial(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionConfig) (ret graphql.Marshaler) {
@@ -14693,6 +15293,138 @@ func (ec *executionContext) fieldContext_Mutation_deleteActionStep(ctx context.C
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createActionComment(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_createActionComment(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().CreateActionComment(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateActionCommentInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.ActionComment) graphql.Marshaler {
+			return ec.marshalNActionComment2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionComment(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_createActionComment(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ActionComment(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createActionComment_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateActionComment(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_updateActionComment(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().UpdateActionComment(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateActionCommentInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.ActionComment) graphql.Marshaler {
+			return ec.marshalNActionComment2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionComment(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_updateActionComment(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ActionComment(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateActionComment_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteActionComment(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_deleteActionComment(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().DeleteActionComment(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.DeleteActionCommentInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_deleteActionComment(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteActionComment_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_createNotionDBSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -20342,6 +21074,43 @@ func (ec *executionContext) unmarshalInputAddActionStepInput(ctx context.Context
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateActionCommentInput(ctx context.Context, obj any) (graphql1.CreateActionCommentInput, error) {
+	var it graphql1.CreateActionCommentInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"actionId", "body"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "actionId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("actionId"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ActionID = data
+		case "body":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("body"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Body = data
+		}
+	}
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context, obj any) (graphql1.CreateActionInput, error) {
 	var it graphql1.CreateActionInput
 	if obj == nil {
@@ -20887,6 +21656,43 @@ func (ec *executionContext) unmarshalInputCreateSlackSourceInput(ctx context.Con
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputDeleteActionCommentInput(ctx context.Context, obj any) (graphql1.DeleteActionCommentInput, error) {
+	var it graphql1.DeleteActionCommentInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"actionId", "commentId"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "actionId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("actionId"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ActionID = data
+		case "commentId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("commentId"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CommentID = data
+		}
+	}
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputDeleteActionStepInput(ctx context.Context, obj any) (graphql1.DeleteActionStepInput, error) {
 	var it graphql1.DeleteActionStepInput
 	if obj == nil {
@@ -21095,6 +21901,50 @@ func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, 
 				return it, err
 			}
 			it.IsTest = data
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateActionCommentInput(ctx context.Context, obj any) (graphql1.UpdateActionCommentInput, error) {
+	var it graphql1.UpdateActionCommentInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"actionId", "commentId", "body"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "actionId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("actionId"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ActionID = data
+		case "commentId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("commentId"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CommentID = data
+		case "body":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("body"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Body = data
 		}
 	}
 	return it, nil
@@ -22009,6 +22859,44 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "comments":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Action_comments(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "steps":
 			field := field
 
@@ -22085,6 +22973,155 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var actionCommentImplementors = []string{"ActionComment"}
+
+func (ec *executionContext) _ActionComment(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ActionComment) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, actionCommentImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ActionComment")
+		case "id":
+			out.Values[i] = ec._ActionComment_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "actionID":
+			out.Values[i] = ec._ActionComment_actionID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "authorID":
+			out.Values[i] = ec._ActionComment_authorID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "author":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ActionComment_author(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "body":
+			out.Values[i] = ec._ActionComment_body(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "createdAt":
+			out.Values[i] = ec._ActionComment_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "updatedAt":
+			out.Values[i] = ec._ActionComment_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "edited":
+			out.Values[i] = ec._ActionComment_edited(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var actionCommentConnectionImplementors = []string{"ActionCommentConnection"}
+
+func (ec *executionContext) _ActionCommentConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ActionCommentConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, actionCommentConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ActionCommentConnection")
+		case "items":
+			out.Values[i] = ec._ActionCommentConnection_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "nextCursor":
+			out.Values[i] = ec._ActionCommentConnection_nextCursor(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -25020,6 +26057,27 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createActionComment":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createActionComment(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateActionComment":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateActionComment(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deleteActionComment":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteActionComment(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "createNotionDBSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_createNotionDBSource(ctx, field)
@@ -27481,6 +28539,50 @@ func (ec *executionContext) marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋheca
 	return ec._Action(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNActionComment2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionComment(ctx context.Context, sel ast.SelectionSet, v graphql1.ActionComment) graphql.Marshaler {
+	return ec._ActionComment(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNActionComment2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionCommentᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ActionComment) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNActionComment2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionComment(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNActionComment2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionComment(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionComment) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ActionComment(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNActionCommentConnection2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionCommentConnection(ctx context.Context, sel ast.SelectionSet, v graphql1.ActionCommentConnection) graphql.Marshaler {
+	return ec._ActionCommentConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNActionCommentConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionCommentConnection(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionCommentConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ActionCommentConnection(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNActionConfig2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionConfig(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionConfig) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
@@ -27847,6 +28949,11 @@ func (ec *executionContext) marshalNChannelUserConnection2ᚖgithubᚗcomᚋsecm
 	return ec._ChannelUserConnection(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNCreateActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionCommentInput(ctx context.Context, v any) (graphql1.CreateActionCommentInput, error) {
+	res, err := ec.unmarshalInputCreateActionCommentInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput(ctx context.Context, v any) (graphql1.CreateActionInput, error) {
 	res, err := ec.unmarshalInputCreateActionInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -27894,6 +29001,11 @@ func (ec *executionContext) unmarshalNCreateNotionPageSourceInput2githubᚗcom�
 
 func (ec *executionContext) unmarshalNCreateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateSlackSourceInput(ctx context.Context, v any) (graphql1.CreateSlackSourceInput, error) {
 	res, err := ec.unmarshalInputCreateSlackSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNDeleteActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐDeleteActionCommentInput(ctx context.Context, v any) (graphql1.DeleteActionCommentInput, error) {
+	res, err := ec.unmarshalInputDeleteActionCommentInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -28908,6 +30020,11 @@ func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel as
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNUpdateActionCommentInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionCommentInput(ctx context.Context, v any) (graphql1.UpdateActionCommentInput, error) {
+	res, err := ec.unmarshalInputUpdateActionCommentInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalNUpdateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionInput(ctx context.Context, v any) (graphql1.UpdateActionInput, error) {

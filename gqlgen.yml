@@ -77,9 +77,15 @@ models:
         resolver: true
       events:
         resolver: true
+      comments:
+        resolver: true
   ActionEvent:
     fields:
       actor:
+        resolver: true
+  ActionComment:
+    fields:
+      author:
         resolver: true
   Memo:
     model:

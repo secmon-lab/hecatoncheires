@@ -16,6 +16,22 @@ type SourceConfig interface {
 	IsSourceConfig()
 }
 
+type ActionComment struct {
+	ID        string     `json:"id"`
+	ActionID  int        `json:"actionID"`
+	AuthorID  string     `json:"authorID"`
+	Author    *SlackUser `json:"author,omitempty"`
+	Body      string     `json:"body"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Edited    bool       `json:"edited"`
+}
+
+type ActionCommentConnection struct {
+	Items      []*ActionComment `json:"items"`
+	NextCursor string           `json:"nextCursor"`
+}
+
 type ActionConfig struct {
 	Initial  string                    `json:"initial"`
 	Closed   []string                  `json:"closed"`
@@ -111,6 +127,11 @@ type ChannelUserConnection struct {
 	HasMore    bool         `json:"hasMore"`
 }
 
+type CreateActionCommentInput struct {
+	ActionID int    `json:"actionId"`
+	Body     string `json:"body"`
+}
+
 type CreateActionInput struct {
 	CaseID         int        `json:"caseID"`
 	Title          string     `json:"title"`
@@ -186,6 +207,11 @@ type CreateSlackSourceInput struct {
 	Description *string  `json:"description,omitempty"`
 	ChannelIDs  []string `json:"channelIDs"`
 	Enabled     *bool    `json:"enabled,omitempty"`
+}
+
+type DeleteActionCommentInput struct {
+	ActionID  int    `json:"actionId"`
+	CommentID string `json:"commentId"`
 }
 
 type DeleteActionStepInput struct {
@@ -536,6 +562,12 @@ type Tag struct {
 	Name      *string   `json:"name,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type UpdateActionCommentInput struct {
+	ActionID  int    `json:"actionId"`
+	CommentID string `json:"commentId"`
+	Body      string `json:"body"`
 }
 
 type UpdateActionInput struct {

@@ -64,6 +64,22 @@ func toGraphQLActionEvent(e *model.ActionEvent) *graphql1.ActionEvent {
 	}
 }
 
+// toGraphQLActionComment converts a domain ActionComment to its GraphQL view.
+// The Author sub-field is left nil here; the resolver fills it via the
+// SlackUser dataloader to share the per-request batching layer, the same way
+// toGraphQLActionEvent leaves Actor nil.
+func toGraphQLActionComment(c *model.ActionComment) *graphql1.ActionComment {
+	return &graphql1.ActionComment{
+		ID:        c.ID,
+		ActionID:  int(c.ActionID),
+		AuthorID:  c.AuthorID,
+		Body:      c.Body,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+		Edited:    c.IsEdited(),
+	}
+}
+
 // toGraphQLActionStep converts a domain ActionStep to its GraphQL view.
 // Done is derived from DoneAt to keep the WebUI's archived/archivedAt
 // pattern uniform across the schema (single source of truth on the model

@@ -2,6 +2,7 @@ package graphql_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
 	graphqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
@@ -43,4 +44,43 @@ func TestToGraphQLFieldType_Markdown(t *testing.T) {
 		Equal(graphql1.FieldTypeMarkdown)
 	gt.Value(t, graphqlctrl.ToGraphQLFieldTypeForTest(types.FieldTypeText)).
 		Equal(graphql1.FieldTypeText)
+}
+
+// TestToGraphQLActionComment pins the ActionComment mapping: every stored field
+// reaches the wire, `edited` is derived from the timestamps rather than carried
+// separately, and `author` is deliberately left nil for the dataloader-backed
+// sub-resolver to fill.
+func TestToGraphQLActionComment(t *testing.T) {
+	created := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+
+	t.Run("an unedited comment maps every field and reports edited=false", func(t *testing.T) {
+		g := graphqlctrl.ToGraphQLActionCommentForTest(&model.ActionComment{
+			ID:        "c-1",
+			ActionID:  42,
+			AuthorID:  "U123ABC",
+			Body:      "the alert matched a maintenance window",
+			CreatedAt: created,
+			UpdatedAt: created,
+		})
+		gt.Value(t, g.ID).Equal("c-1")
+		gt.Value(t, g.ActionID).Equal(42)
+		gt.Value(t, g.AuthorID).Equal("U123ABC")
+		gt.Value(t, g.Body).Equal("the alert matched a maintenance window")
+		gt.Value(t, g.CreatedAt).Equal(created)
+		gt.Value(t, g.UpdatedAt).Equal(created)
+		gt.Bool(t, g.Edited).False()
+		gt.Value(t, g.Author).Nil()
+	})
+
+	t.Run("a later UpdatedAt reports edited=true", func(t *testing.T) {
+		g := graphqlctrl.ToGraphQLActionCommentForTest(&model.ActionComment{
+			ID:        "c-2",
+			ActionID:  42,
+			AuthorID:  "U123ABC",
+			Body:      "revised",
+			CreatedAt: created,
+			UpdatedAt: created.Add(time.Minute),
+		})
+		gt.Bool(t, g.Edited).True()
+	})
 }

@@ -239,6 +239,10 @@ type Action {
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
   events(limit: Int, cursor: String): ActionEventConnection!
+  # Web-UI-authored comments on this Action, newest first. Separate from
+  # `messages`, which are Slack thread replies ingested from the Action's
+  # Slack thread.
+  comments(limit: Int, cursor: String): ActionCommentConnection!
   # ActionStep listing under this Action, ordered by createdAt asc.
   steps: [ActionStep!]!
   # Aggregate progress over the Action's steps. Both fields are 0 when the
@@ -402,6 +406,28 @@ type ActionEventConnection {
   nextCursor: String!
 }
 
+# ActionComment is a comment written on an Action from the Web UI. It is never
+# reproduced as a Slack message; creating one only announces it in the Action's
+# Slack thread with a deep link and a short excerpt.
+type ActionComment {
+  id: String!
+  actionID: Int!
+  authorID: String!
+  author: SlackUser
+  # body is Markdown source. Clients render it through the shared Markdown
+  # renderer, which does not enable raw HTML.
+  body: String!
+  createdAt: Time!
+  updatedAt: Time!
+  # edited mirrors updatedAt > createdAt.
+  edited: Boolean!
+}
+
+type ActionCommentConnection {
+  items: [ActionComment!]!
+  nextCursor: String!
+}
+
 # Inputs
 input CreateCaseInput {
   title: String!
@@ -508,6 +534,22 @@ input RenameActionStepInput {
 input DeleteActionStepInput {
   actionId: Int!
   stepId: String!
+}
+
+input CreateActionCommentInput {
+  actionId: Int!
+  body: String!
+}
+
+input UpdateActionCommentInput {
+  actionId: Int!
+  commentId: String!
+  body: String!
+}
+
+input DeleteActionCommentInput {
+  actionId: Int!
+  commentId: String!
 }
 
 # Slack User
@@ -866,6 +908,13 @@ type Mutation {
   setActionStepDone(workspaceId: String!, input: SetActionStepDoneInput!): ActionStep!
   renameActionStep(workspaceId: String!, input: RenameActionStepInput!): ActionStep!
   deleteActionStep(workspaceId: String!, input: DeleteActionStepInput!): Boolean!
+
+  # Action Comments — Web-UI-authored comments on an Action. Creating one posts
+  # a link-and-excerpt notification into the Action's Slack thread; editing and
+  # deleting are silent. Only the author may edit or delete their own comment.
+  createActionComment(workspaceId: String!, input: CreateActionCommentInput!): ActionComment!
+  updateActionComment(workspaceId: String!, input: UpdateActionCommentInput!): ActionComment!
+  deleteActionComment(workspaceId: String!, input: DeleteActionCommentInput!): Boolean!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!

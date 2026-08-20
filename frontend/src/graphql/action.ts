@@ -171,3 +171,56 @@ export const GET_ACTIONS_BY_CASE = gql`
     }
   }
 `
+
+const ACTION_COMMENT_FIELDS = `
+  id
+  actionID
+  authorID
+  body
+  createdAt
+  updatedAt
+  edited
+  author {
+    id
+    name
+    realName
+    imageUrl
+  }
+`
+
+export const GET_ACTION_COMMENTS = gql`
+  query GetActionComments($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
+    action(workspaceId: $workspaceId, id: $id) {
+      id
+      workspaceId
+      comments(limit: $limit, cursor: $cursor) {
+        items {
+          ${ACTION_COMMENT_FIELDS}
+        }
+        nextCursor
+      }
+    }
+  }
+`
+
+export const CREATE_ACTION_COMMENT = gql`
+  mutation CreateActionComment($workspaceId: String!, $input: CreateActionCommentInput!) {
+    createActionComment(workspaceId: $workspaceId, input: $input) {
+      ${ACTION_COMMENT_FIELDS}
+    }
+  }
+`
+
+export const UPDATE_ACTION_COMMENT = gql`
+  mutation UpdateActionComment($workspaceId: String!, $input: UpdateActionCommentInput!) {
+    updateActionComment(workspaceId: $workspaceId, input: $input) {
+      ${ACTION_COMMENT_FIELDS}
+    }
+  }
+`
+
+export const DELETE_ACTION_COMMENT = gql`
+  mutation DeleteActionComment($workspaceId: String!, $input: DeleteActionCommentInput!) {
+    deleteActionComment(workspaceId: $workspaceId, input: $input)
+  }
+`

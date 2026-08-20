@@ -36,3 +36,11 @@ func shouldBroadcastActionEvent(kind types.ActionEventKind) bool {
 func shouldBroadcastAnyActionEvent(kinds ...types.ActionEventKind) bool {
 	return slices.ContainsFunc(kinds, shouldBroadcastActionEvent)
 }
+
+// actionCommentBroadcasts records that an Action comment notification is
+// broadcast to the parent Case channel — the same channel-level attention a
+// status / assignee change gets. It lives beside broadcastableActionEvents so
+// every channel-visibility decision for Action notifications is readable in
+// one file; a comment is a first-class model.ActionComment, not an
+// ActionEventKind, so it cannot be expressed as an entry in that map.
+const actionCommentBroadcasts = true

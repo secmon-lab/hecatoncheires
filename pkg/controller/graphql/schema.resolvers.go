@@ -130,6 +130,46 @@ func (r *actionResolver) Events(ctx context.Context, obj *graphql1.Action, limit
 	}, nil
 }
 
+// Comments is the resolver for the comments field.
+func (r *actionResolver) Comments(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.ActionCommentConnection, error) {
+	empty := &graphql1.ActionCommentConnection{
+		Items:      []*graphql1.ActionComment{},
+		NextCursor: "",
+	}
+
+	loaders := GetDataLoaders(ctx)
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
+	if err != nil {
+		return nil, err
+	}
+	if c == nil || c.AccessDenied {
+		return empty, nil
+	}
+
+	limitVal := 20
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	comments, nextCursor, err := r.UseCases.ActionComment.List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action comments")
+	}
+
+	items := make([]*graphql1.ActionComment, len(comments))
+	for i, c := range comments {
+		items[i] = toGraphQLActionComment(c)
+	}
+	return &graphql1.ActionCommentConnection{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
+}
+
 // Steps is the resolver for the steps field.
 func (r *actionResolver) Steps(ctx context.Context, obj *graphql1.Action) ([]*graphql1.ActionStep, error) {
 	empty := []*graphql1.ActionStep{}
@@ -172,6 +212,19 @@ func (r *actionResolver) StepProgress(ctx context.Context, obj *graphql1.Action)
 		return nil, goerr.Wrap(err, "failed to compute action step progress")
 	}
 	return &graphql1.ActionStepProgress{Done: done, Total: total}, nil
+}
+
+// Author is the resolver for the author field.
+func (r *actionCommentResolver) Author(ctx context.Context, obj *graphql1.ActionComment) (*graphql1.SlackUser, error) {
+	if obj.AuthorID == "" {
+		return nil, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	user, err := loaders.SlackUser.Load(ctx, obj.AuthorID)()
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // Actor is the resolver for the actor field.
@@ -846,6 +899,45 @@ func (r *mutationResolver) DeleteActionStep(ctx context.Context, workspaceID str
 		ActionID:    int64(input.ActionID),
 		StepID:      input.StepID,
 		Actor:       resolveStepActor(ctx),
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CreateActionComment is the resolver for the createActionComment field.
+func (r *mutationResolver) CreateActionComment(ctx context.Context, workspaceID string, input graphql1.CreateActionCommentInput) (*graphql1.ActionComment, error) {
+	comment, err := r.UseCases.ActionComment.Create(ctx, usecase.CreateActionCommentInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		Body:        input.Body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLActionComment(comment), nil
+}
+
+// UpdateActionComment is the resolver for the updateActionComment field.
+func (r *mutationResolver) UpdateActionComment(ctx context.Context, workspaceID string, input graphql1.UpdateActionCommentInput) (*graphql1.ActionComment, error) {
+	comment, err := r.UseCases.ActionComment.Update(ctx, usecase.UpdateActionCommentInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		CommentID:   input.CommentID,
+		Body:        input.Body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLActionComment(comment), nil
+}
+
+// DeleteActionComment is the resolver for the deleteActionComment field.
+func (r *mutationResolver) DeleteActionComment(ctx context.Context, workspaceID string, input graphql1.DeleteActionCommentInput) (bool, error) {
+	if err := r.UseCases.ActionComment.Delete(ctx, usecase.DeleteActionCommentInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		CommentID:   input.CommentID,
 	}); err != nil {
 		return false, err
 	}
@@ -1832,6 +1924,9 @@ func (r *queryResolver) Tag(ctx context.Context, workspaceID string, id string) 
 // Action returns ActionResolver implementation.
 func (r *Resolver) Action() ActionResolver { return &actionResolver{r} }
 
+// ActionComment returns ActionCommentResolver implementation.
+func (r *Resolver) ActionComment() ActionCommentResolver { return &actionCommentResolver{r} }
+
 // ActionEvent returns ActionEventResolver implementation.
 func (r *Resolver) ActionEvent() ActionEventResolver { return &actionEventResolver{r} }
 
@@ -1848,10 +1943,11 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type (
-	actionResolver      struct{ *Resolver }
-	actionEventResolver struct{ *Resolver }
-	caseResolver        struct{ *Resolver }
-	memoResolver        struct{ *Resolver }
-	mutationResolver    struct{ *Resolver }
-	queryResolver       struct{ *Resolver }
+	actionResolver        struct{ *Resolver }
+	actionCommentResolver struct{ *Resolver }
+	actionEventResolver   struct{ *Resolver }
+	caseResolver          struct{ *Resolver }
+	memoResolver          struct{ *Resolver }
+	mutationResolver      struct{ *Resolver }
+	queryResolver         struct{ *Resolver }
 )

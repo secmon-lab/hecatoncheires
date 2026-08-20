@@ -60,6 +60,8 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionStepDone:                 ":white_check_mark: %s completed step %q",
 	MsgActionStepReopened:             ":arrow_backward: %s reopened step %q",
 	MsgActionStepRenamed:              ":pencil2: %s renamed step %q -> %q",
+	MsgActionCommentAdded:             ":speech_balloon: %s commented: <%s|Open comment>",
+	MsgActionCommentAddedNoLink:       ":speech_balloon: %s commented",
 
 	// Agent
 	MsgAgentThinking:      "Thinking...",
@@ -268,6 +270,8 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionStepDone:                 ":white_check_mark: %s がステップ %q を完了しました",
 	MsgActionStepReopened:             ":arrow_backward: %s がステップ %q を未完に戻しました",
 	MsgActionStepRenamed:              ":pencil2: %s がステップ %q を %q に変更しました",
+	MsgActionCommentAdded:             ":speech_balloon: %s がコメントしました: <%s|コメントを開く>",
+	MsgActionCommentAddedNoLink:       ":speech_balloon: %s がコメントしました",
 
 	// Agent
 	MsgAgentThinking:      "考え中...",
