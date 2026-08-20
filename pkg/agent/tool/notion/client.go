@@ -587,7 +587,7 @@ func (c *client) QueryDataSource(ctx context.Context, dataSourceID string, opts 
 		NextCursor: decoded.NextCursor,
 	}
 	for _, obj := range decoded.Results {
-		item, ok := convertSearchItem(obj)
+		item, ok := convertSearchItem(ctx, obj)
 		if !ok {
 			continue
 		}
