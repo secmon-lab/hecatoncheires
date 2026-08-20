@@ -43,6 +43,7 @@ type UseCases struct {
 	Knowledge                *KnowledgeUseCase
 	Tag                      *TagUseCase
 	ActionStep               *ActionStepUseCase
+	ActionComment            *ActionCommentUseCase
 	Agent                    *AgentUseCase
 	Auth                     AuthUseCaseInterface
 	Slack                    *SlackUseCases
@@ -245,6 +246,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Knowledge = NewKnowledgeUseCase(repo, uc.embedClient)
 	uc.Tag = NewTagUseCase(repo)
 	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService, slotCoord)
+	uc.ActionComment = NewActionCommentUseCase(repo, uc.slackService, uc.baseURL, slotCoord)
 
 	// Convert *github.Client to githubAPI interface, preserving nil-ness:
 	// passing a typed nil pointer through an interface parameter would make

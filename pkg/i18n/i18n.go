@@ -77,6 +77,8 @@ const (
 	MsgActionStepDone                 // ":white_check_mark: %s completed step %q"
 	MsgActionStepReopened             // ":arrow_backward: %s reopened step %q"
 	MsgActionStepRenamed              // ":pencil2: %s renamed step %q -> %q"
+	MsgActionCommentAdded             // ":speech_balloon: %s commented: <%s|Open comment>"
+	MsgActionCommentAddedNoLink       // ":speech_balloon: %s commented"
 
 	// Agent
 	MsgAgentThinking

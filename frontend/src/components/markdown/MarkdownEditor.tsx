@@ -8,6 +8,8 @@ interface Props {
   onChange: (value: string) => void
   disabled?: boolean
   testId?: string
+  /** Placeholder for the Write tab's textarea. Omitted tabs render none. */
+  placeholder?: string
 }
 
 // Controlled Write / Preview editor for Markdown text. The Write tab is a
@@ -17,7 +19,7 @@ interface Props {
 // Enter inserts a newline, and any save shortcut is the caller's concern
 // (attached at the container level so it survives the textarea unmounting
 // while the Preview tab is shown).
-export default function MarkdownEditor({ value, onChange, disabled, testId }: Props) {
+export default function MarkdownEditor({ value, onChange, disabled, testId, placeholder }: Props) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'write' | 'preview'>('write')
   const previewIsEmpty = !value || value.trim() === ''
@@ -54,6 +56,7 @@ export default function MarkdownEditor({ value, onChange, disabled, testId }: Pr
           value={value || ''}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
+          placeholder={placeholder}
           data-testid={testId ? `${testId}-textarea` : undefined}
         />
       ) : (

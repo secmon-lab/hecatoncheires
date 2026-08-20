@@ -672,6 +672,94 @@ All mutations go through GraphQL (WebUI) or agent tools (LLM).
 Domain models, repository backends, use cases, and Firestore layout for
 Action Steps are documented in [develop/architecture.md](develop/architecture.md).
 
+## Action comments
+
+An Action carries a comment thread of its own, written from the Web UI. This is
+separate from the Slack replies the Action's thread already collects: those are
+Slack messages ingested into `Action.messages`, while a comment is an
+`ActionComment` that only ever lives in Hecatoncheires. Both appear in the
+Action's Activity feed, interleaved by time, under the **All** and **Comments**
+tabs.
+
+### Writing, editing, deleting
+
+- The composer sits at the bottom of the Activity section of the Action detail
+  modal. The body is **Markdown**, edited through the same Write / Preview
+  editor as a Markdown custom field, and rendered through the shared Markdown
+  renderer (raw HTML is not enabled, so it is displayed as text).
+- Post with the **Comment** button or **Cmd/Ctrl + Enter**. A bare Enter inserts
+  a newline. IME composition is guarded, so confirming a kana → kanji
+  conversion with Enter never posts.
+- Only the **author** may edit or delete their own comment; the buttons are not
+  offered on anyone else's. Deletion is permanent (there is no archived state
+  for comments) and is confirmed with a dialog.
+- Saving an unchanged body is a no-op: nothing is written and the comment is not
+  marked edited. An edited comment shows an "edited" label next to its
+  timestamp, derived from `updatedAt > createdAt`.
+- The body is capped at 16384 bytes; a blank or whitespace-only body is
+  rejected.
+
+### Slack notification
+
+Creating a comment posts one context-block reply in the Action's Slack thread.
+The reply deliberately does **not** reproduce the comment:
+
+| Part          | Content                                                     |
+|---------------|-------------------------------------------------------------|
+| Author line   | `:speech_balloon: {actor} commented: <{url}|Open comment>`   |
+| Excerpt line  | `> ` + the first 100 characters of the body                 |
+
+- `{actor}` is the comment's author as a Slack mention. The message itself is
+  posted by the bot — a comment is never impersonated as its author's own Slack
+  post.
+- The link is `{baseURL}/ws/{workspaceId}/cases/{caseId}/actions/{actionId}?comment={commentId}`.
+  Opening it selects the **Comments** tab and scrolls that comment into view
+  with a highlight. When `--base-url` is not configured, the author line drops
+  the link.
+- The excerpt collapses newlines and runs of spaces to single spaces, truncates
+  on a character boundary, and escapes Slack's mrkdwn control characters. The
+  full body never reaches Slack.
+- The reply is broadcast to the parent Case channel, and therefore folds into
+  the same rolling notification-slot message as a status or assignee change (see
+  the Action lifecycle events above). This is fixed by
+  `actionCommentBroadcasts` in `pkg/usecase/action_broadcast.go`, alongside the
+  broadcast set for `ActionEventKind` values.
+- **Editing and deleting are silent.** Nothing is posted or updated in Slack;
+  the channel was already told a comment exists.
+- The notification is best-effort. A missing Slack channel, an Action with no
+  Slack card, or a Slack API failure is reported through `errutil.Handle` and
+  never rolls back the comment. Conversely, a failed write posts nothing — a
+  link to a comment that does not exist is never sent.
+
+### Access control
+
+- Comments inherit their parent Case's privacy. For a private Case, only members
+  listed in `channelUserIDs` may read or write them.
+- Reading follows the other Case sub-resolvers: a non-member gets an empty list
+  rather than an error. Writing returns `FORBIDDEN`.
+- A comment requires an authenticated author, so there is no agent tool for
+  writing one; comments are human statements. A context with no auth token
+  (system / bot flow) may read but not write.
+- Comments are **not** recorded as `ActionEvent`s, do not appear on the History
+  tab, and are not part of the BigQuery export (neither are Action events,
+  steps, or Slack messages).
+
+### GraphQL
+
+Schema additions in `graphql/schema.graphql`:
+
+- Types: `ActionComment`, `ActionCommentConnection`
+- `Action.comments(limit: Int, cursor: String): ActionCommentConnection!` —
+  newest first, cursor-paginated
+- Mutations: `createActionComment`, `updateActionComment`,
+  `deleteActionComment`
+- Inputs: `CreateActionCommentInput`, `UpdateActionCommentInput`,
+  `DeleteActionCommentInput`
+
+Comments are stored in the Firestore subcollection
+`workspaces/{workspaceId}/actions/{actionId}/comments/{commentId}`, beside the
+existing `steps` and `events` subcollections. No index or migration is required.
+
 ## Case change notifications (thread mode)
 
 In a **thread-mode** workspace a Case lives in a Slack thread, so changes to the

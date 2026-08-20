@@ -2574,7 +2574,7 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 		Title:       "Private Action",
 		Description: "Secret action",
 	}
-	_, err = repo.Action().Create(ctx, testWorkspaceID, privateAction)
+	createdPrivateAction, err := repo.Action().Create(ctx, testWorkspaceID, privateAction)
 	gt.NoError(t, err).Required()
 
 	// Create an action on the public case
@@ -2859,6 +2859,145 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 		gt.Value(t, result.Case.AccessDenied).Equal(true)
 		gt.Array(t, result.Case.Actions).Length(0)
+	})
+
+	t.Run("action comments are hidden from a non-member and readable by a member", func(t *testing.T) {
+		seededAt := time.Now().UTC()
+		seeded := &model.ActionComment{
+			ID:        "comment-private-1",
+			ActionID:  createdPrivateAction.ID,
+			AuthorID:  "UMEMBER",
+			Body:      "secret note",
+			CreatedAt: seededAt,
+			UpdatedAt: seededAt,
+		}
+		gt.NoError(t, repo.ActionComment().Create(ctx, testWorkspaceID, createdPrivateAction.ID, seeded)).Required()
+
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				action(workspaceId: $workspaceId, id: $id) {
+					id
+					comments {
+						items { id body authorID edited }
+						nextCursor
+					}
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivateAction.ID,
+		}
+
+		var result struct {
+			Action struct {
+				ID       int `json:"id"`
+				Comments struct {
+					Items []struct {
+						ID       string `json:"id"`
+						Body     string `json:"body"`
+						AuthorID string `json:"authorID"`
+						Edited   bool   `json:"edited"`
+					} `json:"items"`
+					NextCursor string `json:"nextCursor"`
+				} `json:"comments"`
+			} `json:"action"`
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Comments.Items).Length(0)
+
+		rec = executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Comments.Items).Length(1).Required()
+		gt.Value(t, result.Action.Comments.Items[0].ID).Equal("comment-private-1")
+		gt.Value(t, result.Action.Comments.Items[0].Body).Equal("secret note")
+		gt.Value(t, result.Action.Comments.Items[0].AuthorID).Equal("UMEMBER")
+		gt.Value(t, result.Action.Comments.Items[0].Edited).Equal(false)
+
+		// A system / bot context (no auth token) reads freely, matching the
+		// other private-case sub-resolvers.
+		rec = executeGraphQLRequest(t, handler, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Comments.Items).Length(1)
+	})
+
+	t.Run("non-member cannot comment on a private case action", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: CreateActionCommentInput!) {
+				createActionComment(workspaceId: $workspaceId, input: $input) { id }
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": createdPrivateAction.ID,
+				"body":     "let me in",
+			},
+		}
+
+		before, _, err := repo.ActionComment().List(ctx, testWorkspaceID, createdPrivateAction.ID, 100, "")
+		gt.NoError(t, err).Required()
+
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, variables, "UOUTSIDER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1).Required()
+
+		// The mutation must not have landed. (The FORBIDDEN classification of
+		// ErrAccessDenied is pinned in pkg/controller/graphql/errors_test.go;
+		// this test's handler does not attach extensions.)
+		after, _, err := repo.ActionComment().List(ctx, testWorkspaceID, createdPrivateAction.ID, 100, "")
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(after)).Equal(len(before))
+	})
+
+	t.Run("member can comment on a private case action", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: CreateActionCommentInput!) {
+				createActionComment(workspaceId: $workspaceId, input: $input) {
+					id
+					body
+					authorID
+					edited
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": createdPrivateAction.ID,
+				"body":     "  looks fine  ",
+			},
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			CreateActionComment struct {
+				ID       string `json:"id"`
+				Body     string `json:"body"`
+				AuthorID string `json:"authorID"`
+				Edited   bool   `json:"edited"`
+			} `json:"createActionComment"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.CreateActionComment.Body).Equal("looks fine")
+		gt.Value(t, result.CreateActionComment.AuthorID).Equal("UMEMBER")
+		gt.Value(t, result.CreateActionComment.Edited).Equal(false)
 	})
 
 	t.Run("without auth token private case is fully visible (backward compat)", func(t *testing.T) {

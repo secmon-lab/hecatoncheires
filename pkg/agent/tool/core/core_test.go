@@ -197,6 +197,9 @@ func (m *mockRepo) ActionEvent() interfaces.ActionEventRepository {
 func (m *mockRepo) ActionStep() interfaces.ActionStepRepository {
 	panic("unexpected call: ActionStep()")
 }
+func (m *mockRepo) ActionComment() interfaces.ActionCommentRepository {
+	panic("unexpected call: ActionComment()")
+}
 func (m *mockRepo) PutToken(ctx context.Context, token *auth.Token) error {
 	panic("unexpected call: PutToken()")
 }

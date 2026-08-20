@@ -289,6 +289,11 @@ They are **not detected** — which is different from not implemented:
   are references, and everything else is runtime state (strategy state, metrics,
   lease). There is nothing a configuration edit can leave inconsistent there, so
   they are out of scope by construction rather than by choice.
+- **Action comments.** An `ActionComment`
+  (`actions/{id}/comments/{commentId}`) holds an author id, a Markdown body and
+  timestamps — no field values, no status id, nothing derived from the TOML. A
+  configuration edit cannot leave one inconsistent, so like agent processes they
+  are out of scope by construction.
 
 The check reads the data as it finds it and does not take a snapshot, so a
 workspace being written to concurrently can yield a count that is already stale.

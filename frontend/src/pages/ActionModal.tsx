@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_ACTION, UPDATE_ACTION, ARCHIVE_ACTION, UNARCHIVE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -45,6 +45,10 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const navigate = useNavigate()
+  // `?comment=<id>` is what the Slack comment notification links to. Reading it
+  // here keeps ActionActivity free of any router dependency.
+  const [searchParams] = useSearchParams()
+  const highlightCommentId = searchParams.get('comment')
   const { statuses, label: statusLabel } = useActionStatuses(currentWorkspace?.id)
   const { data, loading } = useQuery(GET_ACTION, {
     variables: { workspaceId: currentWorkspace?.id, id: actionId },
@@ -338,6 +342,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
               slackMessageTS={action.slackMessageTS}
               slackChannelID={action.case?.slackChannelID}
               slackChannelURL={action.case?.slackChannelURL}
+              highlightCommentId={highlightCommentId}
             />
           </div>
         </>

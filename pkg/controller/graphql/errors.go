@@ -80,6 +80,7 @@ func ErrorCode(err error) string {
 	case errors.Is(err, usecase.ErrCaseNotFound),
 		errors.Is(err, usecase.ErrActionNotFound),
 		errors.Is(err, usecase.ErrActionStepNotFound),
+		errors.Is(err, usecase.ErrActionCommentNotFound),
 		errors.Is(err, usecase.ErrJobNotFound),
 		errors.Is(err, model.ErrWorkspaceNotFound):
 		return ErrCodeNotFound

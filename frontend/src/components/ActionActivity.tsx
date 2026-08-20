@@ -1,13 +1,26 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
-import { GET_ACTION_MESSAGES, GET_ACTION_EVENTS, POST_ACTION_SLACK_MESSAGE, GET_ACTION } from '../graphql/action'
+import {
+  GET_ACTION_MESSAGES,
+  GET_ACTION_EVENTS,
+  GET_ACTION_COMMENTS,
+  UPDATE_ACTION_COMMENT,
+  DELETE_ACTION_COMMENT,
+  POST_ACTION_SLACK_MESSAGE,
+  GET_ACTION,
+} from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useTranslation, type MsgKey } from '../i18n'
+import { useAuth } from '../contexts/auth-context'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { buildSlackPermalink } from '../utils/slackLink'
 import { displayName } from '../utils/user'
 import Button from './Button'
+import Modal from './Modal'
+import MarkdownContent from './markdown/MarkdownContent'
+import MarkdownEditor from './markdown/MarkdownEditor'
+import ActionCommentComposer from './ActionCommentComposer'
 
 type EventKind =
   | 'CREATED'
@@ -44,6 +57,17 @@ interface ActionEvent {
   createdAt: string
 }
 
+interface ActionComment {
+  id: string
+  actionID: number
+  authorID: string
+  author?: SlackUser | null
+  body: string
+  createdAt: string
+  updatedAt: string
+  edited: boolean
+}
+
 interface MessagesData {
   action: {
     id: number
@@ -58,6 +82,13 @@ interface EventsData {
   } | null
 }
 
+interface CommentsData {
+  action: {
+    id: number
+    comments: { items: ActionComment[]; nextCursor: string }
+  } | null
+}
+
 interface ActionActivityProps {
   workspaceId: string
   actionId: number
@@ -65,7 +96,16 @@ interface ActionActivityProps {
   slackMessageTS?: string | null
   slackChannelID?: string | null
   slackChannelURL?: string | null
+  /** Comment id to select the Comments tab for and scroll into view. Supplied
+   * by the surrounding page from the `?comment=` deep link the Slack
+   * notification carries. */
+  highlightCommentId?: string | null
 }
+
+// Deep-linking to one comment must be able to reach it, so a deep-linked feed
+// asks for a larger first page than the incremental one. A comment older than
+// this is still reachable through "Load more".
+const DEEP_LINK_COMMENT_LIMIT = 100
 
 type Tab = 'all' | 'comments' | 'history'
 
@@ -198,11 +238,20 @@ const styles: Record<string, CSSProperties> = {
   slackPostButton: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--accent)', cursor: 'pointer', padding: '4px 10px', borderRadius: 6, border: '1px solid color-mix(in oklch, var(--accent) 25%, var(--line))', background: 'color-mix(in oklch, var(--accent) 6%, transparent)' },
   slackPostError: { fontSize: 12, color: 'var(--color-error)' },
   inline: { display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
+  commentCard: { border: '1px solid var(--border-light, #E5E7EB)', borderRadius: 6, padding: '8px 12px', background: 'var(--bg-paper, #fff)', fontSize: 13, lineHeight: 1.6, color: 'var(--text-body)' },
+  commentCardHighlighted: { outline: '2px solid var(--accent)', outlineOffset: 2 },
+  commentEdited: { color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' },
+  commentActions: { marginLeft: 'auto', display: 'inline-flex', gap: 4 },
+  commentActionButton: { appearance: 'none', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 },
+  commentEditFooter: { display: 'flex', gap: 8, alignItems: 'center', paddingTop: 6 },
+  commentError: { fontSize: 12, color: 'var(--color-error)' },
+  composer: { paddingTop: 8, borderTop: '1px solid var(--border-light, #E5E7EB)' },
 }
 
-export default function ActionActivity({ workspaceId, actionId, pageSize = 20, slackMessageTS, slackChannelID, slackChannelURL }: ActionActivityProps) {
+export default function ActionActivity({ workspaceId, actionId, pageSize = 20, slackMessageTS, slackChannelID, slackChannelURL, highlightCommentId }: ActionActivityProps) {
   const slackPermalink = buildSlackPermalink(slackChannelURL, slackChannelID, slackMessageTS)
   const { t } = useTranslation()
+  const { user } = useAuth()
 
   // Self-repair entry point for actions whose initial Slack post never
   // happened (e.g. tool-created actions before the create paths were
@@ -228,7 +277,10 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
     const def = actionStatuses.get(id)
     return (actionStatusColorStyle(def?.color).background as string) ?? 'var(--text-muted)'
   }
-  const [tab, setTab] = useState<Tab>('all')
+  // A deep link names one comment, so the feed opens on the Comments tab.
+  const [tab, setTab] = useState<Tab>(highlightCommentId ? 'comments' : 'all')
+
+  const commentLimit = highlightCommentId ? DEEP_LINK_COMMENT_LIMIT : pageSize
 
   const messagesQuery = useQuery<MessagesData>(GET_ACTION_MESSAGES, {
     variables: { workspaceId, id: actionId, limit: pageSize, cursor: null },
@@ -238,6 +290,53 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
     variables: { workspaceId, id: actionId, limit: pageSize, cursor: null },
     fetchPolicy: 'cache-and-network',
   })
+  const commentsQuery = useQuery<CommentsData>(GET_ACTION_COMMENTS, {
+    variables: { workspaceId, id: actionId, limit: commentLimit, cursor: null },
+    fetchPolicy: 'cache-and-network',
+  })
+
+  const refetchComments = [
+    { query: GET_ACTION_COMMENTS, variables: { workspaceId, id: actionId, limit: commentLimit, cursor: null } },
+  ]
+  const [updateComment, updateState] = useMutation(UPDATE_ACTION_COMMENT, { refetchQueries: refetchComments })
+  const [deleteComment, deleteState] = useMutation(DELETE_ACTION_COMMENT, { refetchQueries: refetchComments })
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingBody, setEditingBody] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
+  const handleStartEdit = (comment: ActionComment) => {
+    setEditingId(comment.id)
+    setEditingBody(comment.body)
+  }
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    setEditingBody('')
+  }
+  const handleSaveEdit = (comment: ActionComment) => {
+    if (editingBody.trim() === '' || editingBody === comment.body) {
+      handleCancelEdit()
+      return
+    }
+    void updateComment({
+      variables: { workspaceId, input: { actionId, commentId: comment.id, body: editingBody } },
+    })
+      .then(() => handleCancelEdit())
+      .catch(() => {
+        // Apollo surfaces the failure through updateState.error, rendered
+        // inline below. The edit stays open so the text is not lost.
+      })
+  }
+  const handleConfirmDelete = () => {
+    const id = confirmDeleteId
+    if (!id) return
+    void deleteComment({ variables: { workspaceId, input: { actionId, commentId: id } } })
+      .then(() => setConfirmDeleteId(null))
+      .catch(() => {
+        // deleteState.error renders inside the dialog; keep it open so the
+        // user sees why nothing happened.
+      })
+  }
   const usersQuery = useQuery<{ slackUsers: SlackUser[] }>(GET_SLACK_USERS, {
     fetchPolicy: 'cache-first',
   })
@@ -257,20 +356,25 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
 
   const messages = messagesQuery.data?.action?.messages.items ?? []
   const events = eventsQuery.data?.action?.events.items ?? []
+  const comments = commentsQuery.data?.action?.comments.items ?? []
   const messagesCursor = messagesQuery.data?.action?.messages.nextCursor ?? ''
   const eventsCursor = eventsQuery.data?.action?.events.nextCursor ?? ''
+  const commentsCursor = commentsQuery.data?.action?.comments.nextCursor ?? ''
 
   const messageCount = messages.length
   const eventCount = events.length
-  const totalCount = messageCount + eventCount
+  const commentCount = comments.length
+  const totalCount = messageCount + eventCount + commentCount
 
   const visible = useMemo(() => {
     type Item =
       | { kind: 'message'; createdAt: string; data: SlackMessage }
       | { kind: 'event'; createdAt: string; data: ActionEvent }
+      | { kind: 'comment'; createdAt: string; data: ActionComment }
     const items: Item[] = []
     if (tab !== 'history') {
       for (const m of messages) items.push({ kind: 'message', createdAt: m.createdAt, data: m })
+      for (const c of comments) items.push({ kind: 'comment', createdAt: c.createdAt, data: c })
     }
     if (tab !== 'comments') {
       for (const e of events) items.push({ kind: 'event', createdAt: e.createdAt, data: e })
@@ -278,9 +382,12 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
     // Newest first.
     items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
     return items
-  }, [messages, events, tab])
+  }, [messages, events, comments, tab])
 
-  const loadingInitial = (messagesQuery.loading && messages.length === 0) || (eventsQuery.loading && events.length === 0)
+  const loadingInitial =
+    (messagesQuery.loading && messages.length === 0) ||
+    (eventsQuery.loading && events.length === 0) ||
+    (commentsQuery.loading && comments.length === 0)
 
   return (
     <div style={styles.root} data-testid="action-activity">
@@ -305,16 +412,63 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
       ) : (
         <div style={styles.feed}>
           <div style={styles.rail} aria-hidden />
-          {visible.map((it) => it.kind === 'message' ? (
-            <MessageRow key={`m-${it.data.id}`} message={it.data} userIndex={userIndex} t={t} />
-          ) : (
-            <EventRow key={`e-${it.data.id}`} event={it.data} userIndex={userIndex} t={t} statusLabel={statusLabel} statusColor={statusColor} />
-          ))}
+          {visible.map((it) => {
+            if (it.kind === 'message') {
+              return <MessageRow key={`m-${it.data.id}`} message={it.data} userIndex={userIndex} t={t} />
+            }
+            if (it.kind === 'comment') {
+              return (
+                <CommentRow
+                  key={`c-${it.data.id}`}
+                  comment={it.data}
+                  userIndex={userIndex}
+                  t={t}
+                  isOwn={!!user && it.data.authorID === user.sub}
+                  highlighted={it.data.id === highlightCommentId}
+                  isEditing={editingId === it.data.id}
+                  editingBody={editingBody}
+                  saving={updateState.loading}
+                  editError={editingId === it.data.id && !!updateState.error}
+                  onEditingBodyChange={setEditingBody}
+                  onStartEdit={() => handleStartEdit(it.data)}
+                  onCancelEdit={handleCancelEdit}
+                  onSaveEdit={() => handleSaveEdit(it.data)}
+                  onRequestDelete={() => setConfirmDeleteId(it.data.id)}
+                />
+              )
+            }
+            return <EventRow key={`e-${it.data.id}`} event={it.data} userIndex={userIndex} t={t} statusLabel={statusLabel} statusColor={statusColor} />
+          })}
         </div>
       )}
 
-      {(tab !== 'history' && messagesCursor) || (tab !== 'comments' && eventsCursor) ? (
+      {(tab !== 'history' && (messagesCursor || commentsCursor)) || (tab !== 'comments' && eventsCursor) ? (
         <div style={styles.loadMoreBar}>
+          {tab !== 'history' && commentsCursor && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                void commentsQuery.fetchMore({
+                  variables: { workspaceId, id: actionId, limit: commentLimit, cursor: commentsCursor },
+                  updateQuery: (prev, { fetchMoreResult }) => {
+                    if (!fetchMoreResult?.action || !prev.action) return prev
+                    return {
+                      action: {
+                        ...prev.action,
+                        comments: {
+                          items: [...prev.action.comments.items, ...fetchMoreResult.action.comments.items],
+                          nextCursor: fetchMoreResult.action.comments.nextCursor,
+                        },
+                      },
+                    }
+                  },
+                })
+              }}
+              data-testid="activity-load-more-comments"
+            >
+              {t('messagesLoadMore')}
+            </Button>
+          )}
           {tab !== 'history' && messagesCursor && (
             <Button
               variant="ghost"
@@ -367,6 +521,39 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
           )}
         </div>
       ) : null}
+
+      <div style={styles.composer}>
+        <ActionCommentComposer workspaceId={workspaceId} actionId={actionId} pageSize={commentLimit} />
+      </div>
+
+      {confirmDeleteId && (
+        <Modal
+          open
+          onClose={() => setConfirmDeleteId(null)}
+          title={t('titleDeleteComment')}
+          width={420}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDeleteId(null)}>{t('btnCancel')}</Button>
+              <Button
+                variant="danger"
+                onClick={handleConfirmDelete}
+                disabled={deleteState.loading}
+                data-testid="action-comment-delete-confirm"
+              >
+                {t('btnDelete')}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{t('msgDeleteCommentConfirm')}</p>
+          {deleteState.error && (
+            <p style={styles.commentError} role="alert" data-testid="action-comment-delete-error">
+              {t('errCommentDeleteFailed')}
+            </p>
+          )}
+        </Modal>
+      )}
 
       {slackPermalink ? (
         <div style={styles.slackLinkRow}>
@@ -448,6 +635,124 @@ function MessageRow({ message, userIndex, t }: { message: SlackMessage; userInde
           </span>
         </div>
         <div style={styles.messageCard}>{body}</div>
+      </div>
+    </div>
+  )
+}
+
+function CommentRow({
+  comment,
+  userIndex,
+  t,
+  isOwn,
+  highlighted,
+  isEditing,
+  editingBody,
+  saving,
+  editError,
+  onEditingBodyChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onRequestDelete,
+}: {
+  comment: ActionComment
+  userIndex: UserIndex
+  t: (k: MsgKey, p?: Record<string, string | number>) => string
+  isOwn: boolean
+  highlighted: boolean
+  isEditing: boolean
+  editingBody: string
+  saving: boolean
+  editError: boolean
+  onEditingBodyChange: (value: string) => void
+  onStartEdit: () => void
+  onCancelEdit: () => void
+  onSaveEdit: () => void
+  onRequestDelete: () => void
+}) {
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const name = displayName(comment.author) || userIndex.byName.get(comment.authorID) || comment.authorID
+  const avatar = comment.author?.imageUrl || userIndex.byImage.get(comment.authorID)
+  const initial = userIndex.byInitial.get(comment.authorID) ?? initialOf(name)
+
+  // Bring a deep-linked comment into view once its row exists. The highlight
+  // itself is left in place so the reader can still tell which row the link
+  // pointed at after scrolling. scrollIntoView is feature-detected because it
+  // is absent in jsdom and in older embedded webviews, where an unguarded call
+  // would throw out of the effect and blank the whole feed.
+  useEffect(() => {
+    if (!highlighted) return
+    const row = rowRef.current
+    if (row && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'center' })
+    }
+  }, [highlighted])
+
+  return (
+    <div style={styles.row} ref={rowRef} data-testid={`activity-comment-${comment.id}`}>
+      <Avatar name={initial} image={avatar} />
+      <div style={styles.body}>
+        <div style={styles.messageHead}>
+          <span style={styles.messageName}>{name}</span>
+          <span style={styles.timestamp} title={formatTimestampFull(comment.createdAt)}>
+            {formatTimestamp(comment.createdAt, t('activityToday'))}
+          </span>
+          {comment.edited && (
+            <span style={styles.commentEdited} title={formatTimestampFull(comment.updatedAt)}>
+              {t('activityCommentEdited')}
+            </span>
+          )}
+          {isOwn && !isEditing && (
+            <span style={styles.commentActions}>
+              <button
+                type="button"
+                style={styles.commentActionButton}
+                onClick={onStartEdit}
+                aria-label={t('ariaEditComment')}
+                data-testid={`action-comment-edit-${comment.id}`}
+              >
+                {t('btnEdit')}
+              </button>
+              <button
+                type="button"
+                style={styles.commentActionButton}
+                onClick={onRequestDelete}
+                aria-label={t('ariaDeleteComment')}
+                data-testid={`action-comment-delete-${comment.id}`}
+              >
+                {t('btnDelete')}
+              </button>
+            </span>
+          )}
+        </div>
+        {isEditing ? (
+          <div>
+            <MarkdownEditor
+              value={editingBody}
+              onChange={onEditingBodyChange}
+              disabled={saving}
+              testId={`action-comment-editor-${comment.id}`}
+            />
+            <div style={styles.commentEditFooter}>
+              <Button variant="primary" size="sm" onClick={onSaveEdit} disabled={saving} data-testid={`action-comment-save-${comment.id}`}>
+                {saving ? t('btnSaving') : t('btnSave')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onCancelEdit} disabled={saving}>
+                {t('btnCancel')}
+              </Button>
+              {editError && (
+                <span style={styles.commentError} role="alert" data-testid={`action-comment-update-error-${comment.id}`}>
+                  {t('errCommentUpdateFailed')}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={highlighted ? { ...styles.commentCard, ...styles.commentCardHighlighted } : styles.commentCard}>
+            <MarkdownContent source={comment.body} />
+          </div>
+        )}
       </div>
     </div>
   )

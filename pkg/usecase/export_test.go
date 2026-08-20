@@ -159,6 +159,15 @@ var ShouldBroadcastAnyActionEventForTest = shouldBroadcastAnyActionEvent
 // external tests can verify the Slack input-length contract.
 var ClampPlainTextForTest = clampPlainText
 
+// CommentExcerptForTest exposes the unexported commentExcerpt helper so
+// external tests can verify the whitespace-collapse / rune-boundary
+// truncation / mrkdwn-escape contract of the Slack notification preview.
+var CommentExcerptForTest = commentExcerpt
+
+// ActionCommentBroadcastsForTest exposes the channel-visibility decision for
+// Action comment notifications so an external test can pin it.
+const ActionCommentBroadcastsForTest = actionCommentBroadcasts
+
 // CoerceFieldValueForTest exposes the unexported coerceFieldValue helper so
 // external tests can verify the JSON-decoded value → canonical Go shape
 // contract per field type (notably markdown → string).

@@ -20,6 +20,7 @@ type Repository interface {
 	ActionMessage() ActionMessageRepository
 	ActionEvent() ActionEventRepository
 	ActionStep() ActionStepRepository
+	ActionComment() ActionCommentRepository
 	AssistLog() AssistLogRepository
 	CaseProposal() CaseProposalRepository
 	Session() SessionRepository

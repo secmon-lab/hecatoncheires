@@ -161,6 +161,80 @@ export class ActionDetailPage extends BasePage {
     await expect(row).toHaveCount(0);
   }
 
+  // --- Action comments ---
+
+  /** The activity feed section within the action modal. */
+  activity(): Locator {
+    return this.page.getByTestId('action-activity');
+  }
+
+  /** A comment row located by its id (returned by the GraphQL mutation). */
+  commentRowById(id: string): Locator {
+    return this.page.getByTestId(`activity-comment-${id}`);
+  }
+
+  /** A comment row located by its rendered body text. */
+  commentRowByBody(body: string): Locator {
+    return this.activity()
+      .locator('[data-testid^="activity-comment-"]')
+      .filter({ hasText: body });
+  }
+
+  /** Post a comment through the composer and wait for it to appear. */
+  async addComment(body: string): Promise<void> {
+    const textarea = this.page.getByTestId('action-comment-body-textarea');
+    await textarea.waitFor({ state: 'visible', timeout: 5000 });
+    await textarea.fill(body);
+    await this.page.getByTestId('action-comment-submit').click();
+    await expect(this.commentRowByBody(body)).toBeVisible({ timeout: 10000 });
+  }
+
+  /**
+   * Rewrite an existing comment, located by its current body text.
+   *
+   * The row is re-located by its own test id before the edit starts: opening
+   * the editor replaces the rendered body with a textarea, so a locator that
+   * filters on the old body text stops matching the moment the new text is
+   * typed — and the save button inside it becomes unreachable.
+   */
+  async editComment(currentBody: string, nextBody: string): Promise<void> {
+    const testId = await this.commentRowByBody(currentBody).getAttribute('data-testid');
+    expect(testId).not.toBeNull();
+    const row = this.page.getByTestId(testId as string);
+
+    await row.locator('[data-testid^="action-comment-edit-"]').click();
+    const textarea = row.locator('textarea');
+    await textarea.waitFor({ state: 'visible', timeout: 5000 });
+    await textarea.fill(nextBody);
+    await row.locator('[data-testid^="action-comment-save-"]').click();
+    await expect(this.commentRowByBody(nextBody)).toBeVisible({ timeout: 10000 });
+  }
+
+  /** Delete a comment, located by its body text, through the confirm dialog. */
+  async deleteComment(body: string): Promise<void> {
+    const row = this.commentRowByBody(body);
+    await row.locator('[data-testid^="action-comment-delete-"]').click();
+    await this.page.getByTestId('action-comment-delete-confirm').click();
+    await expect(this.commentRowByBody(body)).toHaveCount(0, { timeout: 10000 });
+  }
+
+  /** Select one of the activity feed's tabs. */
+  async selectActivityTab(tab: 'all' | 'comments' | 'history'): Promise<void> {
+    await this.page.getByTestId(`activity-tab-${tab}`).click();
+  }
+
+  /**
+   * Whether the comment with the given body shows the "edited" marker. Matched
+   * exactly so a body that happens to contain the word does not read as edited
+   * (playwright.config.ts pins the browser locale to en-US, so the marker is
+   * the English string).
+   */
+  async isCommentEdited(body: string): Promise<boolean> {
+    return await this.commentRowByBody(body)
+      .getByText('edited', { exact: true })
+      .isVisible();
+  }
+
   /**
    * Close the modal by clicking the close button
    */

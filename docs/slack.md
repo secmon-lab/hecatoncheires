@@ -558,6 +558,16 @@ thread-only. The broadcast set is centralised in `broadcastableActionEvents`
 (`pkg/usecase/action_broadcast.go`); adding a kind there enables broadcasting
 from every notify path at once.
 
+A comment written on an Action from the web UI also posts a context-block
+thread reply, broadcast the same way (`actionCommentBroadcasts`, in the same
+file — a comment is an `ActionComment`, not an `ActionEventKind`, so it cannot
+be an entry in that map). The reply carries only the author, a deep link to the
+comment in the web UI, and a 100-character excerpt of the body; the comment
+itself is never reproduced as a Slack message, and editing or deleting one
+posts nothing. See
+[docs/user_guide.md](./user_guide.md#slack-notification) for the message shape
+and the deep-link format.
+
 ### Interactivity Setup
 
 #### 1. Enable Interactivity

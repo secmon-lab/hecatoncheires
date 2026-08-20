@@ -42,6 +42,7 @@ func TestErrorCode(t *testing.T) {
 		{"invalid argument", goerr.Wrap(usecase.ErrInvalidArgument, "x"), gqlctrl.ErrCodeBadUserInput},
 		{"missing required (model)", goerr.Wrap(model.ErrMissingRequired, "x"), gqlctrl.ErrCodeBadUserInput},
 		{"workspace not found", goerr.Wrap(model.ErrWorkspaceNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"action comment not found", goerr.Wrap(usecase.ErrActionCommentNotFound, "x"), gqlctrl.ErrCodeNotFound},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

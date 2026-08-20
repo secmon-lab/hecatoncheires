@@ -8,6 +8,9 @@ var (
 	ErrCaseNotFound       = errors.New("case not found")
 	ErrActionNotFound     = errors.New("action not found")
 	ErrActionStepNotFound = errors.New("action step not found")
+	// ErrActionCommentNotFound is returned when the targeted comment does not
+	// exist under the given Action.
+	ErrActionCommentNotFound = errors.New("action comment not found")
 
 	// Status errors
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
@@ -125,9 +128,10 @@ var (
 
 // Context keys for error values
 const (
-	CaseIDKey       = "case_id"
-	ActionIDKey     = "action_id"
-	ActionStepIDKey = "action_step_id"
+	CaseIDKey          = "case_id"
+	ActionIDKey        = "action_id"
+	ActionStepIDKey    = "action_step_id"
+	ActionCommentIDKey = "action_comment_id"
 	// MissingFieldIDsKey / MissingFieldNamesKey are populated on
 	// ErrMissingRequiredOnSubmit so the GraphQL error mapper can expose the
 	// list to the frontend (which renders them as the offending inputs).

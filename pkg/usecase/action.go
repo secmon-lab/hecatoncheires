@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -930,10 +931,27 @@ func (uc *ActionUseCase) recordActionEvents(ctx context.Context, workspaceID str
 }
 
 func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64) string {
-	if uc.baseURL == "" {
+	return buildActionWebURL(uc.baseURL, workspaceID, caseID, actionID)
+}
+
+// buildActionWebURL builds the WebUI deep link to an Action's detail modal.
+// Package-level so ActionCommentUseCase can build the per-comment variant
+// below from its own baseURL without duplicating the path shape.
+func buildActionWebURL(baseURL, workspaceID string, caseID, actionID int64) string {
+	if baseURL == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/ws/%s/cases/%d/actions/%d", uc.baseURL, workspaceID, caseID, actionID)
+	return fmt.Sprintf("%s/ws/%s/cases/%d/actions/%d", baseURL, workspaceID, caseID, actionID)
+}
+
+// buildActionCommentWebURL appends the query parameter the WebUI reads to
+// select the Comments tab and highlight one comment.
+func buildActionCommentWebURL(baseURL, workspaceID string, caseID, actionID int64, commentID string) string {
+	base := buildActionWebURL(baseURL, workspaceID, caseID, actionID)
+	if base == "" {
+		return ""
+	}
+	return base + "?comment=" + url.QueryEscape(commentID)
 }
 
 // buildActionMessagePayload constructs the top-level `text` and the single
