@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -161,7 +162,7 @@ func (uc *ActionCommentUseCase) Create(ctx context.Context, in CreateActionComme
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := uc.repo.ActionComment().Put(ctx, in.WorkspaceID, action.ID, comment); err != nil {
+	if err := uc.repo.ActionComment().Create(ctx, in.WorkspaceID, action.ID, comment); err != nil {
 		return nil, goerr.Wrap(err, "failed to create action comment",
 			goerr.V(ActionIDKey, in.ActionID))
 	}
@@ -195,7 +196,15 @@ func (uc *ActionCommentUseCase) Update(ctx context.Context, in UpdateActionComme
 
 	existing.Body = body
 	existing.UpdatedAt = time.Now().UTC()
-	if err := uc.repo.ActionComment().Put(ctx, in.WorkspaceID, in.ActionID, existing); err != nil {
+	if err := uc.repo.ActionComment().Update(ctx, in.WorkspaceID, in.ActionID, existing); err != nil {
+		// The comment was deleted between the read above and this write (the
+		// same author editing in one tab and deleting in another). Report it as
+		// not found rather than resurrecting it.
+		if errors.Is(err, interfaces.ErrActionCommentNotFound) {
+			return nil, goerr.Wrap(ErrActionCommentNotFound, "action comment not found",
+				goerr.V(ActionIDKey, in.ActionID),
+				goerr.V(ActionCommentIDKey, in.CommentID))
+		}
 		return nil, goerr.Wrap(err, "failed to update action comment",
 			goerr.V(ActionIDKey, in.ActionID),
 			goerr.V(ActionCommentIDKey, in.CommentID))
@@ -287,13 +296,18 @@ func (uc *ActionCommentUseCase) loadOwnComment(ctx context.Context, workspaceID 
 		return nil, err
 	}
 
-	// The repository's not-found error is package-local (memory and firestore
-	// each define their own), so it cannot be discriminated with errors.Is
-	// from here. Collapsing every Get failure into ErrActionCommentNotFound
-	// matches ActionStepUseCase.SetDone.
+	// Absence and a storage failure are different answers: only the former is a
+	// 404. Collapsing both would report a Firestore outage or a corrupt
+	// document as "this comment does not exist", losing the cause for anyone
+	// diagnosing it.
 	existing, err := uc.repo.ActionComment().Get(ctx, workspaceID, actionID, commentID)
 	if err != nil {
-		return nil, goerr.Wrap(ErrActionCommentNotFound, "action comment not found",
+		if errors.Is(err, interfaces.ErrActionCommentNotFound) {
+			return nil, goerr.Wrap(ErrActionCommentNotFound, "action comment not found",
+				goerr.V(ActionIDKey, actionID),
+				goerr.V(ActionCommentIDKey, commentID))
+		}
+		return nil, goerr.Wrap(err, "failed to load action comment",
 			goerr.V(ActionIDKey, actionID),
 			goerr.V(ActionCommentIDKey, commentID))
 	}

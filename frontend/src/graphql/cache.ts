@@ -22,6 +22,12 @@ import { InMemoryCache } from '@apollo/client'
 //     vs MemoConfiguration.fields; fieldConfiguration.actionConfig vs
 //     caseStatusConfig). No field combination identifies one, so they are not
 //     normalized at all.
+//
+// Types absent from this map are left on Apollo's default `__typename:id`
+// because their id genuinely is globally unique. ActionStep and ActionComment
+// are the cases worth naming: both live under one Action, but their ids are
+// server-generated UUIDs (the mutation inputs carry no id), so the default key
+// cannot collide across Actions or workspaces.
 export function createCache(): InMemoryCache {
   return new InMemoryCache({
     typePolicies: {

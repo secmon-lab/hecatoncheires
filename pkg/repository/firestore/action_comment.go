@@ -32,20 +32,35 @@ func (r *actionCommentRepository) commentsCollection(workspaceID string, actionI
 		Collection(actionCommentsCollection)
 }
 
-func (r *actionCommentRepository) Put(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+// validateForWrite enforces the invariants shared by Create and Update: the
+// model's own checks, plus agreement between the struct's ActionID and the
+// parameter it is stored under, so the two can never diverge.
+func validateActionCommentForWrite(actionID int64, comment *model.ActionComment) error {
 	if err := comment.Validate(); err != nil {
-		return goerr.Wrap(err, "action comment validation failed before put")
+		return goerr.Wrap(err, "action comment validation failed before write")
 	}
-	// The comment is stored under the actionID parameter's key; reject a struct
-	// whose own ActionID points elsewhere so the two can never diverge.
 	if comment.ActionID != actionID {
 		return goerr.Wrap(model.ErrActionCommentValidation, "action comment ActionID does not match parameter",
 			goerr.V("param", actionID), goerr.V("comment", comment.ActionID))
 	}
+	return nil
+}
+
+func (r *actionCommentRepository) Create(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+	if err := validateActionCommentForWrite(actionID, comment); err != nil {
+		return err
+	}
 
 	ref := r.commentsCollection(workspaceID, actionID).Doc(comment.ID)
-	if _, err := ref.Set(ctx, comment); err != nil {
-		return goerr.Wrap(err, "failed to save action comment",
+	// Create (not Set) so a colliding id fails instead of overwriting.
+	if _, err := ref.Create(ctx, comment); err != nil {
+		if status.Code(err) == codes.AlreadyExists {
+			return goerr.Wrap(interfaces.ErrActionCommentExists, "action comment already exists",
+				goerr.V("workspace_id", workspaceID),
+				goerr.V("action_id", actionID),
+				goerr.V("comment_id", comment.ID))
+		}
+		return goerr.Wrap(err, "failed to create action comment",
 			goerr.V("workspace_id", workspaceID),
 			goerr.V("action_id", actionID),
 			goerr.V("comment_id", comment.ID))
@@ -53,11 +68,44 @@ func (r *actionCommentRepository) Put(ctx context.Context, workspaceID string, a
 	return nil
 }
 
+// Update writes the comment only if its document still exists. The existence
+// check and the write share one transaction so they are atomic against a
+// concurrent Delete — a plain Set would resurrect a comment the author had
+// already deleted from another tab. Mirrors jobRunLogRepository.setExistingLog.
+func (r *actionCommentRepository) Update(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+	if err := validateActionCommentForWrite(actionID, comment); err != nil {
+		return err
+	}
+
+	ref := r.commentsCollection(workspaceID, actionID).Doc(comment.ID)
+	return r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if _, err := tx.Get(ref); err != nil {
+			if status.Code(err) == codes.NotFound {
+				return goerr.Wrap(interfaces.ErrActionCommentNotFound, "action comment not found",
+					goerr.V("workspace_id", workspaceID),
+					goerr.V("action_id", actionID),
+					goerr.V("comment_id", comment.ID))
+			}
+			return goerr.Wrap(err, "failed to read action comment before update",
+				goerr.V("workspace_id", workspaceID),
+				goerr.V("action_id", actionID),
+				goerr.V("comment_id", comment.ID))
+		}
+		if err := tx.Set(ref, comment); err != nil {
+			return goerr.Wrap(err, "failed to update action comment",
+				goerr.V("workspace_id", workspaceID),
+				goerr.V("action_id", actionID),
+				goerr.V("comment_id", comment.ID))
+		}
+		return nil
+	})
+}
+
 func (r *actionCommentRepository) Get(ctx context.Context, workspaceID string, actionID int64, commentID string) (*model.ActionComment, error) {
 	docSnap, err := r.commentsCollection(workspaceID, actionID).Doc(commentID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return nil, goerr.Wrap(ErrNotFound, "action comment not found",
+			return nil, goerr.Wrap(interfaces.ErrActionCommentNotFound, "action comment not found",
 				goerr.V("workspace_id", workspaceID),
 				goerr.V("action_id", actionID),
 				goerr.V("comment_id", commentID))

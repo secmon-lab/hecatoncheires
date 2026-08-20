@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,14 +60,28 @@ func (r *failingCommentRepo) ActionComment() interfaces.ActionCommentRepository 
 	return r.comments
 }
 
-var errCommentPutFailed = goerr.New("comment put failed")
+var (
+	errCommentCreateFailed = goerr.New("comment create failed")
+	errCommentGetFailed    = goerr.New("comment storage unavailable")
+)
 
 type failingActionCommentRepository struct {
 	interfaces.ActionCommentRepository
 }
 
-func (r *failingActionCommentRepository) Put(context.Context, string, int64, *model.ActionComment) error {
-	return errCommentPutFailed
+func (r *failingActionCommentRepository) Create(context.Context, string, int64, *model.ActionComment) error {
+	return errCommentCreateFailed
+}
+
+// brokenGetActionCommentRepository answers every Get with a storage failure
+// that is NOT ErrActionCommentNotFound, so the usecase must surface it rather
+// than reporting the comment as missing.
+type brokenGetActionCommentRepository struct {
+	interfaces.ActionCommentRepository
+}
+
+func (r *brokenGetActionCommentRepository) Get(context.Context, string, int64, string) (*model.ActionComment, error) {
+	return nil, errCommentGetFailed
 }
 
 type commentTestFixture struct {
@@ -325,7 +340,7 @@ func TestActionCommentUseCase_Create(t *testing.T) {
 			ActionID:    f.action.ID,
 			Body:        "never lands",
 		})
-		gt.Error(t, err).Is(errCommentPutFailed)
+		gt.Error(t, err).Is(errCommentCreateFailed)
 		gt.Array(t, f.slack.threadCalls).Length(0)
 	})
 
@@ -453,6 +468,47 @@ func TestActionCommentUseCase_Update(t *testing.T) {
 			Body:        "ghost",
 		})
 		gt.Error(t, err).Is(usecase.ErrActionCommentNotFound)
+	})
+
+	t.Run("a storage failure is not reported as not found", func(t *testing.T) {
+		f := newCommentTestFixture(t, commentFixtureOptions{})
+		comment := seed(t, f, "will not be read")
+
+		broken := &failingCommentRepo{
+			Repository: f.repo,
+			comments:   &brokenGetActionCommentRepository{ActionCommentRepository: f.repo.ActionComment()},
+		}
+		uc := usecase.NewActionCommentUseCase(broken, f.slack, "", nil)
+
+		_, err := uc.Update(f.ctx(), usecase.UpdateActionCommentInput{
+			WorkspaceID: testWorkspaceID,
+			ActionID:    f.action.ID,
+			CommentID:   comment.ID,
+			Body:        "cannot be saved",
+		})
+		gt.Error(t, err).Is(errCommentGetFailed)
+		// A storage outage must not masquerade as a 404.
+		gt.Bool(t, errors.Is(err, usecase.ErrActionCommentNotFound)).False()
+	})
+
+	t.Run("an edit loses to a concurrent delete instead of resurrecting the comment", func(t *testing.T) {
+		f := newCommentTestFixture(t, commentFixtureOptions{})
+		comment := seed(t, f, "about to be deleted elsewhere")
+
+		// Another tab of the same author deletes it after this edit was opened.
+		gt.NoError(t, f.repo.ActionComment().Delete(f.ctx(), testWorkspaceID, f.action.ID, comment.ID)).Required()
+
+		_, err := f.commentUC.Update(f.ctx(), usecase.UpdateActionCommentInput{
+			WorkspaceID: testWorkspaceID,
+			ActionID:    f.action.ID,
+			CommentID:   comment.ID,
+			Body:        "edited after deletion",
+		})
+		gt.Error(t, err).Is(usecase.ErrActionCommentNotFound)
+
+		got, _, err := f.commentUC.List(f.ctx(), testWorkspaceID, f.action.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(0)
 	})
 }
 

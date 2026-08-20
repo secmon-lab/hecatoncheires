@@ -2871,7 +2871,7 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 			CreatedAt: seededAt,
 			UpdatedAt: seededAt,
 		}
-		gt.NoError(t, repo.ActionComment().Put(ctx, testWorkspaceID, createdPrivateAction.ID, seeded)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, testWorkspaceID, createdPrivateAction.ID, seeded)).Required()
 
 		query := `
 			query($workspaceId: String!, $id: Int!) {

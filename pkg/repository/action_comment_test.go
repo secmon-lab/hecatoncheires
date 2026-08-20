@@ -42,7 +42,7 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 			CreatedAt: created,
 			UpdatedAt: updated,
 		}
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, want)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, want)).Required()
 
 		got, err := repo.ActionComment().Get(ctx, wsID, actionID, want.ID)
 		gt.NoError(t, err).Required()
@@ -66,9 +66,9 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		oldest := newTestActionComment(actionID, "oldest", now.Add(-2*time.Minute))
 		middle := newTestActionComment(actionID, "middle", now.Add(-1*time.Minute))
 		newest := newTestActionComment(actionID, "newest", now)
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, oldest)).Required()
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, middle)).Required()
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, newest)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, oldest)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, middle)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, newest)).Required()
 
 		got, cursor, err := repo.ActionComment().List(ctx, wsID, actionID, 10, "")
 		gt.NoError(t, err).Required()
@@ -89,7 +89,7 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		ids := make([]string, 0, 5)
 		for i := range 5 {
 			c := newTestActionComment(actionID, fmt.Sprintf("%d", i), now.Add(time.Duration(i)*time.Minute))
-			gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, c)).Required()
+			gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, c)).Required()
 			ids = append(ids, c.ID)
 		}
 		wantOrder := []string{ids[4], ids[3], ids[2], ids[1], ids[0]}
@@ -115,18 +115,18 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		gt.Value(t, cursor3).Equal("")
 	})
 
-	t.Run("Put with same ID replaces", func(t *testing.T) {
+	t.Run("Update replaces the stored comment", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		actionID := time.Now().UnixNano()
 
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		c := newTestActionComment(actionID, "edit", now)
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, c)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, c)).Required()
 
 		c.Body = "rewritten body"
 		c.UpdatedAt = now.Add(time.Minute)
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, c)).Required()
+		gt.NoError(t, repo.ActionComment().Update(ctx, wsID, actionID, c)).Required()
 
 		got, cursor, err := repo.ActionComment().List(ctx, wsID, actionID, 10, "")
 		gt.NoError(t, err).Required()
@@ -145,8 +145,8 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		forA := newTestActionComment(actionA, "a", now)
 		forB := newTestActionComment(actionB, "b", now)
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionA, forA)).Required()
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionB, forB)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionA, forA)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionB, forB)).Required()
 
 		gotA, _, err := repo.ActionComment().List(ctx, wsID, actionA, 10, "")
 		gt.NoError(t, err).Required()
@@ -159,15 +159,6 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		gt.Value(t, gotB[0].ID).Equal(forB.ID)
 	})
 
-	t.Run("Get of a missing comment fails", func(t *testing.T) {
-		repo := newRepo(t)
-		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		actionID := time.Now().UnixNano()
-
-		_, err := repo.ActionComment().Get(ctx, wsID, actionID, "no-such-comment")
-		gt.Error(t, err)
-	})
-
 	t.Run("Delete removes the comment and is a no-op when absent", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
@@ -175,7 +166,7 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		c := newTestActionComment(actionID, "gone", now)
-		gt.NoError(t, repo.ActionComment().Put(ctx, wsID, actionID, c)).Required()
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, c)).Required()
 
 		gt.NoError(t, repo.ActionComment().Delete(ctx, wsID, actionID, c.ID)).Required()
 
@@ -189,7 +180,55 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		gt.NoError(t, repo.ActionComment().Delete(ctx, wsID, actionID, "no-such-comment"))
 	})
 
-	t.Run("Put rejects an invalid comment", func(t *testing.T) {
+	t.Run("Get of a missing comment reports ErrActionCommentNotFound", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		actionID := time.Now().UnixNano()
+
+		_, err := repo.ActionComment().Get(ctx, wsID, actionID, "no-such-comment")
+		gt.Error(t, err).Is(interfaces.ErrActionCommentNotFound)
+	})
+
+	t.Run("Update of a deleted comment does not resurrect it", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		actionID := time.Now().UnixNano()
+
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		c := newTestActionComment(actionID, "raced", now)
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, c)).Required()
+		gt.NoError(t, repo.ActionComment().Delete(ctx, wsID, actionID, c.ID)).Required()
+
+		// The edit was prepared before the delete landed.
+		c.Body = "edited after deletion"
+		c.UpdatedAt = now.Add(time.Minute)
+		gt.Error(t, repo.ActionComment().Update(ctx, wsID, actionID, c)).Is(interfaces.ErrActionCommentNotFound)
+
+		got, _, err := repo.ActionComment().List(ctx, wsID, actionID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(0)
+	})
+
+	t.Run("Create rejects a colliding ID", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		actionID := time.Now().UnixNano()
+
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		first := newTestActionComment(actionID, "collide", now)
+		gt.NoError(t, repo.ActionComment().Create(ctx, wsID, actionID, first)).Required()
+
+		second := newTestActionComment(actionID, "collide2", now)
+		second.ID = first.ID
+		second.Body = "would overwrite"
+		gt.Error(t, repo.ActionComment().Create(ctx, wsID, actionID, second)).Is(interfaces.ErrActionCommentExists)
+
+		got, err := repo.ActionComment().Get(ctx, wsID, actionID, first.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Body).Equal(first.Body)
+	})
+
+	t.Run("writes reject an invalid comment", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		actionID := time.Now().UnixNano()
@@ -197,17 +236,19 @@ func runActionCommentRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		noAuthor := newTestActionComment(actionID, "noauthor", now)
 		noAuthor.AuthorID = ""
-		gt.Error(t, repo.ActionComment().Put(ctx, wsID, actionID, noAuthor)).Is(model.ErrActionCommentValidation)
+		gt.Error(t, repo.ActionComment().Create(ctx, wsID, actionID, noAuthor)).Is(model.ErrActionCommentValidation)
+		gt.Error(t, repo.ActionComment().Update(ctx, wsID, actionID, noAuthor)).Is(model.ErrActionCommentValidation)
 	})
 
-	t.Run("Put rejects a mismatched ActionID", func(t *testing.T) {
+	t.Run("writes reject a mismatched ActionID", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		actionID := time.Now().UnixNano()
 
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		other := newTestActionComment(actionID+1, "mismatch", now)
-		gt.Error(t, repo.ActionComment().Put(ctx, wsID, actionID, other)).Is(model.ErrActionCommentValidation)
+		gt.Error(t, repo.ActionComment().Create(ctx, wsID, actionID, other)).Is(model.ErrActionCommentValidation)
+		gt.Error(t, repo.ActionComment().Update(ctx, wsID, actionID, other)).Is(model.ErrActionCommentValidation)
 	})
 
 	t.Run("List of an unknown action is empty", func(t *testing.T) {

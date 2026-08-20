@@ -31,15 +31,48 @@ func copyActionComment(c *model.ActionComment) *model.ActionComment {
 	return &dup
 }
 
-func (r *actionCommentRepository) Put(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+// validateForWrite enforces the invariants shared by Create and Update: the
+// model's own checks, plus agreement between the struct's ActionID and the
+// parameter it is stored under, so the two can never diverge.
+func validateActionCommentForWrite(actionID int64, comment *model.ActionComment) error {
 	if err := comment.Validate(); err != nil {
-		return goerr.Wrap(err, "action comment validation failed before put")
+		return goerr.Wrap(err, "action comment validation failed before write")
 	}
-	// The comment is stored under the actionID parameter's key; reject a struct
-	// whose own ActionID points elsewhere so the two can never diverge.
 	if comment.ActionID != actionID {
 		return goerr.Wrap(model.ErrActionCommentValidation, "action comment ActionID does not match parameter",
 			goerr.V("param", actionID), goerr.V("comment", comment.ActionID))
+	}
+	return nil
+}
+
+func (r *actionCommentRepository) Create(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+	if err := validateActionCommentForWrite(actionID, comment); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := actionCommentKey(workspaceID, actionID)
+	for _, c := range r.comments[key] {
+		if c.ID == comment.ID {
+			return goerr.Wrap(interfaces.ErrActionCommentExists, "action comment already exists",
+				goerr.V("workspace_id", workspaceID),
+				goerr.V("action_id", actionID),
+				goerr.V("comment_id", comment.ID))
+		}
+	}
+	r.comments[key] = append(r.comments[key], copyActionComment(comment))
+	return nil
+}
+
+// Update replaces an existing comment and reports ErrActionCommentNotFound when
+// it is gone, so a comment deleted from another tab is not resurrected by an
+// in-flight edit. The lock makes the check and the write atomic, matching the
+// Firestore implementation's transaction.
+func (r *actionCommentRepository) Update(ctx context.Context, workspaceID string, actionID int64, comment *model.ActionComment) error {
+	if err := validateActionCommentForWrite(actionID, comment); err != nil {
+		return err
 	}
 
 	r.mu.Lock()
@@ -54,8 +87,10 @@ func (r *actionCommentRepository) Put(ctx context.Context, workspaceID string, a
 			return nil
 		}
 	}
-	r.comments[key] = append(existing, copyActionComment(comment))
-	return nil
+	return goerr.Wrap(interfaces.ErrActionCommentNotFound, "action comment not found",
+		goerr.V("workspace_id", workspaceID),
+		goerr.V("action_id", actionID),
+		goerr.V("comment_id", comment.ID))
 }
 
 func (r *actionCommentRepository) Get(ctx context.Context, workspaceID string, actionID int64, commentID string) (*model.ActionComment, error) {
@@ -67,7 +102,7 @@ func (r *actionCommentRepository) Get(ctx context.Context, workspaceID string, a
 			return copyActionComment(c), nil
 		}
 	}
-	return nil, goerr.Wrap(ErrNotFound, "action comment not found",
+	return nil, goerr.Wrap(interfaces.ErrActionCommentNotFound, "action comment not found",
 		goerr.V("workspace_id", workspaceID),
 		goerr.V("action_id", actionID),
 		goerr.V("comment_id", commentID))

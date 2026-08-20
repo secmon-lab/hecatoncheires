@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
 import { I18nProvider } from '../i18n'
 import {
+  DELETE_ACTION_COMMENT,
   GET_ACTION_COMMENTS,
   GET_ACTION_EVENTS,
   GET_ACTION_MESSAGES,
+  UPDATE_ACTION_COMMENT,
 } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import ActionActivity from './ActionActivity'
@@ -131,6 +133,44 @@ function commentsMock(limit: number, items: ReturnType<typeof comment>[]): Mocke
   }
 }
 
+function updateMock(commentId: string, body: string, fail = false): MockedResponse {
+  const base = {
+    request: {
+      query: UPDATE_ACTION_COMMENT,
+      variables: { workspaceId: WS, input: { actionId: ACTION_ID, commentId, body } },
+    },
+  }
+  if (fail) return { ...base, error: new Error('boom') }
+  return {
+    ...base,
+    result: {
+      data: {
+        updateActionComment: {
+          id: commentId,
+          actionID: ACTION_ID,
+          authorID: 'UME',
+          body,
+          createdAt: '2026-08-20T03:00:00Z',
+          updatedAt: '2026-08-20T09:00:00Z',
+          edited: true,
+          author: null,
+        },
+      },
+    },
+  }
+}
+
+function deleteMock(commentId: string, fail = false): MockedResponse {
+  const base = {
+    request: {
+      query: DELETE_ACTION_COMMENT,
+      variables: { workspaceId: WS, input: { actionId: ACTION_ID, commentId } },
+    },
+  }
+  if (fail) return { ...base, error: new Error('boom') }
+  return { ...base, result: { data: { deleteActionComment: true } } }
+}
+
 function usersMock(): MockedResponse {
   return {
     request: { query: GET_SLACK_USERS },
@@ -235,5 +275,87 @@ describe('ActionActivity comments', () => {
 
     await screen.findByTestId('activity-comment-c-other')
     expect(screen.queryByTestId('activity-comment-c-missing')).toBeNull()
+  })
+
+  it('sends the edited body and closes the editor on success', async () => {
+    const mine = comment('c-mine', 'UME', 'first draft', '2026-08-20T03:00:00Z')
+    renderActivity([
+      messagesMock(),
+      eventsMock(),
+      commentsMock(PAGE_SIZE, [mine]),
+      usersMock(),
+      updateMock('c-mine', 'second draft'),
+    ])
+
+    await screen.findByTestId('activity-comment-c-mine')
+    fireEvent.click(screen.getByTestId('action-comment-edit-c-mine'))
+
+    const textarea = (await screen.findByTestId('action-comment-editor-c-mine-textarea')) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'second draft' } })
+    fireEvent.click(screen.getByTestId('action-comment-save-c-mine'))
+
+    // The editor closes only when the mutation resolved with the variables the
+    // mock declared; a mismatch leaves it open with an error instead.
+    await waitFor(() => expect(screen.queryByTestId('action-comment-editor-c-mine-textarea')).toBeNull())
+    expect(screen.queryByTestId('action-comment-update-error-c-mine')).toBeNull()
+  })
+
+  it('keeps the editor open with an error when saving fails', async () => {
+    const mine = comment('c-mine', 'UME', 'first draft', '2026-08-20T03:00:00Z')
+    renderActivity([
+      messagesMock(),
+      eventsMock(),
+      commentsMock(PAGE_SIZE, [mine]),
+      usersMock(),
+      updateMock('c-mine', 'doomed edit', true),
+    ])
+
+    await screen.findByTestId('activity-comment-c-mine')
+    fireEvent.click(screen.getByTestId('action-comment-edit-c-mine'))
+
+    const textarea = (await screen.findByTestId('action-comment-editor-c-mine-textarea')) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'doomed edit' } })
+    fireEvent.click(screen.getByTestId('action-comment-save-c-mine'))
+
+    await screen.findByTestId('action-comment-update-error-c-mine')
+    expect(screen.getByTestId('action-comment-editor-c-mine-textarea')).toHaveValue('doomed edit')
+  })
+
+  it('does not send an update when the body is unchanged', async () => {
+    const mine = comment('c-mine', 'UME', 'unchanged', '2026-08-20T03:00:00Z')
+    // No update mock: a mutation here would fail the test with "No more mocked
+    // responses", which is exactly the regression we want to catch.
+    renderActivity([messagesMock(), eventsMock(), commentsMock(PAGE_SIZE, [mine]), usersMock()])
+
+    await screen.findByTestId('activity-comment-c-mine')
+    fireEvent.click(screen.getByTestId('action-comment-edit-c-mine'))
+    await screen.findByTestId('action-comment-editor-c-mine-textarea')
+    fireEvent.click(screen.getByTestId('action-comment-save-c-mine'))
+
+    await waitFor(() => expect(screen.queryByTestId('action-comment-editor-c-mine-textarea')).toBeNull())
+    expect(screen.queryByTestId('action-comment-update-error-c-mine')).toBeNull()
+  })
+
+  it('deletes through the confirm dialog and reports a failed delete', async () => {
+    const mine = comment('c-mine', 'UME', 'to be removed', '2026-08-20T03:00:00Z')
+    renderActivity([
+      messagesMock(),
+      eventsMock(),
+      commentsMock(PAGE_SIZE, [mine]),
+      usersMock(),
+      deleteMock('c-mine', true),
+      deleteMock('c-mine'),
+    ])
+
+    await screen.findByTestId('activity-comment-c-mine')
+    fireEvent.click(screen.getByTestId('action-comment-delete-c-mine'))
+
+    // First attempt fails: the dialog stays open and says so.
+    fireEvent.click(await screen.findByTestId('action-comment-delete-confirm'))
+    await screen.findByTestId('action-comment-delete-error')
+
+    // Second attempt succeeds and the dialog closes.
+    fireEvent.click(screen.getByTestId('action-comment-delete-confirm'))
+    await waitFor(() => expect(screen.queryByTestId('action-comment-delete-confirm')).toBeNull())
   })
 })
