@@ -368,6 +368,38 @@ Hosts opt in (`threadcase` enables it for mention mode but disables it for
 `ModeCreate`; `job` enables it; structured-only hosts leave it off). The
 planner prompt guards it hard: "when in any doubt, investigate."
 
+**The direct child is the only child whose text is published, so it gets its own
+prompt.** `launchDirect` builds it from `prompts/direct.md`
+(`buildDirectSystemPrompt`), never from the sub-agent template — that child's
+output goes to the user verbatim, while every other child's goes to the planner.
+The distinction is not stylistic: `prompts/subagent.md` instructs its reader to
+open with a one-line conclusion, follow it with a supporting-evidence section
+naming the sources it consulted, and address the result to "the parent planner".
+Prompted that way — which is what `launchDirect` did between #261 and the fix —
+the direct child wrote exactly that, and the whole report was posted into the
+Slack thread as the reply. Two things follow for anyone changing this path:
+
+- **The host's persona prompt and `Input.LanguageLabel` must reach it.** It is the
+  one call in the run whose text the user reads, and nothing downstream rewrites
+  or translates it — a lost language directive means the reply arrives in the
+  wrong language, with no other symptom. `LanguageLabel` is the host's to fill,
+  and all three planexec hosts resolve it through `i18n.LanguageLabel` so they
+  cannot answer differently; a host that leaves it empty gives its whole run —
+  planner, terminal output and direct reply alike — no directive at all.
+- **The host prompt it carries is written for the planner**, so it names decision
+  shapes (`respond`, `materialize`) and demands JSON. `prompts/direct.md`
+  therefore overrides that half explicitly. Keep the override when editing either
+  prompt: a direct child that emitted a decision object would have the JSON posted
+  as prose.
+- **Its text is read through `directReplyText`, not `collectResults`.** The latter
+  bounds every child summary at `subAgentSummaryMaxBytes` (8 KiB) and appends an
+  "…[truncated]" marker, which is correct for text fed back into the planner's
+  context and wrong for a reply: it would cut the message off mid-sentence and
+  publish the marker. Only the Job host discards the text — it reflects on the
+  run's history instead, on `OutputFinal` and `OutputDirect` alike — so
+  `prompts/direct.md` says the text is the turn's answer rather than claiming
+  every host posts it.
+
 ## Agent tool wiring (host coverage) (NON-NEGOTIABLE)
 
 A new agent tool is, by default, made available to **every** agent host that

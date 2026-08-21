@@ -579,14 +579,13 @@ func (s *strategy[T]) stepCollect(ctx context.Context, sys agentkit.Syscalls, st
 			goerr.V("key", string(st.RoundKey)), goerr.V("status", string(aw.Status)))
 	}
 
-	results := collectResults(st.Current, aw.Results)
-
 	if st.Direct {
-		// The direct path's single child IS the answer.
-		text := ""
-		if len(results) > 0 {
-			text = results[0].Summary
-		}
+		// The direct path's single child IS the answer, so its text is read straight
+		// off the child rather than through collectResults: that path truncates at
+		// subAgentSummaryMaxBytes to bound what is fed back into the planner's
+		// context, and this text is not fed to the planner — it is the reply. A
+		// user-facing message that ends in "…[truncated]" is a defect, not a bound.
+		text := directReplyText(st.Current, aw.Results)
 		if text == "" {
 			// A direct child that produced nothing is a dead end, not an answer:
 			// replying with an empty message would look like the agent ignored the
@@ -603,6 +602,7 @@ func (s *strategy[T]) stepCollect(ctx context.Context, sys agentkit.Syscalls, st
 		}), nil
 	}
 
+	results := collectResults(st.Current, aw.Results)
 	tasks := make([]TaskPlan, 0, len(st.Current))
 	for _, ref := range st.Current {
 		tasks = append(tasks, TaskPlan{
@@ -958,7 +958,17 @@ func (s *strategy[T]) launchRound(ctx context.Context, sys agentkit.Syscalls, st
 	refs := make([]taskRef, 0, len(tasks))
 	ids := make([]agentkit.ProcessID, 0, len(tasks))
 	for _, task := range tasks {
-		pid, err := s.spawnTask(ctx, sys, st, task)
+		prompt, err := buildSubAgentSystemPrompt(task, st.Input.AllowSubAgentWrites, st.Input.TaskContext)
+		if err != nil {
+			return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err,
+				"planexec: build the task prompt", goerr.V("task_id", task.ID))
+		}
+		description := task.Description
+		if description == "" {
+			description = task.Title
+		}
+		pid, err := s.spawnChild(ctx, sys, task.ID,
+			react.Input{SystemPrompt: prompt, Prompt: description}, task.Tools)
 		if err != nil {
 			return st, agentkit.Decision[Output[T]]{}, err
 		}
@@ -977,48 +987,86 @@ func (s *strategy[T]) launchRound(ctx context.Context, sys agentkit.Syscalls, st
 	return st, agentkit.Suspend[Output[T]](agentkit.WaitChildren(st.RoundKey, ids...)), nil
 }
 
+// directTaskID labels the direct path's single child on the round's taskRef and in
+// a spawn error. It is not a planner-assigned task id — the direct path has no
+// plan — so it must not collide with one.
+const directTaskID = "direct"
+
 // launchDirect spawns the single child that answers a trivial request outright.
+//
+// Its system prompt is built from prompts/direct.md, NOT from the sub-agent
+// template every other child gets: stepCollect publishes this child's text to the
+// user verbatim, so it is the author of a user-facing message rather than an
+// investigator reporting to the planner. See buildDirectSystemPrompt for what
+// reusing the sub-agent prompt here actually produced.
 func (s *strategy[T]) launchDirect(ctx context.Context, sys agentkit.Syscalls, st state, plan *DirectPlan) (state, agentkit.Decision[Output[T]], error) {
-	task := TaskPlan{
-		ID:                 "direct",
-		Title:              "Direct reply",
-		Description:        st.Input.UserInput,
-		AcceptanceCriteria: "The user's request is answered directly.",
-		Tools:              plan.Tools,
+	prompt, err := buildDirectSystemPrompt(directPromptInput{
+		HostPrompt: st.Input.SystemPrompt,
+		Language:   st.Input.LanguageLabel,
+		Context:    st.Input.TaskContext,
+	})
+	if err != nil {
+		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: build the direct prompt")
 	}
-	pid, err := s.spawnTask(ctx, sys, st, task)
+	pid, err := s.spawnChild(ctx, sys, directTaskID,
+		react.Input{SystemPrompt: prompt, Prompt: st.Input.UserInput}, plan.Tools)
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
-	st.Current = []taskRef{{TaskID: task.ID, Title: task.Title, ProcessID: pid}}
+	st.Current = []taskRef{{TaskID: directTaskID, Title: "Direct reply", ProcessID: pid}}
 	st.Direct = true
-	st.RoundKey = agentkit.AwaitKey("direct")
+	st.RoundKey = agentkit.AwaitKey(directTaskID)
 	st.Phase = phaseCollect
 	return st, agentkit.Suspend[Output[T]](agentkit.WaitChildren(st.RoundKey, pid)), nil
 }
 
-// spawnTask launches one task as a child Process.
-func (s *strategy[T]) spawnTask(ctx context.Context, sys agentkit.Syscalls, st state, task TaskPlan) (agentkit.ProcessID, error) {
-	prompt, err := buildSubAgentSystemPrompt(task, st.Input.AllowSubAgentWrites, st.Input.TaskContext)
-	if err != nil {
-		return "", goerr.Wrap(err, "planexec: build the task prompt", goerr.V("task_id", task.ID))
-	}
-	description := task.Description
-	if description == "" {
-		description = task.Title
-	}
+// spawnChild launches one child Process. label names it in a spawn error, and
+// tools is the toolset subset it may call.
+//
+// The prompts arrive as a built react.Input rather than as two adjacent strings
+// because the two callers differ precisely in which template each half comes from
+// — a planned task gets the sub-agent system prompt, the direct path gets the
+// user-facing reply one — and a swap between the two would compile, then be
+// visible only in what the model wrote.
+func (s *strategy[T]) spawnChild(ctx context.Context, sys agentkit.Syscalls,
+	label string, input react.Input, tools []string,
+) (agentkit.ProcessID, error) {
 	// WithToolSets rebuilds the parent's metadata map with only the toolsets
 	// replaced. SpawnChild's WithMetadata REPLACES the map rather than merging
 	// into it, so building a fresh one here would drop the workspace and case the
 	// child needs to have any tools at all.
-	pid, err := s.taskAgent.SpawnChild(ctx, sys,
-		react.Input{SystemPrompt: prompt, Prompt: description},
-		agentkit.WithMetadata(agentkernel.WithToolSets(sys.Metadata(), task.Tools)),
+	pid, err := s.taskAgent.SpawnChild(ctx, sys, input,
+		agentkit.WithMetadata(agentkernel.WithToolSets(sys.Metadata(), tools)),
 	)
 	if err != nil {
-		return "", goerr.Wrap(err, "planexec: spawn the task", goerr.V("task_id", task.ID))
+		return "", goerr.Wrap(err, "planexec: spawn the task", goerr.V("task_id", label))
 	}
 	return pid, nil
+}
+
+// directReplyText reads the direct path's single child's text, in full. An empty
+// return means there is no reply — the child is missing, failed, or produced
+// nothing — which stepCollect turns into a fallback.
+//
+// It bypasses collectResults deliberately: that path bounds each summary at
+// subAgentSummaryMaxBytes because the summaries are fed back into the planner's
+// context, and appends an "…[truncated]" marker. This text is the reply itself,
+// so the bound buys nothing and the marker would be published to the user.
+func directReplyText(refs []taskRef, children []agentkit.ChildResult) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	for _, child := range children {
+		if child.ProcessID != refs[0].ProcessID || child.Status != agentkit.ProcessSucceeded {
+			continue
+		}
+		out, err := react.DecodeOutput(child.Output)
+		if err != nil {
+			return ""
+		}
+		return out.Text()
+	}
+	return ""
 }
 
 // collectResults turns the children's outcomes into TaskResults, in plan order.

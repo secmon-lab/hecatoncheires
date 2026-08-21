@@ -47,12 +47,20 @@ type scriptedPlanner struct {
 	// inputs records the user text each call received, so a test can assert what
 	// the planner was actually told.
 	inputs []string
-	n      atomic.Int32
+	// systemPrompts records the system prompt each call was made under, aligned by
+	// index with inputs. A child's identity lives here rather than in its input —
+	// the input is just the task text — so this is where a test checks WHICH prompt
+	// a child was spawned as.
+	systemPrompts []string
+	n             atomic.Int32
 }
 
 func (p *scriptedPlanner) client() gollem.LLMClient {
 	return &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, so it is read here and
+			// attributed to the calls this session makes.
+			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
 					var b strings.Builder
@@ -64,6 +72,7 @@ func (p *scriptedPlanner) client() gollem.LLMClient {
 					i := int(p.n.Add(1)) - 1
 					p.mu.Lock()
 					p.inputs = append(p.inputs, b.String())
+					p.systemPrompts = append(p.systemPrompts, cfg.SystemPrompt())
 					p.mu.Unlock()
 					if i >= len(p.replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
@@ -83,6 +92,15 @@ func (p *scriptedPlanner) seen() []string {
 	defer p.mu.Unlock()
 	out := make([]string, len(p.inputs))
 	copy(out, p.inputs)
+	return out
+}
+
+// seenSystemPrompts returns the system prompt of each call, in call order.
+func (p *scriptedPlanner) seenSystemPrompts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.systemPrompts))
+	copy(out, p.systemPrompts)
 	return out
 }
 
@@ -385,6 +403,73 @@ func TestDirectPathAnswersWithoutInvestigating(t *testing.T) {
 	// No replan and no final call happened: the script would have failed on an
 	// extra Generate.
 	gt.Number(t, len(planner.seen())).Equal(2)
+}
+
+// A direct reply reaches the user in full. Every other child's text is a summary
+// fed back into the planner's context and is bounded at subAgentSummaryMaxBytes
+// (8 KiB) with an "…[truncated]" marker appended; this one is the reply itself, so
+// applying that bound would cut a user-facing message off mid-sentence and publish
+// the marker.
+func TestALongDirectReplyIsNotTruncated(t *testing.T) {
+	// Comfortably past the sub-agent summary bound, and distinctive at the end so a
+	// truncation is visible rather than merely a length mismatch.
+	const tail = "END-OF-REPLY"
+	long := strings.Repeat("a very long but entirely legitimate answer. ", 400) + tail
+	gt.Number(t, len(long)).GreaterOrEqual(8 * 1024).Required()
+
+	planner := &scriptedPlanner{replies: []string{`{"direct":{"tools":[]}}`, long}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil, nil)
+
+	in := textInput()
+	in.AllowDirect = true
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputDirect)
+	gt.String(t, out.Text).NotContains("[truncated]")
+	gt.String(t, out.Text).HasSuffix(tail)
+	gt.Number(t, len(out.Text)).Equal(len(long))
+}
+
+// The direct child writes the message the user reads, so it is prompted as its
+// author — not as an investigation sub-agent reporting to the planner. When it was
+// prompted as the latter (launchDirect reused buildSubAgentSystemPrompt between
+// #261 and this test), that prompt's output rules were obeyed and the resulting
+// report — a "Conclusion" line, a "Supporting Evidence" section, and a closing
+// remark about what "the parent planner" should do — was posted into the Slack
+// thread verbatim as the answer.
+func TestTheDirectChildIsPromptedToWriteTheUsersReply(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"direct":{"tools":[]}}`,
+		`Understood, thanks for the update.`,
+	}}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), nil, nil)
+
+	in := textInput()
+	in.AllowDirect = true
+	in.LanguageLabel = "Japanese"
+	in.TaskContext = "channel_id: C123\nthread_ts: 1700000000.000100"
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	prompts := planner.seenSystemPrompts()
+	gt.Array(t, prompts).Length(2).Required()
+	child := prompts[1]
+
+	// It is the direct template, and specifically NOT the sub-agent one.
+	gt.String(t, child).Contains("Direct reply (planexec runtime)")
+	gt.String(t, child).NotContains("investigation sub-agent dispatched by a parent planner")
+	gt.String(t, child).NotContains("the parent planner can fold into its next decision")
+	// The two things the sub-agent template asked for and this one must forbid.
+	gt.String(t, child).Contains("posted to the user verbatim")
+	gt.String(t, child).Contains(`No "Conclusion" heading, no "Supporting Evidence" section`)
+	// The host's persona prompt and the run's tool-pinning context are carried, so
+	// the reply knows who it is and its tools have the identifiers they need.
+	gt.String(t, child).Contains(in.SystemPrompt)
+	gt.String(t, child).Contains("thread_ts: 1700000000.000100")
+	// The language directive reaches the one call whose text the user actually sees.
+	gt.String(t, child).Contains("MUST be written in **Japanese**")
 }
 
 // A failed child is an observation, not a failed run: the planner decides on the

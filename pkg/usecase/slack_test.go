@@ -467,7 +467,12 @@ func (p *promptRecorder) sawWorkspaceAgent() bool {
 // persona. A plan-execute run also creates sessions for the sub-agents it spawns,
 // whose prompts are the per-task instructions rather than the persona — so
 // "every prompt is the workspace agent" is no longer the right shape. Counting
-// the persona prompts is: one per turn that reached the workspace agent.
+// the persona prompts is.
+//
+// Which calls carry it depends on the path: the planner rounds always do, and so
+// does the direct-reply child, because its text is published to the user and it is
+// therefore prompted as the host rather than as a sub-agent. Only investigation
+// sub-agents lack it.
 func (p *promptRecorder) workspaceAgentPromptCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -886,10 +891,15 @@ func TestLifecycle_ThreadModeWorkspaceAgentThread(t *testing.T) {
 	gt.Value(t, posts[3].ThreadTS).Equal(rootTS)
 	gt.Value(t, posts[3].Text).Equal("Still nothing.")
 
-	// 3. Both turns went to the workspace agent — two persona prompts, one per
-	// turn — on one Session, and nothing in this thread ever became a Case.
+	// 3. Both turns went to the workspace agent, on one Session, and nothing in
+	// this thread ever became a Case. Each turn makes two LLM calls — the planner
+	// round and the direct-reply child — and BOTH carry the persona: the direct
+	// child writes the message the user reads, so it is given the host's prompt
+	// rather than the investigation sub-agent template. A count of 2 here means the
+	// direct child lost the persona again, which is what published a sub-agent's
+	// investigation report into a Slack thread as the reply.
 	gt.Bool(t, prompts.sawWorkspaceAgent()).True()
-	gt.Number(t, prompts.workspaceAgentPromptCount()).Equal(2)
+	gt.Number(t, prompts.workspaceAgentPromptCount()).Equal(4)
 
 	ssn, err = repo.Session().GetByThread(ctx, channel, rootTS)
 	gt.NoError(t, err).Required()
