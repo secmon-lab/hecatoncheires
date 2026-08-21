@@ -31,7 +31,7 @@ func (x *HomeMessageLLM) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:        "home-message-llm-provider",
-			Usage:       "LLM provider for the home greeting: openai, claude, or gemini (empty falls back to --llm-provider)",
+			Usage:       "LLM provider for the home greeting: openai, claude, or gemini (empty falls back to the default model)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_HOME_MESSAGE_LLM_PROVIDER"),
 			Destination: &x.provider,
 		},

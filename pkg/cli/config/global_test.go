@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 	"github.com/urfave/cli/v3"
 )
 
@@ -387,5 +389,310 @@ func TestExportSection_Validate(t *testing.T) {
 			},
 		}}
 		gt.Error(t, s.Validate(reg)).Is(config.ErrDuplicateExportWorkspace)
+	})
+}
+
+// TestLoadLLMModels_Basic pins the resolved form of a definition: the reference
+// name comes from the alias when there is one, prices are converted out of the
+// dollars-per-million-tokens an operator writes, and the provider survives.
+func TestLoadLLMModels_Basic(t *testing.T) {
+	path := writeGlobalConfig(t, "models.toml", `
+[[llm_model]]
+provider = "claude"
+model = "claude-opus-5"
+input_usd_per_mtok = 5.0
+output_usd_per_mtok = 25.0
+cache_read_usd_per_mtok = 0.5
+cache_write_usd_per_mtok = 6.25
+
+[[llm_model]]
+alias = "cheap"
+provider = "gemini"
+model = "gemini-3.7-flash"
+input_usd_per_mtok = 0.75
+output_usd_per_mtok = 3.75
+cache_read_usd_per_mtok = 0.075
+`)
+
+	defs, err := config.LoadLLMModels([]string{path})
+	gt.NoError(t, err).Required()
+	gt.Array(t, defs).Length(2).Required()
+
+	// No alias: the model name is the reference name.
+	gt.String(t, defs[0].Ref).Equal("claude-opus-5")
+	gt.String(t, defs[0].Provider).Equal(agentkernel.ProviderClaude)
+	gt.String(t, defs[0].Model).Equal("claude-opus-5")
+	gt.Value(t, defs[0].Rate).Equal(pricing.Rate{
+		Input: 5000, Output: 25000, CacheRead: 500, CacheWrite: 6250,
+	})
+
+	// An alias replaces the reference name but not the model name.
+	gt.String(t, defs[1].Ref).Equal("cheap")
+	gt.String(t, defs[1].Provider).Equal(agentkernel.ProviderGemini)
+	gt.String(t, defs[1].Model).Equal("gemini-3.7-flash")
+	gt.Value(t, defs[1].Rate).Equal(pricing.Rate{Input: 750, Output: 3750, CacheRead: 75})
+}
+
+// Definitions are a SET, so several files may each declare some. Only a repeated
+// reference name is a conflict.
+func TestLoadLLMModels_AcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "a.toml"), []byte(`
+[[llm_model]]
+alias = "main"
+provider = "claude"
+model = "claude-opus-5"
+input_usd_per_mtok = 5.0
+output_usd_per_mtok = 25.0
+`), 0600)).Required()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "b.toml"), []byte(`
+[[llm_model]]
+alias = "cheap"
+provider = "gemini"
+model = "gemini-3.7-flash"
+input_usd_per_mtok = 0.75
+output_usd_per_mtok = 3.75
+`), 0600)).Required()
+
+	defs, err := config.LoadLLMModels([]string{dir})
+	gt.NoError(t, err).Required()
+
+	refs := make([]string, 0, len(defs))
+	for _, d := range defs {
+		refs = append(refs, d.Ref)
+	}
+	slices.Sort(refs)
+	gt.Array(t, refs).Equal([]string{"cheap", "main"})
+}
+
+func TestLoadLLMModels_DuplicateRefAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	entry := `
+[[llm_model]]
+alias = "main"
+provider = "claude"
+model = "claude-opus-5"
+input_usd_per_mtok = 5.0
+output_usd_per_mtok = 25.0
+`
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "a.toml"), []byte(entry), 0600)).Required()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "b.toml"), []byte(entry), 0600)).Required()
+
+	_, err := config.LoadLLMModels([]string{dir})
+	gt.Error(t, err).Is(config.ErrDuplicateLLMModelRef)
+}
+
+// An alias colliding with another entry's model name is the same collision: the
+// reference name is what a Job writes, whichever half it came from.
+func TestLoadLLMModels_AliasCollidesWithAModelName(t *testing.T) {
+	path := writeGlobalConfig(t, "models.toml", `
+[[llm_model]]
+provider = "claude"
+model = "claude-opus-5"
+input_usd_per_mtok = 5.0
+output_usd_per_mtok = 25.0
+
+[[llm_model]]
+alias = "claude-opus-5"
+provider = "gemini"
+model = "gemini-3.7-flash"
+input_usd_per_mtok = 0.75
+output_usd_per_mtok = 3.75
+`)
+
+	_, err := config.LoadLLMModels([]string{path})
+	gt.Error(t, err).Is(config.ErrDuplicateLLMModelRef)
+}
+
+func TestLoadLLMModels_NoPaths(t *testing.T) {
+	defs, err := config.LoadLLMModels(nil)
+	gt.NoError(t, err)
+	gt.Array(t, defs).Length(0)
+}
+
+func TestLoadLLMModels_RejectsWorkspaceSection(t *testing.T) {
+	path := writeGlobalConfig(t, "bad.toml", `
+[workspace]
+id = "risk"
+
+[[llm_model]]
+provider = "claude"
+model = "claude-opus-5"
+input_usd_per_mtok = 5.0
+output_usd_per_mtok = 25.0
+`)
+
+	_, err := config.LoadLLMModels([]string{path})
+	gt.Error(t, err).Is(config.ErrGlobalConfigContainsWorkspace)
+}
+
+func TestLLMModelSection_Validate(t *testing.T) {
+	valid := func() *config.LLMModelSection {
+		return &config.LLMModelSection{
+			Provider:         "gemini",
+			Model:            "gemini-3.7-flash",
+			InputUSDPerMTok:  0.75,
+			OutputUSDPerMTok: 3.75,
+		}
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		def, err := valid().Validate()
+		gt.NoError(t, err).Required()
+		gt.String(t, def.Ref).Equal("gemini-3.7-flash")
+	})
+
+	testCases := map[string]struct {
+		mutate func(*config.LLMModelSection) *config.LLMModelSection
+		// wantIs is the sentinel the error must carry, or nil when the rejection
+		// comes from agentkernel.ModelDef.Validate, which carries none.
+		wantIs error
+	}{
+		"no model": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.Model = ""; return s },
+			wantIs: config.ErrInvalidLLMModel,
+		},
+		"unknown provider": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.Provider = "bedrock"; return s },
+		},
+		"missing input price": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.InputUSDPerMTok = 0; return s },
+			wantIs: config.ErrInvalidLLMModelPrice,
+		},
+		"missing output price": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.OutputUSDPerMTok = 0; return s },
+			wantIs: config.ErrInvalidLLMModelPrice,
+		},
+		"negative input price": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.InputUSDPerMTok = -1; return s },
+			wantIs: config.ErrInvalidLLMModelPrice,
+		},
+		"negative cache price": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection {
+				s.CacheReadUSDPerMTok = -0.1
+				return s
+			},
+			wantIs: config.ErrInvalidLLMModelPrice,
+		},
+		// A per-token figure written where a per-million one belongs would price
+		// the model at nothing, which is what a money budget cannot tolerate.
+		"price too small to represent": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection {
+				s.InputUSDPerMTok = 0.0000001
+				return s
+			},
+			wantIs: config.ErrInvalidLLMModelPrice,
+		},
+		"invalid alias": {
+			mutate: func(s *config.LLMModelSection) *config.LLMModelSection { s.Alias = "has space"; return s },
+			wantIs: config.ErrInvalidLLMModelRef,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			_, err := tc.mutate(valid()).Validate()
+			gt.Value(t, err).NotNil().Required()
+			if tc.wantIs != nil {
+				gt.Error(t, err).Is(tc.wantIs)
+			}
+		})
+	}
+}
+
+func TestLoadAgentSection_Basic(t *testing.T) {
+	path := writeGlobalConfig(t, "agent.toml", `
+[agent]
+default_budget_usd = 3.5
+`)
+
+	sec, err := config.LoadAgentSection([]string{path})
+	gt.NoError(t, err).Required()
+	gt.Value(t, sec).NotNil().Required()
+	gt.Value(t, sec.DefaultBudget()).Equal(pricing.FromUSD(3.5))
+}
+
+func TestLoadAgentSection_None(t *testing.T) {
+	path := writeGlobalConfig(t, "empty.toml", `
+[[workspace_group]]
+id = "g1"
+`)
+
+	sec, err := config.LoadAgentSection([]string{path})
+	gt.NoError(t, err)
+	gt.Value(t, sec).Nil()
+
+	// A nil section answers "not set" rather than panicking, which is what a
+	// deployment with no [agent] relies on.
+	gt.Value(t, sec.DefaultBudget()).Equal(pricing.NanoUSD(0))
+}
+
+func TestLoadAgentSection_DuplicateAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	entry := "[agent]\ndefault_budget_usd = 1.0\n"
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "a.toml"), []byte(entry), 0600)).Required()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "b.toml"), []byte(entry), 0600)).Required()
+
+	_, err := config.LoadAgentSection([]string{dir})
+	gt.Error(t, err).Is(config.ErrDuplicateAgentConfig)
+}
+
+func TestLoadAgentSection_RejectsInvalidBudget(t *testing.T) {
+	t.Run("negative", func(t *testing.T) {
+		path := writeGlobalConfig(t, "agent.toml", "[agent]\ndefault_budget_usd = -1.0\n")
+		_, err := config.LoadAgentSection([]string{path})
+		gt.Error(t, err).Is(config.ErrInvalidBudget)
+	})
+
+	t.Run("too small to represent", func(t *testing.T) {
+		path := writeGlobalConfig(t, "agent.toml", "[agent]\ndefault_budget_usd = 0.0000000001\n")
+		_, err := config.LoadAgentSection([]string{path})
+		gt.Error(t, err).Is(config.ErrInvalidBudget)
+	})
+}
+
+// TestValidateJobModels pins the cross-document check: the Jobs come from
+// --config and the definitions from --global-config, so nothing else can catch a
+// Job pointing at a model that does not exist.
+func TestValidateJobModels(t *testing.T) {
+	defs := []agentkernel.ModelDef{{
+		Ref: "cheap", Provider: agentkernel.ProviderGemini, Model: "gemini-3.7-flash",
+		Rate: pricing.Rate{Input: 750, Output: 3750},
+	}}
+
+	registryWithJob := func(j *model.Job) *model.WorkspaceRegistry {
+		reg := model.NewWorkspaceRegistry()
+		reg.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "risk"},
+			Jobs:      []*model.Job{j},
+		})
+		return reg
+	}
+
+	t.Run("a defined model passes", func(t *testing.T) {
+		reg := registryWithJob(&model.Job{ID: "daily", LLMModel: "cheap"})
+		gt.NoError(t, config.ValidateJobModels(defs, reg))
+	})
+
+	t.Run("no model named passes", func(t *testing.T) {
+		reg := registryWithJob(&model.Job{ID: "daily"})
+		gt.NoError(t, config.ValidateJobModels(defs, reg))
+	})
+
+	t.Run("an undefined model is refused", func(t *testing.T) {
+		reg := registryWithJob(&model.Job{ID: "daily", LLMModel: "expensive"})
+		err := config.ValidateJobModels(defs, reg)
+		gt.Error(t, err).Is(config.ErrUnknownLLMModelRef)
+		gt.String(t, err.Error()).Contains("undefined model")
+	})
+
+	// A disabled Job does not run, so it needs no client and no definition.
+	t.Run("a disabled job is ignored", func(t *testing.T) {
+		reg := registryWithJob(&model.Job{ID: "daily", LLMModel: "expensive", Disabled: true})
+		gt.NoError(t, config.ValidateJobModels(defs, reg))
+	})
+
+	t.Run("a nil registry passes", func(t *testing.T) {
+		gt.NoError(t, config.ValidateJobModels(defs, nil))
 	})
 }

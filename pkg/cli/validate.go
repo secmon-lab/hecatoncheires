@@ -65,6 +65,34 @@ func cmdValidate() *cli.Command {
 				)
 			}
 
+			// Validate the model definitions and the deployment-wide agent
+			// settings, and cross-check that every model a Job names is defined.
+			// The two documents are loaded by different flags, so this is the only
+			// place the pairing can be checked without starting a server.
+			modelDefs, err := appCfg.ConfigureLLMModels(c)
+			if err != nil {
+				return goerr.Wrap(err, "model definition validation failed")
+			}
+			agentSection, err := appCfg.ConfigureAgentSection(c)
+			if err != nil {
+				return goerr.Wrap(err, "[agent] section validation failed")
+			}
+			if err := config.ValidateJobModels(modelDefs, registry); err != nil {
+				return goerr.Wrap(err, "job model validation failed")
+			}
+			for _, d := range modelDefs {
+				logger.Info("Model definition validated",
+					"ref", d.Ref,
+					"provider", d.Provider,
+					"model", d.Model,
+				)
+			}
+			if agentSection != nil {
+				logger.Info("Agent settings validated",
+					"default_budget", agentSection.DefaultBudget().USD(),
+				)
+			}
+
 			// Step 2: If --check-db is specified, run DB consistency check
 			if !checkDB {
 				logger.Info("`--check-db` not specified, skipping DB consistency check")

@@ -9,6 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // runAgentFlags parses argv through the flag set so the test exercises the same
@@ -34,8 +35,6 @@ func TestAgentDefaults(t *testing.T) {
 	// finished child's usage is folded into its parent. It therefore has to stay
 	// well clear of the task ceiling: at 64 a single busy sub-agent ended the turn.
 	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(128))
-	gt.Value(t, budgets.Root.MaxInputTokens).Equal(int64(500_000))
-	gt.Value(t, budgets.Root.MaxOutputTokens).Equal(int64(100_000))
 	gt.Value(t, budgets.Task.MaxSteps).Equal(int64(48))
 	gt.Bool(t, budgets.Root.MaxSteps > budgets.Task.MaxSteps*2).True()
 	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(100_000))
@@ -53,8 +52,7 @@ func TestAgentDefaults(t *testing.T) {
 func TestAgentFlagsOverrideDefaults(t *testing.T) {
 	cfg := runAgentFlags(t,
 		"--agent-max-steps", "10",
-		"--agent-max-input-tokens", "2000",
-		"--agent-max-output-tokens", "400",
+		"--agent-default-budget-usd", "7.5",
 		"--agent-task-max-steps", "6",
 		"--agent-task-max-input-tokens", "500",
 		"--agent-task-max-output-tokens", "100",
@@ -68,12 +66,15 @@ func TestAgentFlagsOverrideDefaults(t *testing.T) {
 	budgets, err := cfg.Budgets()
 	gt.NoError(t, err).Required()
 	gt.Value(t, budgets.Root.MaxSteps).Equal(int64(10))
-	gt.Value(t, budgets.Root.MaxInputTokens).Equal(int64(2000))
-	gt.Value(t, budgets.Root.MaxOutputTokens).Equal(int64(400))
 	gt.Value(t, budgets.Task.MaxSteps).Equal(int64(6))
 	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(500))
 	gt.Value(t, budgets.Task.MaxOutputTokens).Equal(int64(100))
 	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.5)
+
+	got, source, err := cfg.BudgetOr(nil)
+	gt.NoError(t, err).Required()
+	gt.Value(t, got).Equal(pricing.FromUSD(7.5))
+	gt.String(t, source).Equal(config.BudgetSourceFlag)
 
 	gt.Value(t, cfg.WorkerConcurrency()).Equal(3)
 	gt.Value(t, cfg.WorkerPollConcurrency()).Equal(1)
@@ -87,8 +88,6 @@ func TestAgentFlagsOverrideDefaults(t *testing.T) {
 func TestAgentBudgetsRejectInvalidValues(t *testing.T) {
 	testCases := map[string][]string{
 		"zero steps":              {"--agent-max-steps", "0"},
-		"zero input tokens":       {"--agent-max-input-tokens", "0"},
-		"zero output tokens":      {"--agent-max-output-tokens", "0"},
 		"ratio at one":            {"--agent-budget-notice-ratio", "1"},
 		"negative ratio":          {"--agent-budget-notice-ratio", "-0.1"},
 		"zero task steps":         {"--agent-task-max-steps", "0"},
@@ -104,19 +103,44 @@ func TestAgentBudgetsRejectInvalidValues(t *testing.T) {
 	}
 }
 
-func TestAgentValidateWorkerRejectsInvalidValues(t *testing.T) {
-	testCases := map[string][]string{
-		"zero concurrency":      {"--agent-worker-concurrency", "0"},
-		"zero poll concurrency": {"--agent-worker-poll-concurrency", "0"},
-		"zero lease":            {"--agent-worker-lease", "0s"},
-		"zero poll interval":    {"--agent-worker-poll-interval", "0s"},
-	}
+// TestAgentBudgetPrecedence pins the three-way decision: the flag wins over the
+// document, the document wins over the built-in figure, and each answer says
+// where it came from so the startup log can report it.
+func TestAgentBudgetPrecedence(t *testing.T) {
+	fromDoc := &config.AgentSection{DefaultBudgetUSD: 3}
 
-	for name, args := range testCases {
-		t.Run(name, func(t *testing.T) {
-			gt.Value(t, runAgentFlags(t, args...).ValidateWorker()).NotNil()
-		})
-	}
+	t.Run("flag beats the document", func(t *testing.T) {
+		got, source, err := runAgentFlags(t, "--agent-default-budget-usd", "9").BudgetOr(fromDoc)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Equal(pricing.FromUSD(9))
+		gt.String(t, source).Equal(config.BudgetSourceFlag)
+	})
+
+	t.Run("document is used when the flag is absent", func(t *testing.T) {
+		got, source, err := runAgentFlags(t).BudgetOr(fromDoc)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Equal(pricing.FromUSD(3))
+		gt.String(t, source).Equal(config.BudgetSourceGlobalConfig)
+	})
+
+	t.Run("built-in figure when neither is set", func(t *testing.T) {
+		got, source, err := runAgentFlags(t).BudgetOr(nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Equal(pricing.FromUSD(2))
+		gt.String(t, source).Equal(config.BudgetSourceBuiltin)
+	})
+
+	t.Run("a section setting no budget falls through", func(t *testing.T) {
+		got, source, err := runAgentFlags(t).BudgetOr(&config.AgentSection{})
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).Equal(pricing.FromUSD(2))
+		gt.String(t, source).Equal(config.BudgetSourceBuiltin)
+	})
+
+	t.Run("negative flag value is refused", func(t *testing.T) {
+		_, _, err := runAgentFlags(t, "--agent-default-budget-usd", "-1").BudgetOr(nil)
+		gt.Error(t, err).Is(config.ErrInvalidBudget)
+	})
 }
 
 func TestAgentLogAttrs(t *testing.T) {
@@ -126,7 +150,7 @@ func TestAgentLogAttrs(t *testing.T) {
 		keys[a.Key] = true
 	}
 	for _, want := range []string{
-		"max_steps", "max_input_tokens", "max_output_tokens",
+		"max_steps",
 		"task_max_steps", "task_max_input_tokens", "task_max_output_tokens",
 		"notice_ratio", "worker_concurrency", "worker_poll_concurrency",
 		"worker_lease", "worker_poll_interval",

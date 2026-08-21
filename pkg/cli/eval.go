@@ -16,8 +16,15 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
+// evalDefaultBudgetUSD is what one scenario run may spend when the global config
+// declares no [agent] budget. It is deliberately generous: a scenario is meant to
+// fail on the agent's judgement, not on a ceiling the harness imposed. The eval
+// command carries no --agent-* flags, so this is the only fallback.
+const evalDefaultBudgetUSD = 20.0
+
 func cmdEval() *cli.Command {
 	var (
+		appCfg      config.AppConfig
 		llmCfg      config.LLM
 		slackCfg    config.Slack
 		githubCfg   config.GitHub
@@ -58,6 +65,7 @@ func cmdEval() *cli.Command {
 			Destination: &notionTok,
 		},
 	}
+	flags = append(flags, appCfg.GlobalConfigFlags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
@@ -100,14 +108,20 @@ func cmdEval() *cli.Command {
 			}
 
 			if !dryRun {
-				llmClient, err := llmCfg.NewClient(ctx)
+				// The harness resolves models exactly as serve does, so a
+				// scenario Job naming a model reaches the same client a deployed
+				// one would. It passes no workspace registry: scenarios bring
+				// their own workspace per run, so every DEFINED model gets a
+				// client rather than only the ones a registry names.
+				setup, err := buildEvalLLMSetup(ctx, c, &appCfg, &llmCfg)
 				if err != nil {
-					return goerr.Wrap(err, "failed to initialize LLM client")
+					return err
 				}
-				if llmClient == nil {
-					return goerr.New("an LLM provider is required to run scenarios (set --llm-provider)")
+				if !setup.enabled() {
+					return goerr.New("a model is required to run scenarios: declare [[llm_model]] in --global-config and name it with --llm-model")
 				}
-				cfg.LLM = llmClient
+				cfg.LLM = setup.Default
+				cfg.Models = setup.Policy
 
 				if err := wireLiveTools(ctx, &cfg, &slackCfg, &githubCfg, &jiraCfg, &webfetchCfg, notionTok); err != nil {
 					return err

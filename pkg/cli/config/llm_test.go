@@ -5,77 +5,108 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
-func TestLLM_Disabled(t *testing.T) {
-	cfg := config.NewLLMForTest("", "", "", "", "", "")
-	gt.Bool(t, cfg.IsEnabled()).False()
+// modelDef builds a priced definition for one provider, which is what
+// NewClientFor takes.
+func modelDef(provider, model string) agentkernel.ModelDef {
+	return agentkernel.ModelDef{
+		Ref:      model,
+		Provider: provider,
+		Model:    model,
+		Rate:     pricing.Rate{Input: 1000, Output: 5000},
+	}
+}
 
-	client, err := cfg.NewClient(context.Background())
-	gt.NoError(t, err)
-	gt.Value(t, client).Nil()
+func TestLLM_IsEnabled(t *testing.T) {
+	gt.Bool(t, config.NewLLMForTest("", "", "", "", "").IsEnabled()).False()
+	gt.Bool(t, config.NewLLMForTest("cheap", "", "", "", "").IsEnabled()).True()
+	gt.String(t, config.NewLLMForTest("cheap", "", "", "", "").ModelRef()).Equal("cheap")
+}
+
+func TestLLM_NewClientFor_RejectsAnUnpricedDefinition(t *testing.T) {
+	cfg := config.NewLLMForTest("cheap", "openai-key", "", "", "")
+
+	_, err := cfg.NewClientFor(context.Background(), agentkernel.ModelDef{
+		Ref: "cheap", Provider: agentkernel.ProviderOpenAI, Model: "gpt-4o",
+	})
+
+	gt.Error(t, err)
+	gt.String(t, err.Error()).Contains("priced at nothing")
 }
 
 func TestLLM_OpenAI_RequiresAPIKey(t *testing.T) {
-	cfg := config.NewLLMForTest("openai", "", "", "", "", "")
-	gt.Bool(t, cfg.IsEnabled()).True()
+	cfg := config.NewLLMForTest("gpt-4o", "", "", "", "")
 
-	_, err := cfg.NewClient(context.Background())
+	_, err := cfg.NewClientFor(context.Background(), modelDef(agentkernel.ProviderOpenAI, "gpt-4o"))
+
 	gt.Error(t, err)
 	gt.String(t, err.Error()).Contains("openai-api-key")
 }
 
 func TestLLM_Claude_RequiresCredentials(t *testing.T) {
-	cfg := config.NewLLMForTest("claude", "", "", "", "", "")
+	cfg := config.NewLLMForTest("claude-opus-5", "", "", "", "global")
 
-	_, err := cfg.NewClient(context.Background())
+	_, err := cfg.NewClientFor(context.Background(),
+		modelDef(agentkernel.ProviderClaude, "claude-opus-5"))
+
 	gt.Error(t, err)
-	gt.String(t, err.Error()).Contains("claude")
+	gt.String(t, err.Error()).Contains("claude-api-key")
 }
 
 func TestLLM_Claude_RejectsBothCredentials(t *testing.T) {
-	cfg := config.NewLLMForTest("claude", "", "", "anthropic-key", "gcp-project", "global")
+	cfg := config.NewLLMForTest("claude-opus-5", "", "anthropic-key", "gcp-project", "global")
 
-	_, err := cfg.NewClient(context.Background())
+	_, err := cfg.NewClientFor(context.Background(),
+		modelDef(agentkernel.ProviderClaude, "claude-opus-5"))
+
 	gt.Error(t, err)
 	gt.String(t, err.Error()).Contains("mutually exclusive")
 }
 
 func TestLLM_Claude_VertexRequiresLocation(t *testing.T) {
-	cfg := config.NewLLMForTest("claude", "", "", "", "gcp-project", "")
+	cfg := config.NewLLMForTest("claude-opus-5", "", "", "gcp-project", "")
 
-	_, err := cfg.NewClient(context.Background())
+	_, err := cfg.NewClientFor(context.Background(),
+		modelDef(agentkernel.ProviderClaude, "claude-opus-5"))
+
 	gt.Error(t, err)
 	gt.String(t, err.Error()).Contains("location")
 }
 
 func TestLLM_Gemini_RequiresProjectAndLocation(t *testing.T) {
 	t.Run("missing project", func(t *testing.T) {
-		cfg := config.NewLLMForTest("gemini", "", "", "", "", "global")
-		_, err := cfg.NewClient(context.Background())
+		cfg := config.NewLLMForTest("cheap", "", "", "", "global")
+		_, err := cfg.NewClientFor(context.Background(),
+			modelDef(agentkernel.ProviderGemini, "gemini-3.7-flash"))
 		gt.Error(t, err)
 		gt.String(t, err.Error()).Contains("gemini-project-id")
 	})
 
 	t.Run("missing location", func(t *testing.T) {
-		cfg := config.NewLLMForTest("gemini", "", "", "", "gcp-project", "")
-		_, err := cfg.NewClient(context.Background())
+		cfg := config.NewLLMForTest("cheap", "", "", "gcp-project", "")
+		_, err := cfg.NewClientFor(context.Background(),
+			modelDef(agentkernel.ProviderGemini, "gemini-3.7-flash"))
 		gt.Error(t, err)
 		gt.String(t, err.Error()).Contains("gemini-location")
 	})
 }
 
 func TestLLM_UnsupportedProvider(t *testing.T) {
-	cfg := config.NewLLMForTest("bogus", "", "", "", "", "")
+	cfg := config.NewLLMForTest("bogus", "", "", "", "")
 
-	_, err := cfg.NewClient(context.Background())
+	_, err := cfg.NewClientFor(context.Background(), modelDef("bedrock", "some-model"))
+
 	gt.Error(t, err)
-	gt.String(t, err.Error()).Contains("unsupported")
+	gt.String(t, err.Error()).Contains("openai, claude or gemini")
 }
 
 func TestLLM_LogAttrs_DoesNotLeakSecrets(t *testing.T) {
-	cfg := config.NewLLMForTest("openai", "gpt-4o", "super-secret-key", "claude-secret", "proj", "global")
+	cfg := config.NewLLMForTest("gpt-4o", "super-secret-key", "claude-secret", "proj", "global")
 	attrs := cfg.LogAttrs()
 
 	for _, a := range attrs {
@@ -84,24 +115,17 @@ func TestLLM_LogAttrs_DoesNotLeakSecrets(t *testing.T) {
 		gt.String(t, s).NotEqual("claude-secret")
 	}
 
-	// OpenAI provider should not emit GCP attributes even when fields happen to be set.
-	for _, a := range attrs {
-		gt.String(t, a.Key).NotEqual("gcp_project_id")
-		gt.String(t, a.Key).NotEqual("gcp_location")
-	}
-
-	// Sanity: provider is logged.
 	found := false
 	for _, a := range attrs {
-		if a.Key == "provider" && a.Value.String() == "openai" {
+		if a.Key == "model_ref" && a.Value.String() == "gpt-4o" {
 			found = true
 		}
 	}
 	gt.Bool(t, found).True()
 }
 
-func TestLLM_LogAttrs_ClaudeDirectAPI_OmitsGCP(t *testing.T) {
-	cfg := config.NewLLMForTest("claude", "", "", "anthropic-key", "", "global")
+func TestLLM_LogAttrs_OmitsGCPWithoutAProject(t *testing.T) {
+	cfg := config.NewLLMForTest("claude-opus-5", "", "anthropic-key", "", "global")
 	attrs := cfg.LogAttrs()
 
 	for _, a := range attrs {
@@ -110,8 +134,8 @@ func TestLLM_LogAttrs_ClaudeDirectAPI_OmitsGCP(t *testing.T) {
 	}
 }
 
-func TestLLM_LogAttrs_ClaudeVertex_IncludesGCP(t *testing.T) {
-	cfg := config.NewLLMForTest("claude", "", "", "", "proj", "us-east5")
+func TestLLM_LogAttrs_IncludesGCPWhenSet(t *testing.T) {
+	cfg := config.NewLLMForTest("claude-opus-5", "", "", "proj", "us-east5")
 	attrs := cfg.LogAttrs()
 
 	hasProject, hasLocation := false, false
@@ -125,9 +149,4 @@ func TestLLM_LogAttrs_ClaudeVertex_IncludesGCP(t *testing.T) {
 	}
 	gt.Bool(t, hasProject).True()
 	gt.Bool(t, hasLocation).True()
-}
-
-func TestLLM_IsEnabled(t *testing.T) {
-	gt.Bool(t, config.NewLLMForTest("", "", "", "", "", "").IsEnabled()).False()
-	gt.Bool(t, config.NewLLMForTest("openai", "", "", "", "", "").IsEnabled()).True()
 }

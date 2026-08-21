@@ -1,6 +1,58 @@
 package kernel
 
-import "github.com/gollem-dev/agentkit"
+import (
+	"github.com/gollem-dev/agentkit"
+	"github.com/gollem-dev/gollem"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
+)
+
+// ModelRoleHandlerForTest applies the model-role middleware to next and returns
+// the resulting handler, so a test can drive one Generate and read back the role
+// it was pointed at. Reaching it through a Kernel would only show which client
+// answered, not which role was selected.
+func ModelRoleHandlerForTest(p ModelPolicy, next agentkit.GenerateHandler) agentkit.GenerateHandler {
+	return modelRoleMiddleware(p)(next)
+}
+
+// ClientForTest is the client a ModelPolicyForTest binds to a non-default model.
+// A test compares against it to tell which model a run resolved to.
+type ClientForTest struct {
+	gollem.LLMClient
+	Ref string
+}
+
+// ModelPolicyForTest builds a policy over the given reference names, the first of
+// which is the default. Every model is priced at $1 / $5 per MTok and the budget
+// is $10, which is far above anything a test spends.
+func ModelPolicyForTest(refs ...string) ModelPolicy {
+	if len(refs) == 0 {
+		refs = []string{"test-model"}
+	}
+	defs := make([]ModelDef, 0, len(refs))
+	clients := make(map[string]gollem.LLMClient, len(refs))
+	for i, ref := range refs {
+		defs = append(defs, ModelDef{
+			Ref:      ref,
+			Provider: ProviderClaude,
+			Model:    ref + "-resolved",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		})
+		if i > 0 {
+			clients[ref] = &ClientForTest{Ref: ref}
+		}
+	}
+	p, err := NewModelPolicy(ModelPolicyInput{
+		Defs:          defs,
+		DefaultRef:    refs[0],
+		Clients:       clients,
+		DefaultBudget: pricing.FromUSD(10),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
 
 // DescribeArgsForTest exposes the rejected-argument shape renderer. The message
 // it builds is read by a model, so its exact wording is part of the contract and

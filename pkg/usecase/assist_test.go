@@ -196,14 +196,16 @@ func wireAssistRuntime(t *testing.T, assistUC *usecase.AssistUseCase, repo inter
 	t.Helper()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
-	gt.NoError(t, assistUC.Register(reg, testAgentBudget.Limiter(), history)).Required()
+	models := testAgentModelPolicy(t)
+	gt.NoError(t, assistUC.Register(reg, testAgentRootBudget.Limiter(models.Resolve), history)).Required()
 
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    agentprocmemory.New(),
 		History: history,
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
+		Budgets: agentkernel.Budgets{Root: testAgentRootBudget, Task: testAgentBudget},
+		Models:  models,
 		Agents:  reg,
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry, SlackBot: bot},
 	})

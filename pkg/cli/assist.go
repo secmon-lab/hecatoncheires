@@ -86,14 +86,15 @@ func cmdAssist() *cli.Command {
 				}
 			}()
 
-			// Initialize LLM client (required)
+			// Resolve the models and the budget (required)
 			if !llmCfg.IsEnabled() {
-				return goerr.New("--llm-provider is required for assist")
+				return goerr.New("--llm-model is required for assist")
 			}
-			llmClient, err := llmCfg.NewClient(ctx)
+			modelSetup, err := buildLLMSetup(ctx, c, &appCfg, &llmCfg, registry, agentCfg.BudgetOr)
 			if err != nil {
-				return goerr.Wrap(err, "failed to initialize LLM client")
+				return goerr.Wrap(err, "failed to resolve the LLM models")
 			}
+			llmClient := modelSetup.Default
 			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
 			// Initialize Embedding client (required)
@@ -136,7 +137,7 @@ func cmdAssist() *cli.Command {
 				return bErr
 			}
 			agentRegistry := agentkit.NewRegistry()
-			if err := uc.Assist.Register(agentRegistry, budgets.Root.Limiter(),
+			if err := uc.Assist.Register(agentRegistry, budgets.Root.Limiter(modelSetup.Policy.Resolve),
 				agentarchive.NewMemoryHistoryStore()); err != nil {
 				return goerr.Wrap(err, "failed to register the assist agent")
 			}
@@ -146,6 +147,7 @@ func cmdAssist() *cli.Command {
 				LLM:     llmClient,
 				Trace:   agentarchive.NewMemoryTraceRepository(),
 				Budgets: budgets,
+				Models:  modelSetup.Policy,
 				Agents:  agentRegistry,
 				// Only the clients this command actually wires. Assist has never
 				// had Notion / GitHub / Jira / WebFetch or the User-token Slack

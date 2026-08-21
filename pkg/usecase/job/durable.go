@@ -355,6 +355,13 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 		// nothing, whereas a lifecycle event, a manual Run or an interactive
 		// resume is a single user-visible action with no such retry.
 		SlotGated: p.event.Domain == model.JobEventDomainScheduled,
+		// The Job's own model and budget, carried on the run rather than looked
+		// up later: the configuration can be replaced while this run is still
+		// going, and a run must be judged against what it started under. Empty
+		// and zero mean "the deployment's default", which is what a Job that
+		// names neither gets.
+		LLMModel: p.job.LLMModel,
+		Budget:   p.job.Budget,
 	}
 	// Both or neither: the scope rejects a half-set pair, and a marker that could
 	// not be posted leaves the run with no thread to report into rather than

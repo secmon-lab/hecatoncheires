@@ -16,11 +16,32 @@ import (
 	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	eval "github.com/secmon-lab/hecatoncheires/pkg/usecase/eval"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 func scenarioPath() string {
 	return filepath.Join("scenario", "testdata", "valid_thread_initial.toml")
+}
+
+// testModelPolicy is the one-model policy a scenario runs under: a priced
+// default model and a budget far above anything a scripted LLM spends, so a
+// scenario never ends on the ceiling.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
 }
 
 // --- scripted LLM building blocks -----------------------------------------
@@ -153,6 +174,7 @@ func TestRun_Lifecycle_Materialize(t *testing.T) {
 
 	code, err := eval.Run(context.Background(), []string{scenarioPath()}, eval.Config{
 		LLM:         materializeLLM(),
+		Models:      testModelPolicy(t),
 		Concurrency: 1,
 		Language:    "en",
 		ReportPath:  reportPath,
@@ -238,6 +260,7 @@ func TestRun_Lifecycle_QuestionAnswerLoop(t *testing.T) {
 
 	code, err := eval.Run(context.Background(), []string{scenarioPath()}, eval.Config{
 		LLM:         questionLLM(),
+		Models:      testModelPolicy(t),
 		Concurrency: 1,
 		Language:    "en",
 		ReportPath:  reportPath,
@@ -292,6 +315,7 @@ func TestRun_ScenarioError_ExitsNonZero(t *testing.T) {
 
 	code, err := eval.Run(context.Background(), []string{scenarioPath()}, eval.Config{
 		LLM:         badJudgeLLM(),
+		Models:      testModelPolicy(t),
 		Concurrency: 1,
 		ReportPath:  reportPath,
 	}, &out)
@@ -367,6 +391,7 @@ func TestRun_Lifecycle_JobExecution(t *testing.T) {
 
 	code, err := eval.Run(context.Background(), []string{jobScenarioPath()}, eval.Config{
 		LLM:         jobScriptLLM(),
+		Models:      testModelPolicy(t),
 		Concurrency: 1,
 		Language:    "en",
 		ReportPath:  reportPath,
@@ -543,6 +568,7 @@ func TestRun_RealLLM_ThreadInitial(t *testing.T) {
 
 	code, err := eval.Run(context.Background(), []string{scenarioPath()}, eval.Config{
 		LLM:         llm,
+		Models:      testModelPolicy(t),
 		Concurrency: 1,
 		Language:    "en",
 		ReportPath:  reportPath,

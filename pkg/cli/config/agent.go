@@ -9,6 +9,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // Agent runtime defaults.
@@ -31,20 +32,27 @@ import (
 // cover one — a single busy sub-agent ended the turn with "step budget
 // exhausted" and no answer.
 //
-// The token ceilings are NOT derived from measurement: the previous runtime
-// counted no tokens at all, so there is no baseline in this repository to
-// derive one from. Replace them with measured values once Process.Metrics has
-// recorded real usage. Note they fold the same way — the root's input allowance
-// is five times a task's, so five sub-agents at their ceiling would spend it.
+// A ROOT RUN'S SPEND CEILING IS MONEY, not tokens: which model a run generates
+// through is configuration, and the models a deployment may name differ in price
+// by more than an order of magnitude, so any token figure is right for one of
+// them and wrong for another. The task tier keeps its token ceilings — they bound
+// one investigation's share of a turn, and the money ceiling on the root already
+// bounds what the tree as a whole may cost.
 //
-// Input and output are bounded separately because output tokens cost several
-// times what input tokens do: under one combined ceiling a large input
-// allowance would hide an output run-away — the expensive half — until the
-// whole budget was gone.
+// The task token ceilings are NOT derived from measurement: the pre-agentkit
+// runtime counted no tokens at all, so there is no baseline in this repository to
+// derive one from. Input and output are bounded separately because output tokens
+// cost several times what input tokens do: under one combined ceiling a large
+// input allowance would hide an output run-away — the expensive half — until the
+// whole allowance was gone.
 const (
-	defaultAgentMaxSteps            = 128
-	defaultAgentMaxInputTokens      = 500_000
-	defaultAgentMaxOutputTokens     = 100_000
+	defaultAgentMaxSteps = 128
+	// fallbackDefaultBudgetUSD is what one run may spend when neither the
+	// command line nor the global config's [agent] section says. It is the last
+	// resort of the three, and deliberately modest: a deployment that cares
+	// about the figure states it, and one that has not thought about it should
+	// not discover the answer on an invoice.
+	fallbackDefaultBudgetUSD        = 2.0
 	defaultAgentTaskMaxSteps        = 48
 	defaultAgentTaskMaxInputTokens  = 100_000
 	defaultAgentTaskMaxOutputTokens = 20_000
@@ -73,9 +81,12 @@ const (
 // ceilings every Process runs under, and the worker settings of the in-process
 // Serve loop.
 type Agent struct {
-	maxSteps            int64
-	maxInputTokens      int64
-	maxOutputTokens     int64
+	maxSteps int64
+	// defaultBudgetUSD is 0 when the flag was not given. The flag deliberately
+	// carries no Value: a built-in default there would make "not specified"
+	// indistinguishable from "specified as the default", and the global config's
+	// [agent] section would then never get a say. See BudgetOr.
+	defaultBudgetUSD    float64
 	taskMaxSteps        int64
 	taskMaxInputTokens  int64
 	taskMaxOutputTokens int64
@@ -97,19 +108,12 @@ func (a *Agent) Flags() []cli.Flag {
 			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_STEPS"),
 			Destination: &a.maxSteps,
 		},
-		&cli.Int64Flag{
-			Name:        "agent-max-input-tokens",
-			Usage:       "Maximum input tokens one agent run may consume, including its sub-agents",
-			Value:       defaultAgentMaxInputTokens,
-			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS"),
-			Destination: &a.maxInputTokens,
-		},
-		&cli.Int64Flag{
-			Name:        "agent-max-output-tokens",
-			Usage:       "Maximum output tokens one agent run may produce, including its sub-agents",
-			Value:       defaultAgentMaxOutputTokens,
-			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS"),
-			Destination: &a.maxOutputTokens,
+		&cli.FloatFlag{
+			Name: "agent-default-budget-usd",
+			Usage: "Maximum USD one agent run may spend, including its sub-agents. " +
+				"Overrides [agent] default_budget_usd in the global config; a Job's budget_usd overrides both",
+			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_DEFAULT_BUDGET_USD"),
+			Destination: &a.defaultBudgetUSD,
 		},
 		&cli.Int64Flag{
 			Name:        "agent-task-max-steps",
@@ -171,13 +175,15 @@ func (a *Agent) Flags() []cli.Flag {
 }
 
 // Budgets returns the validated ceilings for the kernel.
+//
+// The root tier carries no spend ceiling here: what a run may spend is money,
+// and the figure is resolved per run from its Job and the deployment default
+// (see BudgetOr).
 func (a *Agent) Budgets() (agentkernel.Budgets, error) {
 	b := agentkernel.Budgets{
-		Root: budget.Config{
-			MaxSteps:        a.maxSteps,
-			MaxInputTokens:  a.maxInputTokens,
-			MaxOutputTokens: a.maxOutputTokens,
-			NoticeRatio:     a.noticeRatio,
+		Root: budget.Root{
+			MaxSteps:    a.maxSteps,
+			NoticeRatio: a.noticeRatio,
 		},
 		Task: budget.Config{
 			MaxSteps:        a.taskMaxSteps,
@@ -190,6 +196,46 @@ func (a *Agent) Budgets() (agentkernel.Budgets, error) {
 		return agentkernel.Budgets{}, goerr.Wrap(err, "invalid agent budget configuration")
 	}
 	return b, nil
+}
+
+// Budget sources, as reported by BudgetOr. They name where the effective figure
+// came from, so an operator reading the startup log can tell which of the three
+// settings is in force.
+const (
+	BudgetSourceFlag         = "flag"
+	BudgetSourceGlobalConfig = "global_config"
+	BudgetSourceBuiltin      = "builtin"
+)
+
+// BudgetOr resolves the default budget for one run: the command line first, then
+// the global config's [agent] section, then the built-in figure.
+//
+// The precedence is deliberate. The deployment-wide intent belongs in the
+// document alongside the model definitions it is spent on, while a temporary
+// change for one environment belongs on the command line — so the narrower
+// setting wins. sec may be nil, which is what a deployment with no [agent]
+// section has.
+//
+// It lives here rather than at the composition root so the three-way decision is
+// made in ONE place: a second caller resolving it differently is how a run ends
+// up bounded by a figure nobody configured.
+func (a *Agent) BudgetOr(sec *AgentSection) (pricing.NanoUSD, string, error) {
+	if a.defaultBudgetUSD < 0 {
+		return 0, "", goerr.Wrap(ErrInvalidBudget,
+			"--agent-default-budget-usd must not be negative",
+			goerr.V("budget_usd", a.defaultBudgetUSD))
+	}
+	if a.defaultBudgetUSD > 0 {
+		converted, err := budgetFromUSD(a.defaultBudgetUSD)
+		if err != nil {
+			return 0, "", goerr.Wrap(err, "invalid --agent-default-budget-usd")
+		}
+		return converted, BudgetSourceFlag, nil
+	}
+	if fromDoc := sec.DefaultBudget(); fromDoc > 0 {
+		return fromDoc, BudgetSourceGlobalConfig, nil
+	}
+	return pricing.FromUSD(fallbackDefaultBudgetUSD), BudgetSourceBuiltin, nil
 }
 
 // WorkerLease returns the configured claim lease duration.
@@ -229,8 +275,6 @@ func (a *Agent) ValidateWorker() error {
 func (a *Agent) LogAttrs() []slog.Attr {
 	return []slog.Attr{
 		slog.Int64("max_steps", a.maxSteps),
-		slog.Int64("max_input_tokens", a.maxInputTokens),
-		slog.Int64("max_output_tokens", a.maxOutputTokens),
 		slog.Int64("task_max_steps", a.taskMaxSteps),
 		slog.Int64("task_max_input_tokens", a.taskMaxInputTokens),
 		slog.Int64("task_max_output_tokens", a.taskMaxOutputTokens),

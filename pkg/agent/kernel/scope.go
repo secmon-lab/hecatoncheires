@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // Metadata keys. They are unexported because Scope is the only supported way to
@@ -35,6 +37,8 @@ const (
 	metaProcessingTS = "processing_ts"
 	metaPreviewTS    = "preview_ts"
 	metaProposalID   = "proposal_id"
+	metaLLMModel     = "llm_model"
+	metaBudget       = "budget_nano_usd"
 )
 
 // ToolSetsAll is the toolsets value meaning "everything this agent kind is
@@ -121,6 +125,20 @@ type Scope struct {
 	// instead would write this run's draft into whatever draft the thread points at
 	// by then.
 	ProposalID string
+	// LLMModel is the reference name of the model this run generates through —
+	// an [[llm_model]] entry's alias, or its model name when it declares none.
+	// Empty means the deployment's default model. A child Process inherits the
+	// metadata, so a run's sub-agents generate through the same model.
+	//
+	// It carries neither the provider nor the price on purpose: both are read
+	// from the reference name by the ModelPolicy built at startup. A run whose
+	// reference name is no longer defined therefore falls back to the default
+	// client AND the default price together — carrying a rate here would let it
+	// generate with one model while being metered at another's.
+	LLMModel string
+	// Budget is the greatest amount this run may spend. Zero means "not
+	// specified", and the deployment's default budget applies.
+	Budget pricing.NanoUSD
 }
 
 // Validate enforces the invariants the claim path depends on, so a wiring
@@ -169,6 +187,16 @@ func (s Scope) Validate() error {
 			goerr.V("case_id", s.CaseID),
 			goerr.V("job_id", s.JobID))
 	}
+	// A negative budget would be read as "not specified" downstream and silently
+	// hand the run the default allowance, which is the opposite of what whoever
+	// wrote it meant.
+	if s.Budget < 0 {
+		return goerr.New("budget must not be negative", goerr.V("budget", int64(s.Budget)))
+	}
+	// The reference name is NOT checked against the defined models here: the
+	// scope does not know the set. Existence is checked at startup and by
+	// `validate`, and a run naming a model this build cannot resolve falls back
+	// to the default one.
 	return nil
 }
 
@@ -205,6 +233,10 @@ func (s Scope) Metadata() map[string]string {
 	if s.SlotGated {
 		m[metaSlotGated] = "1"
 	}
+	put(metaLLMModel, s.LLMModel)
+	if s.Budget > 0 {
+		m[metaBudget] = strconv.FormatInt(int64(s.Budget), 10)
+	}
 	return m
 }
 
@@ -216,6 +248,7 @@ func (s Scope) Metadata() map[string]string {
 // the Process would strand it with no way forward.
 func ScopeFrom(m map[string]string) Scope {
 	caseID, _ := strconv.ParseInt(m[metaCaseID], 10, 64)
+	budget, _ := strconv.ParseInt(m[metaBudget], 10, 64)
 	return Scope{
 		WorkspaceID:  m[metaWorkspaceID],
 		CaseID:       caseID,
@@ -235,6 +268,8 @@ func ScopeFrom(m map[string]string) Scope {
 		JobRunID:     m[metaJobRunID],
 		EventType:    m[metaEventType],
 		SlotGated:    m[metaSlotGated] == "1",
+		LLMModel:     m[metaLLMModel],
+		Budget:       pricing.NanoUSD(budget),
 	}
 }
 

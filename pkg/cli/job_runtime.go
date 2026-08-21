@@ -98,10 +98,11 @@ func buildTickRuntime(
 		return nil, goerr.Wrap(err, "init repository")
 	}
 
-	llmClient, err := llmCfg.NewClient(ctx)
+	modelSetup, err := buildLLMSetup(ctx, c, appCfg, llmCfg, registry, agentCfg.BudgetOr)
 	if err != nil {
-		return nil, goerr.Wrap(err, "init LLM client")
+		return nil, goerr.Wrap(err, "resolve the LLM models")
 	}
+	llmClient := modelSetup.Default
 
 	integrations, err := configureTickIntegrations(ctx, integrationCfg)
 	if err != nil {
@@ -119,10 +120,10 @@ func buildTickRuntime(
 	// resolving to nothing while the Job palette still advertises them.
 	switch {
 	case integrations.slack != nil && llmClient == nil:
-		return nil, goerr.New("a Slack bot token is configured but no LLM provider is; " +
-			"a sweep with Slack wired must also be given --llm-provider")
+		return nil, goerr.New("a Slack bot token is configured but no model is; " +
+			"a sweep with Slack wired must also be given --llm-model")
 	case integrations.slack == nil && llmClient != nil:
-		return nil, goerr.New("an LLM provider is configured but no Slack bot token is; " +
+		return nil, goerr.New("a model is configured but no Slack bot token is; " +
 			"a sweep that dispatches agent runs must be given --slack-bot-token, " +
 			"or the runs would mutate cases with no way to report it")
 	}
@@ -144,7 +145,7 @@ func buildTickRuntime(
 	if llmClient != nil {
 		ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
 		if !embCfg.IsEnabled() {
-			return nil, goerr.New("--embedding-gemini-project-id is required when --llm-provider is set")
+			return nil, goerr.New("--embedding-gemini-project-id is required when --llm-model is set")
 		}
 		embedClient, eErr := embCfg.NewClient(ctx)
 		if eErr != nil {
@@ -160,7 +161,7 @@ func buildTickRuntime(
 	// checkpointing. It differs only in who drives the worker: serve runs one
 	// continuously, a sweep drains its own runs and exits.
 	durable, cleanup, err := buildTickAgentRuntime(ctx, tickAgentDeps{
-		repo: repo, registry: registry, llm: llmClient, uc: uc,
+		repo: repo, registry: registry, llm: llmClient, models: modelSetup.Policy, uc: uc,
 		agentCfg: agentCfg, storageCfg: storageCfg, repoCfg: repoCfg,
 		slackSvc: integrations.slack, jiraTools: integrations.jiraTools,
 		slotLimit: jobCfg.Limit(),
@@ -357,9 +358,12 @@ func configureTickIntegrations(ctx context.Context, cfg tickIntegrationConfigs) 
 
 // tickAgentDeps is what building the sweep's agent runtime needs.
 type tickAgentDeps struct {
-	repo       interfaces.Repository
-	registry   *model.WorkspaceRegistry
-	llm        gollem.LLMClient
+	repo     interfaces.Repository
+	registry *model.WorkspaceRegistry
+	llm      gollem.LLMClient
+	// models is which model each run generates through and what it may spend.
+	// The sweep executes the runs itself, so it needs the same policy serve has.
+	models     agentkernel.ModelPolicy
 	uc         *usecase.UseCases
 	agentCfg   *config.Agent
 	storageCfg *config.Storage
@@ -439,7 +443,7 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 		return nil, noop, goerr.Wrap(err, "register the task sub-agent")
 	}
 	durable := &job.DurableRuntime{History: archive.ProcessHistory, Locator: locator}
-	if err := durable.Register(reg, budgets.Root.Limiter(), taskAgent); err != nil {
+	if err := durable.Register(reg, budgets.Root.Limiter(d.models.Resolve), taskAgent); err != nil {
 		cleanup()
 		return nil, noop, goerr.Wrap(err, "register the job agents")
 	}
@@ -454,6 +458,7 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 		LLM:     d.llm,
 		Trace:   archive.Trace,
 		Budgets: budgets,
+		Models:  d.models,
 		Agents:  reg,
 		Slots:   slots,
 		Tools:   toolDeps,

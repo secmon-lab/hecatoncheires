@@ -6,6 +6,8 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/robfig/cron/v3"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // CaseLifecycle enumerates the case lifecycle events that a Job can listen
@@ -269,6 +271,21 @@ type Job struct {
 	// to false. Skipped for private cases and for failed runs.
 	Reflection bool
 
+	// LLMModel is the reference name of the model this Job's runs generate
+	// through — an [[llm_model]] entry's alias in the global config, or its
+	// model name when it declares none. Empty means the deployment's default
+	// model.
+	//
+	// Whether the name is actually defined is NOT checked here: the definitions
+	// live in a different configuration document, which this model knows
+	// nothing about. config.ValidateJobModels checks it at startup and in
+	// `validate`.
+	LLMModel string
+
+	// Budget is the greatest amount one run of this Job may spend, in nano USD.
+	// Zero means the deployment's default budget applies.
+	Budget pricing.NanoUSD
+
 	// Events maps the event domains this Job subscribes to. Validate
 	// guarantees at least one non-nil entry.
 	Events JobEvents
@@ -315,6 +332,14 @@ func (j *Job) Validate() error {
 		return goerr.New("interactive job requires strategy=planexec",
 			goerr.V("job_id", j.ID),
 			goerr.V("strategy", string(j.Strategy)))
+	}
+	// A negative budget would be read as "not specified" by the runtime and
+	// silently hand the run the deployment default, which is the opposite of
+	// what whoever wrote it meant.
+	if j.Budget < 0 {
+		return goerr.New("job budget must not be negative",
+			goerr.V("job_id", j.ID),
+			goerr.V("budget", int64(j.Budget)))
 	}
 	if err := j.Events.Validate(); err != nil {
 		return goerr.Wrap(err, "job events invalid",

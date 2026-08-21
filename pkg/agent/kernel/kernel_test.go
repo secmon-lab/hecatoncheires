@@ -19,9 +19,15 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
+// rootOf derives a root tier from a task-tier config, so a test that already has
+// one figure in hand does not restate the step count and notice ratio.
+func rootOf(cfg budget.Config) budget.Root {
+	return budget.Root{MaxSteps: cfg.MaxSteps, NoticeRatio: cfg.NoticeRatio}
+}
+
 func validBudgets() kernel.Budgets {
 	return kernel.Budgets{
-		Root: budget.Config{MaxSteps: 64, MaxInputTokens: 1000, MaxOutputTokens: 200, NoticeRatio: 0.8},
+		Root: budget.Root{MaxSteps: 64, NoticeRatio: 0.8},
 		Task: budget.Config{MaxSteps: 48, MaxInputTokens: 500, MaxOutputTokens: 100, NoticeRatio: 0.8},
 	}
 }
@@ -33,6 +39,7 @@ func validDeps() kernel.Deps {
 		LLM:     &mock.LLMClientMock{},
 		Trace:   agentarchive.NewMemoryTraceRepository(),
 		Budgets: validBudgets(),
+		Models:  kernel.ModelPolicyForTest(),
 		Agents:  agentkit.NewRegistry(),
 		Tools: kernel.ToolDeps{
 			Repo:     memory.New(),
@@ -66,8 +73,12 @@ func TestBuildRejectsIncompleteDeps(t *testing.T) {
 			d.Tools.Registry = nil
 			return d
 		},
+		"no model policy": func(d kernel.Deps) kernel.Deps {
+			d.Models = kernel.ModelPolicy{}
+			return d
+		},
 		"invalid root budget": func(d kernel.Deps) kernel.Deps {
-			d.Budgets.Root.MaxOutputTokens = 0
+			d.Budgets.Root.MaxSteps = 0
 			return d
 		},
 		"invalid task budget": func(d kernel.Deps) kernel.Deps {
@@ -143,7 +154,10 @@ func TestNoDuplicateSideEffects(t *testing.T) {
 			var steps atomic.Int32
 			reg := agentkit.NewRegistry()
 			handle, err := agentkit.Register(reg, "probe", 1,
-				countingStrategy{limiter: validBudgets().Root.Limiter(), steps: &steps})
+				countingStrategy{
+					limiter: validBudgets().Root.Limiter(kernel.ModelPolicyForTest().Resolve),
+					steps:   &steps,
+				})
 			gt.NoError(t, err).Required()
 
 			k, err := kernel.Build(kernel.Deps{
@@ -152,6 +166,7 @@ func TestNoDuplicateSideEffects(t *testing.T) {
 				LLM:     (&probeLLM{}).client(),
 				Trace:   agentarchive.NewMemoryTraceRepository(),
 				Budgets: validBudgets(),
+				Models:  kernel.ModelPolicyForTest(),
 				Agents:  reg,
 				Tools:   kernel.ToolDeps{Repo: memory.New(), Registry: testRegistry()},
 			})
