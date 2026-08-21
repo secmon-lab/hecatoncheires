@@ -118,6 +118,27 @@ func TestPlannerPrompt_SubAgentWritesDisabled(t *testing.T) {
 	gt.Bool(t, contains(got, "Actions and writes")).False()
 }
 
+// Nothing reads PlanResult.Message / ReplanResult.Message — the Sink that once
+// delivered it to the user was removed with the in-process Runner. So the prompt
+// must not list it among the text the user will read: a planner that believes it
+// is writing to the user there writes the answer into a field that is discarded,
+// and the turn ends with the reply nowhere. Its schema description
+// (rationaleDescription) says the same thing; this pins the prompt half.
+func TestPlannerPrompt_MessageIsDescribedAsInternal(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:    "You are the thread planner.",
+		Language:      "Japanese",
+		KnownToolIDs:  []string{"slack_ro"},
+		AllowQuestion: true,
+	})
+	gt.NoError(t, err).Required()
+	gt.String(t, got).Contains("`message` is NOT shown to the user")
+	// The language directive still names the fields the user DOES read, and no
+	// longer names `message`.
+	gt.String(t, got).Contains("MUST be written in **Japanese**")
+	gt.String(t, got).NotContains("the `message` field, ")
+}
+
 func TestPlannerPrompt_RejectsEmptyHostPrompt(t *testing.T) {
 	_, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
 		KnownToolIDs: []string{"a"},

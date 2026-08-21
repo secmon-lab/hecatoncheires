@@ -33,6 +33,13 @@ const (
 	maxToolsPerTask    = 4
 )
 
+// rationaleDescription describes the planner's `message` field to the model. It
+// says the field is internal because the previous wording ("shown to the user")
+// invited the planner to write the reply there, while nothing has read the field
+// since Sink.PlanProposed was removed in #261 — so a planner following it put its
+// answer somewhere that is discarded.
+const rationaleDescription = "1-2 sentence rationale for this decision. Internal to the planner: it is not shown to the user, so do not put the user's answer here."
+
 // PlanResult is the parsed shape of the first planner-round JSON output.
 // The planner must choose exactly one of two shapes:
 //   - Tasks: the parallel investigation phase (the default path). At least
@@ -42,8 +49,13 @@ const (
 //     (round-1 fast path). Only valid when the host set
 //     RunRequest.AllowDirect.
 type PlanResult struct {
-	// Message is a 1-2 sentence rationale shown to the user via
-	// Sink.PlanProposed.
+	// Message is a 1-2 sentence rationale for the decision. Nothing reads it: it
+	// is asked for so the planner states its reasoning somewhere, and it is NOT
+	// user-facing — the user sees the progress lines the strategy writes and the
+	// terminal output, never this. (It once reached the user through
+	// Sink.PlanProposed, which was removed with the in-process Runner in #261.)
+	// Do not wire it into a reply: it is the planner's internal reasoning, and
+	// publishing it is what rationaleDescription is worded to prevent.
 	Message string `json:"message,omitempty"`
 	// Tasks is the parallel investigation phase emitted by the planner.
 	// Empty / omitted when Direct is set — the two are mutually exclusive.
@@ -80,6 +92,8 @@ type DirectPlan struct {
 // in structured hosts, commit) a half-finished turn. Completion is now an
 // explicit act.
 type ReplanResult struct {
+	// Message is the replan round's counterpart of PlanResult.Message, and carries
+	// the same warning: nothing reads it and it is not user-facing.
 	Message  string        `json:"message,omitempty"`
 	Tasks    []TaskPlan    `json:"tasks,omitempty"`
 	Question *Question     `json:"question,omitempty"`
@@ -490,7 +504,7 @@ func planSchema(opts schemaOptions) *gollem.Parameter {
 	props := map[string]*gollem.Parameter{
 		"message": {
 			Type:        gollem.TypeString,
-			Description: "1-2 sentence rationale shown to the user.",
+			Description: rationaleDescription,
 		},
 		"tasks": tasksSchema(opts.knownToolIDs),
 	}
@@ -533,7 +547,7 @@ func replanSchema(opts schemaOptions) *gollem.Parameter {
 	props := map[string]*gollem.Parameter{
 		"message": {
 			Type:        gollem.TypeString,
-			Description: "1-2 sentence rationale shown to the user.",
+			Description: rationaleDescription,
 		},
 		"tasks":    tasksSchema(opts.knownToolIDs),
 		"finalize": finalizeSchema(),
