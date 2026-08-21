@@ -285,6 +285,11 @@ func TestStartTurnPostsTheReplyAndRecordsTheRun(t *testing.T) {
 	gt.Value(t, log.InputTokens).Equal(int64(120))
 	gt.Value(t, log.OutputTokens).Equal(int64(34))
 	gt.Value(t, log.LLMCallCount).Equal(int64(1))
+	// The same usage priced at testModelPolicy's rate: 120*1000 + 34*5000 nanoUSD.
+	// A host that recorded no cost, or priced it at another model's rate, fails
+	// here rather than showing an em dash on the run-detail page.
+	gt.Value(t, log.CostNanoUSD).Equal(int64(290_000))
+	gt.String(t, log.Model).Equal("test-model")
 
 	stored, err := h.repo.Session().GetByThread(ctx, testChannelID, testThreadTS)
 	gt.NoError(t, err).Required()

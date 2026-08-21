@@ -602,6 +602,13 @@ func TestDurableMentionRecordsTheRun(t *testing.T) {
 	// single in-process handler saw every transition.
 	gt.Number(t, log.LLMCallCount).GreaterOrEqual(1)
 	gt.Number(t, log.InputTokens).GreaterOrEqual(1)
+	// The cost is that same usage priced at testModelPolicy's rate ($1 / $5 per
+	// MTok, no cache pricing), and the model is the one the run's scope resolved
+	// to. A host that recorded neither fails here rather than showing an em dash
+	// on the run-detail page.
+	gt.Value(t, log.CostNanoUSD).Equal(log.InputTokens*1000 + log.OutputTokens*5000)
+	gt.Number(t, log.CostNanoUSD).GreaterOrEqual(1)
+	gt.String(t, log.Model).Equal("test-model")
 }
 
 // A create turn keeps no run record: it runs before the case exists, and the case

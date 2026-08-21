@@ -40,6 +40,42 @@ func TestNanoUSDFormatAtMinInt64(t *testing.T) {
 	gt.String(t, got).Equal("-$9223372036.85")
 }
 
+// TestNanoUSDValue pins the conversion the GraphQL field carries. It is the one
+// place a money value becomes a float, so what matters is that the stored integer
+// survives the trip: a fraction of a cent must not round to zero, and an amount
+// inside float64's exact integer range must come back exactly.
+func TestNanoUSDValue(t *testing.T) {
+	testCases := map[string]struct {
+		nano pricing.NanoUSD
+		want float64
+	}{
+		"zero":                     {nano: 0, want: 0},
+		"one nano":                 {nano: 1, want: 1e-9},
+		"a fraction of a cent":     {nano: 290_000, want: 0.00029},
+		"a whole cent":             {nano: 10_000_000, want: 0.01},
+		"a whole dollar":           {nano: 1_000_000_000, want: 1},
+		"negative":                 {nano: -2_500_000_000, want: -2.5},
+		"the exactness bound":      {nano: 1 << 53, want: float64(1<<53) / 1e9},
+		"past the exactness bound": {nano: math.MaxInt64, want: float64(math.MaxInt64) / 1e9},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			gt.Value(t, tc.nano.USDValue()).Equal(tc.want)
+		})
+	}
+}
+
+// TestNanoUSDValueKeepsCentsExact walks every cent of a dollar, because the value
+// a page renders is read at two decimals: a conversion that drifted by a fraction
+// of a cent would display the wrong amount without failing any single case above.
+func TestNanoUSDValueKeepsCentsExact(t *testing.T) {
+	for cents := range 100 {
+		nano := pricing.NanoUSD(cents) * 10_000_000
+		gt.Number(t, math.Abs(nano.USDValue()-float64(cents)/100)).Less(1e-12)
+	}
+}
+
 func TestFromUSD(t *testing.T) {
 	testCases := map[string]struct {
 		usd  float64
