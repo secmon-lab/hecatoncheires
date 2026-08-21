@@ -17,16 +17,32 @@ import (
 
 // twoModels declares an expensive default and a cheap alternative, which is the
 // shape a deployment that gives one Job its own model has.
+//
+// The provider is openai because its client is built from an API key alone: a
+// test that resolves models must not depend on ambient cloud credentials, which
+// exist on a developer's machine and not in CI. The credential rules themselves
+// are covered by geminiModel below and by config.LLM's own tests.
 const twoModels = `
 [[llm_model]]
 alias = "main"
-provider = "gemini"
-model = "gemini-3.1-pro-preview"
+provider = "openai"
+model = "gpt-4o"
 input_usd_per_mtok = 4.0
 output_usd_per_mtok = 18.0
 
 [[llm_model]]
 alias = "cheap"
+provider = "openai"
+model = "gpt-4o-mini"
+input_usd_per_mtok = 0.75
+output_usd_per_mtok = 3.75
+`
+
+// geminiModel needs a GCP project, so it is what the missing-credential case
+// uses.
+const geminiModel = `
+[[llm_model]]
+alias = "main"
 provider = "gemini"
 model = "gemini-3.7-flash"
 input_usd_per_mtok = 0.75
@@ -104,7 +120,7 @@ func TestBuildLLMSetupRefusesAnUndefinedDefault(t *testing.T) {
 
 	_, err := cli.BuildLLMSetupForTest(context.Background(), nil,
 		"--global-config", path, "--llm-model", "nonexistent",
-		"--llm-gemini-project-id", "proj")
+		"--llm-openai-api-key", "test-key")
 
 	gt.Error(t, err).Is(config.ErrUnknownLLMModelRef)
 }
@@ -115,7 +131,7 @@ func TestBuildLLMSetupRefusesAnUndefinedJobModel(t *testing.T) {
 
 	_, err := cli.BuildLLMSetupForTest(context.Background(), reg,
 		"--global-config", path, "--llm-model", "main",
-		"--llm-gemini-project-id", "proj")
+		"--llm-openai-api-key", "test-key")
 
 	gt.Error(t, err).Is(config.ErrUnknownLLMModelRef)
 	// The Job is named on the error so an operator knows which one to fix; it
@@ -135,7 +151,7 @@ default_budget_usd = 3.0
 
 	setup, err := cli.BuildLLMSetupForTest(context.Background(), reg,
 		"--global-config", path, "--llm-model", "main",
-		"--llm-gemini-project-id", "proj")
+		"--llm-openai-api-key", "test-key")
 	gt.NoError(t, err).Required()
 	gt.Value(t, setup.Default).NotNil()
 	gt.Array(t, setup.Policy.Refs()).Equal([]string{"cheap", "main"})
@@ -156,7 +172,7 @@ default_budget_usd = 3.0
 
 	setup, err := cli.BuildLLMSetupForTest(context.Background(), nil,
 		"--global-config", path, "--llm-model", "main",
-		"--llm-gemini-project-id", "proj",
+		"--llm-openai-api-key", "test-key",
 		"--agent-default-budget-usd", "9.0")
 	gt.NoError(t, err).Required()
 
@@ -166,11 +182,23 @@ default_budget_usd = 3.0
 // TestBuildLLMSetupRefusesAModelWithoutCredentials pins that the credentials each
 // provider needs are checked at startup rather than at the first generate.
 func TestBuildLLMSetupRefusesAModelWithoutCredentials(t *testing.T) {
-	path := writeModelsConfig(t, twoModels)
+	t.Run("openai without an api key", func(t *testing.T) {
+		path := writeModelsConfig(t, twoModels)
 
-	_, err := cli.BuildLLMSetupForTest(context.Background(), nil,
-		"--global-config", path, "--llm-model", "main")
+		_, err := cli.BuildLLMSetupForTest(context.Background(), nil,
+			"--global-config", path, "--llm-model", "main")
 
-	gt.Error(t, err)
-	gt.String(t, err.Error()).Contains("gemini-project-id")
+		gt.Error(t, err)
+		gt.String(t, err.Error()).Contains("openai-api-key")
+	})
+
+	t.Run("gemini without a project", func(t *testing.T) {
+		path := writeModelsConfig(t, geminiModel)
+
+		_, err := cli.BuildLLMSetupForTest(context.Background(), nil,
+			"--global-config", path, "--llm-model", "main")
+
+		gt.Error(t, err)
+		gt.String(t, err.Error()).Contains("gemini-project-id")
+	})
 }
