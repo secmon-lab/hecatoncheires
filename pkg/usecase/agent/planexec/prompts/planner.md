@@ -77,7 +77,7 @@ Every user-input message prepended to your prompt starts with a budget line like
 
 ## Reasoning vs final output
 
-- Internal fields (`message`, `tasks[].description`, `tasks[].acceptance_criteria`, `tasks[].id`) may stay in English for clarity. `message` is NOT shown to the user — never put the user's answer there.
+- Internal fields (`message`, `tasks[].description`, `tasks[].acceptance_criteria`, `tasks[].id`) may stay in English for clarity. `message` is NOT shown to the user — never put the user's answer there. It is kept in this run's record, so write the reason for your decision plainly enough that someone reading the run later understands it.
 {{- if .Language }}
 - Any text the user will read ({{ if .AllowQuestion }}`question.reason`, `question.items[].text`, {{ end }}the eventual final response) MUST be written in **{{ .Language }}**.
 {{- end }}

@@ -380,6 +380,35 @@ func TestPlanSchema_HasDirectWhenAllowed(t *testing.T) {
 	gt.Bool(t, has).False()
 }
 
+// The `message` description must tell the planner both things, on both rounds,
+// because each half prevents a different failure. NOT user-facing: no code reads
+// the field, so a planner that thinks it is writing to the user puts the answer
+// somewhere discarded and the turn ends with the reply nowhere — which is what the
+// previous wording ("rationale shown to the user") invited. Kept: the planner reply
+// carrying it is committed to the run's conversation and recorded as that
+// transition's LLM_RESPONSE, so it is where an operator reads why a turn decided as
+// it did, and a planner told only "nobody reads this" has every reason to emit a
+// placeholder instead.
+//
+// It must not drift from prompts/planner.md either — a schema contradicting the
+// prompt on this exact point decides where the answer goes.
+func TestSchemas_DescribeMessageAsInternalButKept(t *testing.T) {
+	for name, raw := range map[string]any{
+		"plan":   planexec.PlanSchemaForTest(knownTools, false, true),
+		"replan": planexec.ReplanSchemaForTest(knownTools, true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema, ok := raw.(*gollem.Parameter)
+			gt.Bool(t, ok).True().Required()
+			msg, has := schema.Properties["message"]
+			gt.Bool(t, has).True().Required()
+			gt.String(t, msg.Description).Contains("NOT shown to the user")
+			gt.String(t, msg.Description).Contains("kept in this run's record")
+			gt.String(t, msg.Description).NotContains("rationale shown to the user")
+		})
+	}
+}
+
 func TestReplanSchema_HasQuestionWhenAllowed(t *testing.T) {
 	rawAllow := planexec.ReplanSchemaForTest(knownTools, true)
 	schemaAllow := rawAllow.(*gollem.Parameter)

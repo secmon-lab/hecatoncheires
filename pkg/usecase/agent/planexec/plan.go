@@ -33,12 +33,19 @@ const (
 	maxToolsPerTask    = 4
 )
 
-// rationaleDescription describes the planner's `message` field to the model. It
-// says the field is internal because the previous wording ("shown to the user")
-// invited the planner to write the reply there, while nothing has read the field
-// since Sink.PlanProposed was removed in #261 — so a planner following it put its
-// answer somewhere that is discarded.
-const rationaleDescription = "1-2 sentence rationale for this decision. Internal to the planner: it is not shown to the user, so do not put the user's answer here."
+// rationaleDescription describes the planner's `message` field to the model.
+//
+// Two halves, and both matter. It says the field is NOT user-facing because the
+// previous wording ("shown to the user") invited the planner to write the reply
+// there, while nothing has read the field since Sink.PlanProposed was removed in
+// #261 — so a planner following it put its answer somewhere that is discarded. And
+// it says the rationale is kept, because it is: the whole planner reply is
+// committed to the run's conversation and recorded as the LLM_RESPONSE of that
+// transition, so `message` is what an operator reading the run's timeline or trace
+// archive has to work from when reconstructing why a turn decided as it did. That
+// is the field's purpose, and it is why the planner should write something
+// substantive rather than a placeholder.
+const rationaleDescription = "1-2 sentence rationale for this decision. NOT shown to the user — never put the user's answer here — but it is kept in this run's record, so state the reason plainly enough that someone reading the run later understands the decision."
 
 // PlanResult is the parsed shape of the first planner-round JSON output.
 // The planner must choose exactly one of two shapes:
@@ -49,13 +56,17 @@ const rationaleDescription = "1-2 sentence rationale for this decision. Internal
 //     (round-1 fast path). Only valid when the host set
 //     RunRequest.AllowDirect.
 type PlanResult struct {
-	// Message is a 1-2 sentence rationale for the decision. Nothing reads it: it
-	// is asked for so the planner states its reasoning somewhere, and it is NOT
-	// user-facing — the user sees the progress lines the strategy writes and the
-	// terminal output, never this. (It once reached the user through
-	// Sink.PlanProposed, which was removed with the in-process Runner in #261.)
-	// Do not wire it into a reply: it is the planner's internal reasoning, and
-	// publishing it is what rationaleDescription is worded to prevent.
+	// Message is a 1-2 sentence rationale for the decision. No code reads it, and
+	// that is not a reason to remove it: the planner reply carrying it is committed
+	// to the run's conversation and recorded as that transition's LLM_RESPONSE, so
+	// it is what the run timeline and the trace archive preserve of WHY the turn
+	// decided as it did. Deleting the field would take that out of the record.
+	//
+	// It is NOT user-facing. The user sees the progress lines the strategy writes
+	// and the terminal output, never this. (It once reached the user through
+	// Sink.PlanProposed, removed with the in-process Runner in #261.) Do not wire it
+	// into a reply — publishing the planner's reasoning as the answer is exactly
+	// what rationaleDescription is worded to prevent.
 	Message string `json:"message,omitempty"`
 	// Tasks is the parallel investigation phase emitted by the planner.
 	// Empty / omitted when Direct is set — the two are mutually exclusive.
@@ -92,8 +103,9 @@ type DirectPlan struct {
 // in structured hosts, commit) a half-finished turn. Completion is now an
 // explicit act.
 type ReplanResult struct {
-	// Message is the replan round's counterpart of PlanResult.Message, and carries
-	// the same warning: nothing reads it and it is not user-facing.
+	// Message is the replan round's counterpart of PlanResult.Message, kept for the
+	// same reason and carrying the same warning: no code reads it, it survives in
+	// the run's record, and it is not user-facing.
 	Message  string        `json:"message,omitempty"`
 	Tasks    []TaskPlan    `json:"tasks,omitempty"`
 	Question *Question     `json:"question,omitempty"`

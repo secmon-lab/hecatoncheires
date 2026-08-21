@@ -400,6 +400,20 @@ Slack thread as the reply. Two things follow for anyone changing this path:
   `prompts/direct.md` says the text is the turn's answer rather than claiming
   every host posts it.
 
+**The planner's `message` is unread code-side and kept on purpose.** No code reads
+`PlanResult.Message` / `ReplanResult.Message` — the `Sink` that once delivered it
+was removed with the in-process Runner — but the planner reply carrying it is
+committed to the run's conversation and recorded as that transition's
+`LLM_RESPONSE`, so it is what the run timeline and the trace archive preserve of
+WHY a turn decided as it did. Do not delete the field to tidy up an unread value.
+Both halves must be stated wherever it is described (`plan.go`'s
+`rationaleDescription` and `prompts/planner.md`, which must not drift from each
+other): told the field is user-facing, a planner writes the answer into it and the
+turn ends with the reply nowhere — the previous wording, "rationale shown to the
+user", said exactly that; told only that nobody reads it, the planner emits a
+placeholder and the record goes empty. And it is never wired into a reply: the
+user sees the strategy's progress lines and the terminal output, never this.
+
 ## Agent tool wiring (host coverage) (NON-NEGOTIABLE)
 
 A new agent tool is, by default, made available to **every** agent host that
