@@ -15,9 +15,24 @@ import (
 )
 
 // ErrNotFound is returned when a requested GitHub resource (issue, PR, file,
-// commit) does not exist or is not accessible to the GitHub App installation.
-// Callers can use errors.Is to detect this without parsing error messages.
+// commit) does not exist within a repository this GitHub App installation can
+// read. Callers can use errors.Is to detect this without parsing error
+// messages.
 var ErrNotFound = goerr.New("github resource not found")
+
+// errRepoNotAccessible is returned instead of ErrNotFound when a 404 on a
+// repository sub-resource turns out to be a 404 on the repository itself.
+// GitHub answers 404 both for a repository that does not exist and for one
+// this App installation cannot see, so the sub-resource call alone cannot
+// tell the two apart.
+//
+// The distinction is kept because the agent acts on it. Told "issue not
+// found" it varies the issue number and calls again; told the repository is
+// out of reach it can correct the owner instead. One production turn spent
+// three parallel lookups on consecutive issue numbers under an owner that
+// named a team rather than a GitHub organization, and every one of them came
+// back as a bare "issue not found" (ARGUS-98).
+var errRepoNotAccessible = goerr.New("repository not accessible")
 
 // PullRequest represents a GitHub pull request with all comments and reviews.
 type PullRequest struct {

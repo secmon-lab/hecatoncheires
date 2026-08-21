@@ -197,6 +197,15 @@ Available in the investigation / interactive contexts **and in Jobs** (both mode
 Wired when the GitHub App flags are set. See [integrations.md](integrations.md).
 Investigation / interactive contexts only — **not** wired into Jobs.
 
+The repositories these tools can read are exactly those the GitHub App
+installation covers. GitHub answers 404 both for a repository that does not
+exist and for one the installation cannot see, so a lookup that 404s is
+re-checked against the repository itself: when the repository is out of reach
+the tool says so and names the owner and repository it tried, instead of
+reporting the issue, PR, file, or ref as missing. The agent needs the two apart
+— it varies the number after "not found", but has to correct the owner when the
+repository is unreachable.
+
 | Tool | R/W | Purpose |
 |------|-----|---------|
 | `github__search` | R | Search issues / PRs with GitHub search syntax (`repo:`, `is:open`, `author:`, `label:`, …). Up to 50 hits. |

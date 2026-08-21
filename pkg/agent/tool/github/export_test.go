@@ -30,6 +30,11 @@ func NewTestClient(baseURL string, httpClient *http.Client) *Client {
 	return &Client{gql: gql, restClient: rest}
 }
 
+// ErrRepoNotAccessibleForTest re-exports the package-private sentinel that
+// separates "this installation cannot read the repository" from "the
+// repository is readable but the resource is absent".
+var ErrRepoNotAccessibleForTest = errRepoNotAccessible
+
 // SafeTruncateForTest is exported for testing the byte-safe truncation helper.
 var SafeTruncateForTest = safeTruncate
 
