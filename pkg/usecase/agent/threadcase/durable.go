@@ -81,6 +81,9 @@ type Durable struct {
 	registry *model.WorkspaceRegistry
 	host     Host
 	locator  agentkernel.Locator
+	// models prices a finished turn for its run record, at the rate of the model
+	// the turn generated through.
+	models agentkernel.ModelPolicy
 
 	mention agentkit.Agent[planexec.Input]
 	create  agentkit.Agent[planexec.Input]
@@ -99,7 +102,7 @@ type Durable struct {
 // nil locator makes every delivery look fresh, which the idempotency key still
 // covers.
 func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
-	host Host, locator agentkernel.Locator,
+	host Host, locator agentkernel.Locator, models agentkernel.ModelPolicy,
 ) (*Durable, error) {
 	if repo == nil {
 		return nil, goerr.New("repository is required")
@@ -110,7 +113,9 @@ func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
 	if host == nil {
 		return nil, goerr.New("host is required")
 	}
-	return &Durable{repo: repo, registry: registry, host: host, locator: locator}, nil
+	return &Durable{
+		repo: repo, registry: registry, host: host, locator: locator, models: models,
+	}, nil
 }
 
 // Register registers both thread-mode agents and wires this host as their
@@ -677,6 +682,8 @@ func (d *Durable) finishRunLog(ctx context.Context, sc agentkernel.Scope, pid ag
 			CacheReadInputTokens:     m.CacheReadInputTokens,
 			LLMCalls:                 m.LLMCalls,
 			ToolCalls:                m.ToolCalls,
+			CostNanoUSD:              int64(d.models.Cost(sc, m)),
+			Model:                    d.models.ModelName(sc),
 		},
 		runErr, time.Now().UTC())
 }

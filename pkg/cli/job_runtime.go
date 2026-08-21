@@ -442,7 +442,9 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 		cleanup()
 		return nil, noop, goerr.Wrap(err, "register the task sub-agent")
 	}
-	durable := &job.DurableRuntime{History: archive.ProcessHistory, Locator: locator}
+	durable := &job.DurableRuntime{
+		History: archive.ProcessHistory, Locator: locator, Models: d.models,
+	}
 	if err := durable.Register(reg, budgets.Root.Limiter(d.models.Resolve), taskAgent); err != nil {
 		cleanup()
 		return nil, noop, goerr.Wrap(err, "register the job agents")

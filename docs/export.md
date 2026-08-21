@@ -85,7 +85,7 @@ dataset names must be unique.
 | `actions` | Actions (archived included) | only actions whose parent Case is exported |
 | `memos` | Memos (archived included) | `field_<id>` per workspace memo field; only memos of exported cases |
 | `job_runs` | Latest run state per (case, job) | only runs of exported cases |
-| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt and its token / step totals |
+| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt, its token / step totals, and what it cost |
 | `job_run_events` | One row per LLM call, tool execution or run error | the full timeline of every exported run, payload bodies included |
 | `knowledge` | Knowledge | workspace-level; embedding vector excluded |
 | `tags` | Tags | workspace-level |
@@ -123,6 +123,15 @@ Note that `input_tokens` and `output_tokens` also exist on `job_run_events`, whe
 they are one call's figures rather than the run's total. Do not sum the
 `job_run_logs` columns across a run's events, or compare the two without
 qualifying which table you mean.
+
+`cost_nano_usd` is what the run spent, in 1e-9 USD, and `model` is the provider's
+own name for the model it generated through. The cost is an integer in nano-USD so
+a spend query sums it exactly (`SUM(cost_nano_usd) / 1e9` for dollars); it is
+priced when the run ends, at the rate the deployment had configured for that model
+then, so **correcting a price later does not restate past runs**. The two columns
+are what makes spend attributable — group by `model`, `job_id` or `event_type` to
+see where it went. Runs finished before these columns existed report zero and an
+empty model, and are not backfilled: the model they used was not recorded either.
 
 `cache_creation_input_tokens` / `cache_read_input_tokens` split out the
 prompt-cache share of `input_tokens`, which **already includes both** — do not add

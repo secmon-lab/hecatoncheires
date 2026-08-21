@@ -22,7 +22,26 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
+
+// testModelPolicy is the one-model policy these turns are priced at: $1 / $5 per
+// MTok, which is what the run-record assertions expect.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
 
 // durableCall records one Host call a finished turn made, so a test asserts what
 // the user and the case actually got rather than that no error was returned.
@@ -176,7 +195,7 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	gt.NoError(t, err).Required()
 
 	host := &durableHost{}
-	tc, err := threadcase.NewDurable(repo, registry, host, locator)
+	tc, err := threadcase.NewDurable(repo, registry, host, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	store := agentarchive.NewMemoryHistoryStore()
@@ -748,13 +767,15 @@ func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(newThreadWorkspace())
 
-	_, err := threadcase.NewDurable(nil, registry, &durableHost{}, nil)
+	models := testModelPolicy(t)
+
+	_, err := threadcase.NewDurable(nil, registry, &durableHost{}, nil, models)
 	gt.Error(t, err).Required()
 
-	_, err = threadcase.NewDurable(memory.New(), nil, &durableHost{}, nil)
+	_, err = threadcase.NewDurable(memory.New(), nil, &durableHost{}, nil, models)
 	gt.Error(t, err).Required()
 
-	_, err = threadcase.NewDurable(memory.New(), registry, nil, nil)
+	_, err = threadcase.NewDurable(memory.New(), registry, nil, nil, models)
 	gt.Error(t, err).Required()
 }
 
@@ -762,7 +783,7 @@ func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(newThreadWorkspace())
-	tc, err := threadcase.NewDurable(memory.New(), registry, &durableHost{}, nil)
+	tc, err := threadcase.NewDurable(memory.New(), registry, &durableHost{}, nil, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	ssn := newThreadSession()

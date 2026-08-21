@@ -186,6 +186,8 @@ func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID in
 	log.CacheReadInputTokens = 700
 	log.LLMCallCount = 4
 	log.ToolCallCount = 6
+	log.CostNanoUSD = 2_550_000
+	log.Model = "gemini-3.7-flash"
 	gt.NoError(t, repo.JobRunLog().Finish(ctx, log)).Required()
 	gt.NoError(t, repo.JobRun().RecordRun(ctx, key,
 		model.JobRunStatusSuccess, log.EndedAt, runID, traceID, "")).Required()
@@ -363,6 +365,10 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.Value(t, normalLogRow["cache_read_input_tokens"]).Equal(int64(700))
 	gt.Value(t, normalLogRow["llm_call_count"]).Equal(int64(4))
 	gt.Value(t, normalLogRow["tool_call_count"]).Equal(int64(6))
+	// The cost is exported in nano-USD, the unit it is stored in, so a spend
+	// query sums integers rather than accumulating float error.
+	gt.Value(t, normalLogRow["cost_nano_usd"]).Equal(int64(2_550_000))
+	gt.Value(t, normalLogRow["model"]).Equal("gemini-3.7-flash")
 
 	// Job run events: the full timeline of each exported run (4 events x 2 cases).
 	jobRunEvents := sink.table("ds", "job_run_events")
@@ -670,6 +676,8 @@ func TestExporter_LiveBigQuery(t *testing.T) {
 		gt.Value(t, r["cache_read_input_tokens"]).Equal(int64(700))
 		gt.Value(t, r["llm_call_count"]).Equal(int64(4))
 		gt.Value(t, r["tool_call_count"]).Equal(int64(6))
+		gt.Value(t, r["cost_nano_usd"]).Equal(int64(2_550_000))
+		gt.Value(t, r["model"]).Equal("gemini-3.7-flash")
 	}
 
 	// The event timeline round-trips through the real BigQuery schema, including

@@ -42,6 +42,11 @@ interface JobRunLogDetailData {
   systemPrompt: string
   eventType: string
   eventTriggerAt: string
+  // What the run spent, in USD, at the rate of the model it ran on. 0 for a run
+  // recorded before costs were tracked.
+  costUsd: number
+  // The provider's own model name, or empty for such an older run.
+  model: string
 }
 
 // ExportedEvent mirrors JobRunEvent but with payload decoded from its
@@ -133,6 +138,16 @@ function formatDateTime(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso ?? '—'
   return d.toLocaleString()
+}
+
+// formatCost renders what a run spent. A run that spent a fraction of a cent
+// would read as "$0.00" at two decimals, which is indistinguishable from a run
+// that spent nothing — so a non-zero amount below a cent keeps four decimals.
+// Zero means the run predates cost tracking, and says so with an em dash.
+export function formatCost(usd: number): string {
+  if (!Number.isFinite(usd) || usd <= 0) return '—'
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
 }
 
 // summariseEvent returns the short header that sits next to the type
@@ -430,6 +445,10 @@ export default function JobRunLogDetail() {
           value={formatDuration(log.durationMs, log.stage, t('caseAgentRunDurationRunning'))}
           mono
         />
+        <div className={styles.metaDivider} />
+        <MetaKpi label={t('jobRunLogMetaCost')} value={formatCost(log.costUsd)} mono />
+        <div className={styles.metaDivider} />
+        <MetaKpi label={t('jobRunLogMetaModel')} value={log.model || '—'} mono />
         <div className={styles.metaDivider} />
         <MetaKpi label={t('jobRunLogMetaJobId')} value={log.jobId} mono />
         <div className={styles.metaDivider} />

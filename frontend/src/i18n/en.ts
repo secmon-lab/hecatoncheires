@@ -555,6 +555,8 @@ export const en: Messages = {
   jobRunLogMetaDuration: 'Duration',
   jobRunLogMetaModel: 'Model',
   jobRunLogMetaJobId: 'Job ID',
+  jobRunLogMetaCost: 'Cost',
+  jobRunLogMetaModel: 'Model',
   jobRunLogMetaSources: 'Sources',
   jobRunLogMetaTrigger: 'Trigger',
   jobRunLogIdRunId: 'Run ID',

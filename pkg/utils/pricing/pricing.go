@@ -50,6 +50,14 @@ func (n NanoUSD) USD() string {
 	return out
 }
 
+// USDValue is the amount in dollars, for a wire format that carries a number
+// rather than a formatted string (the GraphQL field a page displays).
+//
+// Like USD it is an OUTPUT conversion: nothing is accounted in the result, and
+// the stored value stays the integer. int64 nano-USD exceeds float64's exact
+// integer range only past about 9 million dollars, well beyond any single run.
+func (n NanoUSD) USDValue() float64 { return float64(n) / 1e9 }
+
 func pad2(v uint64) string {
 	s := strconv.FormatUint(v, 10)
 	if len(s) < 2 {

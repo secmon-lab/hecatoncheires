@@ -52,6 +52,11 @@ type DurableRuntime struct {
 	// re-trigger be refused BEFORE the run record and the Slack marker exist; a nil
 	// Locator degrades to finding out at Spawn, which is late but still correct.
 	Locator agentkernel.Locator
+	// Models prices a finished run at the rate of the model it generated through,
+	// and names that model for the run record. The zero value prices nothing,
+	// which is what a deployment with no LLM configured has — such a deployment
+	// spawns no durable run at all.
+	Models agentkernel.ModelPolicy
 
 	simple   agentkit.Agent[react.Input]
 	planexec agentkit.Agent[planexec.Input]
@@ -490,14 +495,7 @@ func (d *DurableRuntime) onSimpleFinish(ctx context.Context, pid agentkit.Proces
 
 	// The run record first: it is what the case agent page lists, so it must be
 	// closed even if the Slack marker or the reflection below fails.
-	runtrace.FinishRun(ctx, r.deps.Repo, key, sc.JobRunID, runtrace.Usage{
-		InputTokens:              proc.Metrics.InputTokens,
-		OutputTokens:             proc.Metrics.OutputTokens,
-		CacheCreationInputTokens: proc.Metrics.CacheCreationInputTokens,
-		CacheReadInputTokens:     proc.Metrics.CacheReadInputTokens,
-		LLMCalls:                 proc.Metrics.LLMCalls,
-		ToolCalls:                proc.Metrics.ToolCalls,
-	}, runErr, r.clock())
+	runtrace.FinishRun(ctx, r.deps.Repo, key, sc.JobRunID, d.processUsage(sc, proc), runErr, r.clock())
 
 	j, c := d.reloadRunContext(ctx, sc)
 	d.postCompletionMarker(ctx, sc, j, runErr)
@@ -525,7 +523,7 @@ func (d *DurableRuntime) onPlanexecFinish(ctx context.Context, pid agentkit.Proc
 	}
 	sc := agentkernel.ScopeFrom(proc.Metadata)
 	key := model.JobRunKey{WorkspaceID: sc.WorkspaceID, CaseID: sc.CaseID, JobID: sc.JobID}
-	usage := processUsage(proc)
+	usage := d.processUsage(sc, proc)
 
 	var runErr error
 	switch res.Status {
@@ -663,8 +661,13 @@ func toQuestionAnswers(answers []interaction.Answer) []planexec.QuestionAnswer {
 }
 
 // processUsage reads a finished run's totals off its Process, which is the only
-// place a run whose transitions span claims and instances accumulates them.
-func processUsage(proc *agentkit.Process) runtrace.Usage {
+// place a run whose transitions span claims and instances accumulates them, and
+// prices them at the rate of the model that run generated through.
+//
+// The cost is computed here rather than at read time because it is the run's own
+// fact: the same token counts cost different amounts on different models, and a
+// configured price may be corrected after the run is over.
+func (d *DurableRuntime) processUsage(sc agentkernel.Scope, proc *agentkit.Process) runtrace.Usage {
 	return runtrace.Usage{
 		InputTokens:              proc.Metrics.InputTokens,
 		OutputTokens:             proc.Metrics.OutputTokens,
@@ -672,6 +675,8 @@ func processUsage(proc *agentkit.Process) runtrace.Usage {
 		CacheReadInputTokens:     proc.Metrics.CacheReadInputTokens,
 		LLMCalls:                 proc.Metrics.LLMCalls,
 		ToolCalls:                proc.Metrics.ToolCalls,
+		CostNanoUSD:              int64(d.Models.Cost(sc, proc.Metrics)),
+		Model:                    d.Models.ModelName(sc),
 	}
 }
 

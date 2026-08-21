@@ -582,7 +582,9 @@ func cmdServe() *cli.Command {
 				if tErr != nil {
 					return goerr.Wrap(tErr, "failed to register the task sub-agent")
 				}
-				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(modelSetup.Policy.Resolve), processHistory, agentProcessRepo, taskAgent); rErr != nil {
+				if rErr := uc.Agent.RegisterAgents(agentRegistry,
+					budgets.Root.Limiter(modelSetup.Policy.Resolve), modelSetup.Policy,
+					processHistory, agentProcessRepo, taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
 				}
 				// One locator serves every host that needs to tell "already live" from
@@ -592,7 +594,9 @@ func cmdServe() *cli.Command {
 				if lErr != nil {
 					return goerr.Wrap(lErr, "failed to build the agent process locator")
 				}
-				durableJobs = &job.DurableRuntime{History: processHistory, Locator: locator}
+				durableJobs = &job.DurableRuntime{
+					History: processHistory, Locator: locator, Models: modelSetup.Policy,
+				}
 				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(modelSetup.Policy.Resolve), taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the job agents")
 				}

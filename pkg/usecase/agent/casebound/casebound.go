@@ -34,6 +34,11 @@ type UseCase struct {
 	repo    interfaces.Repository
 	host    Host
 	locator agentkernel.Locator
+	// models prices a finished turn for its run record, at the rate of the model
+	// the turn generated through. A mention turn names no model of its own, so in
+	// practice that is the deployment's default one — but reading it from the
+	// policy rather than assuming so keeps the record correct if that changes.
+	models agentkernel.ModelPolicy
 
 	// agent and kernel are filled by Register and Bind. They cannot be
 	// constructor arguments: registering the agent needs this UseCase as its
@@ -46,14 +51,16 @@ type UseCase struct {
 // New builds a casebound UseCase. locator is used only to describe the run
 // holding a thread when a turn is refused as busy; a nil locator leaves that
 // description empty rather than failing the turn.
-func New(repo interfaces.Repository, host Host, locator agentkernel.Locator) (*UseCase, error) {
+func New(repo interfaces.Repository, host Host, locator agentkernel.Locator,
+	models agentkernel.ModelPolicy,
+) (*UseCase, error) {
 	if repo == nil {
 		return nil, goerr.New("repository is required")
 	}
 	if host == nil {
 		return nil, goerr.New("host is required")
 	}
-	return &UseCase{repo: repo, host: host, locator: locator}, nil
+	return &UseCase{repo: repo, host: host, locator: locator, models: models}, nil
 }
 
 // Register registers the case-channel agent and wires this UseCase as its
@@ -340,6 +347,8 @@ func (uc *UseCase) finishRunLog(ctx context.Context, sc agentkernel.Scope, m age
 			CacheReadInputTokens:     m.CacheReadInputTokens,
 			LLMCalls:                 m.LLMCalls,
 			ToolCalls:                m.ToolCalls,
+			CostNanoUSD:              int64(uc.models.Cost(sc, m)),
+			Model:                    uc.models.ModelName(sc),
 		},
 		runErr, time.Now().UTC())
 }

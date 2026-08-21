@@ -16,6 +16,11 @@ var ToGraphQLCaseJobForTest = toGraphQLCaseJob
 // the run-detail UI and the exported run file both read.
 var ToGraphQLJobRunEventForTest = toGraphQLJobRunEvent
 
+// ToGraphQLJobRunLogForTest exposes the unexported toGraphQLJobRunLog so a test
+// can pin the wire form of a run record — the cost in particular, which is
+// stored in nano-USD and read in dollars.
+var ToGraphQLJobRunLogForTest = toGraphQLJobRunLog
+
 // ToGraphQLActionCommentForTest exposes the unexported toGraphQLActionComment
 // converter so the external graphql_test package can assert the domain →
 // GraphQL mapping, notably that `edited` is derived from the timestamps and

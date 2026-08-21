@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { buildRunExport } from './JobRunLogDetail'
+import { buildRunExport, formatCost } from './JobRunLogDetail'
 
 const log = {
   workspaceId: 'risk-review',
@@ -17,6 +17,8 @@ const log = {
   systemPrompt: 'You are a helpful agent.\nFollow the rules.',
   eventType: 'scheduled',
   eventTriggerAt: '2026-06-23T00:00:00.000Z',
+  costUsd: 0.0234,
+  model: 'gemini-3.7-flash',
 }
 
 const exportedAt = '2026-06-23T09:00:00.000Z'
@@ -115,5 +117,26 @@ describe('buildRunExport', () => {
     ]
     buildRunExport(log, events, exportedAt)
     expect(events.map((e) => e.eventId)).toEqual(['e2', 'e1'])
+  })
+})
+
+describe('formatCost', () => {
+  it('keeps a sub-cent amount readable instead of rounding it to zero', () => {
+    // At two decimals this would read as "$0.00", which is what a run that spent
+    // nothing shows — the two must not look the same.
+    expect(formatCost(0.0034)).toBe('$0.0034')
+    expect(formatCost(0.0001)).toBe('$0.0001')
+  })
+
+  it('shows cents for anything a cent or above', () => {
+    expect(formatCost(0.01)).toBe('$0.01')
+    expect(formatCost(2.5)).toBe('$2.50')
+    expect(formatCost(12.345)).toBe('$12.35')
+  })
+
+  it('shows an em dash when there is nothing recorded', () => {
+    // Zero is what a run predating cost tracking carries, not a run that was free.
+    expect(formatCost(0)).toBe('—')
+    expect(formatCost(Number.NaN)).toBe('—')
   })
 })

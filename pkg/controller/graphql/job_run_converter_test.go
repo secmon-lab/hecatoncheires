@@ -90,3 +90,38 @@ func TestToGraphQLJobRunEvent(t *testing.T) {
 		gt.String(t, ev.Payload).Equal("{}")
 	})
 }
+
+// TestToGraphQLJobRunLogCost pins the unit change at the wire boundary: the run
+// record stores nano-USD integers, and the field a page reads is dollars.
+func TestToGraphQLJobRunLogCost(t *testing.T) {
+	started := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+
+	testCases := map[string]struct {
+		costNanoUSD int64
+		model       string
+		wantUSD     float64
+	}{
+		"cents":                              {costNanoUSD: 12_340_000, model: "gemini-3.7-flash", wantUSD: 0.01234},
+		"dollars":                            {costNanoUSD: 2_500_000_000, model: "claude-opus-5", wantUSD: 2.5},
+		"a run recorded before cost existed": {costNanoUSD: 0, wantUSD: 0},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			gql := graphqlctrl.ToGraphQLJobRunLogForTest(&model.JobRunLog{
+				WorkspaceID: "ws1",
+				CaseID:      16,
+				JobID:       "triage",
+				RunID:       "run-1",
+				TraceID:     "trace-1",
+				Stage:       model.JobRunStageSuccess,
+				StartedAt:   started,
+				CostNanoUSD: tc.costNanoUSD,
+				Model:       tc.model,
+			}, "Triage")
+			gt.Value(t, gql).NotNil().Required()
+			gt.Value(t, gql.CostUsd).Equal(tc.wantUSD)
+			gt.String(t, gql.Model).Equal(tc.model)
+		})
+	}
+}

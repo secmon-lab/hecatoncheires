@@ -555,6 +555,8 @@ export const ja: Messages = {
   jobRunLogMetaDuration: '実行時間',
   jobRunLogMetaModel: 'モデル',
   jobRunLogMetaJobId: 'ジョブ ID',
+  jobRunLogMetaCost: 'コスト',
+  jobRunLogMetaModel: 'モデル',
   jobRunLogMetaSources: 'ソース',
   jobRunLogMetaTrigger: 'トリガー',
   jobRunLogIdRunId: '実行 ID',

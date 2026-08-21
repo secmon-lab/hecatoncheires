@@ -350,6 +350,8 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			CacheReadInputTokens:     2600,
 			LLMCallCount:             9,
 			ToolCallCount:            14,
+			CostNanoUSD:              12_345_678,
+			Model:                    "gemini-3.7-flash",
 		}
 		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
 
@@ -375,6 +377,8 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.Number(t, got.CacheReadInputTokens).Equal(2600)
 		gt.Number(t, got.LLMCallCount).Equal(9)
 		gt.Number(t, got.ToolCallCount).Equal(14)
+		gt.Number(t, got.CostNanoUSD).Equal(12_345_678)
+		gt.String(t, got.Model).Equal("gemini-3.7-flash")
 	})
 
 	t.Run("Create rejects duplicate (key, runID)", func(t *testing.T) {

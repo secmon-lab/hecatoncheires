@@ -150,6 +150,8 @@ export const GET_JOB_RUN_LOG = gql`
       systemPrompt
       eventType
       eventTriggerAt
+      costUsd
+      model
     }
   }
 `

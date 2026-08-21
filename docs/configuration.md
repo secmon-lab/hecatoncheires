@@ -1240,6 +1240,14 @@ What appears there mirrors the firing rules above:
 The page is backed by the `caseJobs(workspaceId, caseId): [CaseJob!]!`
 GraphQL query. Like the run-history queries it enforces private-case access
 control: a caller who is not a member of a private Case's channel is refused.
+
+A single run's detail page also reports **what that run spent** and **which model
+it ran on**, beside its duration and trigger. The cost is priced when the run
+ends, at the rate then configured for that model, so it is the same figure the
+run's budget was judged against; correcting a price afterwards does not restate
+it. A run recorded before costs were tracked shows an em dash rather than `$0.00`.
+The same two values are exported to BigQuery as `cost_nano_usd` and `model` (see
+[export.md](./export.md)).
 `CaseJob.trigger.schedule.everySeconds` reports `every` as whole seconds and
 `cron` reports the original cron expression (the two are mutually exclusive).
 

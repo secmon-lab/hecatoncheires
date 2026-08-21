@@ -177,53 +177,50 @@ func (p ModelPolicy) IsZero() bool { return len(p.defs) == 0 }
 func (p ModelPolicy) Refs() []string { return slices.Sorted(maps.Keys(p.defs)) }
 
 // Resolve returns what this run is judged against: its budget and the price of
-// the model it generates through.
+// the model it generates through. It takes the Process because that is what the
+// Limiter contract hands it.
 func (p ModelPolicy) Resolve(proc *agentkit.Process) budget.RunLimit {
-	def, sc := p.resolve(proc)
-	limit := budget.RunLimit{Budget: p.defaultBudget, Rate: def.Rate}
+	var sc Scope
+	if proc != nil {
+		sc = ScopeFrom(proc.Metadata)
+	}
+	limit := budget.RunLimit{Budget: p.defaultBudget, Rate: p.defOf(sc).Rate}
 	if sc.Budget > 0 {
 		limit.Budget = sc.Budget
 	}
 	return limit
 }
 
-// CostOf prices what a finished run actually spent, at the rate of the model it
-// generated through. It is what the run record stores, so a later edit to the
-// configured price cannot rewrite history.
-func (p ModelPolicy) CostOf(proc *agentkit.Process) pricing.NanoUSD {
-	if proc == nil {
-		return 0
-	}
-	def, _ := p.resolve(proc)
-	m := proc.Metrics
+// Cost prices what a run spent, at the rate of the model its scope names. It is
+// what the run record stores, so a later edit to the configured price cannot
+// rewrite history.
+//
+// It takes the scope rather than the Process because every caller already holds
+// one: a completion handler reads the scope to find the run's records, and
+// re-deriving it here would parse the same metadata twice.
+func (p ModelPolicy) Cost(sc Scope, m agentkit.Metrics) pricing.NanoUSD {
+	def := p.defOf(sc)
 	return def.Rate.Cost(m.InputTokens, m.OutputTokens,
 		m.CacheReadInputTokens, m.CacheCreationInputTokens)
 }
 
-// ModelOf names the model a run generated through — the provider's own model
+// ModelName names the model a run generated through — the provider's own model
 // name, not the reference name, because that is the value an operator can match
 // against a provider's billing.
-func (p ModelPolicy) ModelOf(proc *agentkit.Process) string {
-	def, _ := p.resolve(proc)
-	return def.Model
-}
+func (p ModelPolicy) ModelName(sc Scope) string { return p.defOf(sc).Model }
 
-// resolve reads the run's model definition off its metadata.
+// defOf is the run's model definition.
 //
 // An empty or UNKNOWN reference name falls back to the default definition, and
 // that is deliberate: the role lookup falls back the same way, so a run whose
 // model was removed from the configuration generates with the default client and
 // is priced at the default rate. Pricing it at the removed model's rate would
 // meter it for a model it is not using.
-func (p ModelPolicy) resolve(proc *agentkit.Process) (ModelDef, Scope) {
-	var sc Scope
-	if proc != nil {
-		sc = ScopeFrom(proc.Metadata)
-	}
+func (p ModelPolicy) defOf(sc Scope) ModelDef {
 	if def, ok := p.defs[sc.LLMModel]; ok {
-		return def, sc
+		return def
 	}
-	return p.defs[p.defaultRef], sc
+	return p.defs[p.defaultRef]
 }
 
 // kernelOptions binds each non-default model to its role. Build passes them to
