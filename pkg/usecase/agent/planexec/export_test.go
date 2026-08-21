@@ -35,6 +35,13 @@ func ReplanSchemaForTest(knownToolIDs []string, allowQuestion bool) any {
 // RenderSubAgentPromptForTest exposes buildSubAgentSystemPrompt.
 var RenderSubAgentPromptForTest = buildSubAgentSystemPrompt
 
+// DirectPromptInputForTest mirrors directPromptInput so tests can build inputs
+// without re-importing the internal alias.
+type DirectPromptInputForTest = directPromptInput
+
+// RenderDirectPromptForTest exposes buildDirectSystemPrompt.
+var RenderDirectPromptForTest = buildDirectSystemPrompt
+
 // FormatObservationsForTest exposes formatObservationsAsUserTurn.
 var FormatObservationsForTest = formatObservationsAsUserTurn
 

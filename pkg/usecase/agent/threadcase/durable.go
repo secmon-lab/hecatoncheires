@@ -304,8 +304,13 @@ func (d *Durable) input(ctx context.Context, req TurnRequest, scope agentkernel.
 			UserName:  req.MentionUserName,
 			Text:      req.MentionText,
 		}),
-		KnownToolIDs: knownToolIDs,
-		TaskContext:  taskContext,
+		// Without this the run has no language directive at all: the planner, the
+		// terminal output and the direct reply are each left to infer the language
+		// from the thread, and a turn whose prompts are English (which they all are)
+		// answers a Japanese thread in English.
+		LanguageLabel: i18n.LanguageLabel(ctx),
+		KnownToolIDs:  knownToolIDs,
+		TaskContext:   taskContext,
 		// Milestones are drawn where the person who triggered the turn is looking,
 		// which for a reaction-raised case is not the case thread.
 		Progress:            planexec.ProgressTarget{ChannelID: uiChannel, ThreadTS: uiThread},

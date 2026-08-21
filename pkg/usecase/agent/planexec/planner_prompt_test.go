@@ -118,6 +118,34 @@ func TestPlannerPrompt_SubAgentWritesDisabled(t *testing.T) {
 	gt.Bool(t, contains(got, "Actions and writes")).False()
 }
 
+// The prompt must tell the planner both things about `message`, because each half
+// prevents a different failure.
+//
+// It is NOT user-facing: no code reads it (the Sink that once delivered it was
+// removed with the in-process Runner), so a planner that believes it is writing to
+// the user there writes the answer into a field that is discarded, and the turn
+// ends with the reply nowhere.
+//
+// It IS kept: the planner reply carrying it is committed to the run's conversation
+// and recorded as that transition's LLM_RESPONSE, which is where an operator reads
+// why a turn decided as it did. Told only "nobody reads this", a planner has every
+// reason to emit a placeholder and that record goes empty.
+func TestPlannerPrompt_MessageIsInternalButKeptInTheRunRecord(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:    "You are the thread planner.",
+		Language:      "Japanese",
+		KnownToolIDs:  []string{"slack_ro"},
+		AllowQuestion: true,
+	})
+	gt.NoError(t, err).Required()
+	gt.String(t, got).Contains("`message` is NOT shown to the user")
+	gt.String(t, got).Contains("kept in this run's record")
+	// The language directive still names the fields the user DOES read, and no
+	// longer names `message`.
+	gt.String(t, got).Contains("MUST be written in **Japanese**")
+	gt.String(t, got).NotContains("the `message` field, ")
+}
+
 func TestPlannerPrompt_RejectsEmptyHostPrompt(t *testing.T) {
 	_, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
 		KnownToolIDs: []string{"a"},
