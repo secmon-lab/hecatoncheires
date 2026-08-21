@@ -1263,9 +1263,13 @@ A single run's detail page also reports **what that run spent** and **which mode
 it ran on**, beside its duration and trigger. The cost is priced when the run
 ends, at the rate then configured for that model, so it is the same figure the
 run's budget was judged against; correcting a price afterwards does not restate
-it. A run recorded before costs were tracked shows an em dash rather than `$0.00`.
-The same two values are exported to BigQuery as `cost_nano_usd` and `model` (see
-[export.md](./export.md)).
+it. A run whose recorded cost is zero shows an em dash rather than `$0.00`, so a
+fraction of a cent is not confused with nothing; note that zero covers two cases
+the page cannot tell apart — a run that finished before costs were tracked, and a
+run that ended before it reached the model at all. The same two values are
+exported to BigQuery as `cost_nano_usd` and `model` (see
+[export.md](./export.md)), where the scope of what the figure covers is stated in
+full.
 `CaseJob.trigger.schedule.everySeconds` reports `every` as whole seconds and
 `cron` reports the original cron expression (the two are mutually exclusive).
 

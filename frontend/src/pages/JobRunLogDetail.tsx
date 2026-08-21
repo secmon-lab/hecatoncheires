@@ -143,7 +143,11 @@ function formatDateTime(iso: string | null | undefined): string {
 // formatCost renders what a run spent. A run that spent a fraction of a cent
 // would read as "$0.00" at two decimals, which is indistinguishable from a run
 // that spent nothing — so a non-zero amount below a cent keeps four decimals.
-// Zero means the run predates cost tracking, and says so with an em dash.
+//
+// Zero reads as an em dash rather than "$0.00" because it is not a priced amount:
+// it is a run that finished before costs were tracked, or one that ended before it
+// reached the model. Those two are indistinguishable here, which is why the em
+// dash claims nothing more specific than "no cost recorded".
 export function formatCost(usd: number): string {
   if (!Number.isFinite(usd) || usd <= 0) return '—'
   if (usd < 0.01) return `$${usd.toFixed(4)}`
