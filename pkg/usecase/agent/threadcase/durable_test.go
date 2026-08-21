@@ -18,6 +18,7 @@ import (
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
@@ -93,11 +94,28 @@ func (h *durableHost) kinds() []string {
 // durableLLM answers with replies[i] on the i-th Generate. An extra call fails
 // rather than repeating the last answer, so a strategy that looped is caught.
 func durableLLM(replies ...string) gollem.LLMClient {
+	client, _ := recordingDurableLLM(replies...)
+	return client
+}
+
+// recordingDurableLLM is durableLLM plus the system prompt each call was made
+// under, in call order. The prompt is where the host's per-run decisions actually
+// land — the language directive above all — so it is the observable a test asserting
+// on them has to read.
+func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) {
 	var n atomic.Int32
-	return &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+	var mu sync.Mutex
+	var prompts []string
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, so it is read here and
+			// attributed to the calls this session makes.
+			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					mu.Lock()
+					prompts = append(prompts, cfg.SystemPrompt())
+					mu.Unlock()
 					i := int(n.Add(1)) - 1
 					if i >= len(replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
@@ -109,6 +127,13 @@ func durableLLM(replies ...string) gollem.LLMClient {
 				},
 			}, nil
 		},
+	}
+	return client, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]string, len(prompts))
+		copy(out, prompts)
+		return out
 	}
 }
 
@@ -255,7 +280,13 @@ func (h *durableHarness) spawned(t *testing.T, ssn *model.Session, triggerTS str
 // run spawns a turn and drives it to completion.
 func (h *durableHarness) run(t *testing.T, req threadcase.TurnRequest) *agentkit.Process {
 	t.Helper()
-	ctx := context.Background()
+	return h.runCtx(t, context.Background(), req)
+}
+
+// runCtx is run with the caller's context, for a test asserting on something the
+// host reads off it — the request language, which only StartTurn's context carries.
+func (h *durableHarness) runCtx(t *testing.T, ctx context.Context, req threadcase.TurnRequest) *agentkit.Process {
+	t.Helper()
 	res, err := h.agent.StartTurn(ctx, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(threadcase.StatusStarted)
@@ -339,6 +370,32 @@ func TestDurableMentionDirectBecomesARespond(t *testing.T) {
 	gt.Value(t, calls[0].Decision).NotNil().Required()
 	gt.Value(t, calls[0].Decision.Kind).Equal(threadcase.DecisionRespond)
 	gt.String(t, calls[0].Decision.Message).Contains("still open")
+}
+
+// Every call in the turn must be told which language to answer in. The host is the
+// only thing that knows — planexec renders the directive from Input.LanguageLabel
+// and omits it entirely when that is empty — and a turn with no directive answers a
+// Japanese thread in English, since every prompt around it is written in English.
+// There is no other symptom: the turn succeeds and nothing logs.
+func TestDurableMentionTellsTheTurnWhichLanguageToAnswerIn(t *testing.T) {
+	ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+	llm, prompts := recordingDurableLLM(
+		`{"direct":{"tools":[]}}`,
+		// The reply's own wording is not the contract here — the directive handed to
+		// the model is — so the fixture stays English.
+		"It is still open.",
+	)
+	h := newDurableHarness(t, llm)
+	ssn := h.session(t, ctx, 42)
+
+	h.runCtx(t, ctx, h.mentionRequest(ssn, "1700000001.000004"))
+
+	// The planner call and the direct-reply child: both carry the directive, and the
+	// second is the one whose text is posted to the thread.
+	seen := prompts()
+	gt.Array(t, seen).Length(2).Required()
+	gt.String(t, seen[0]).Contains("**Japanese**")
+	gt.String(t, seen[1]).Contains("**Japanese**")
 }
 
 // A create turn's proposal must reach the host with its field values already

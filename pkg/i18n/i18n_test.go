@@ -76,6 +76,34 @@ func TestDefaultLang(t *testing.T) {
 	})
 }
 
+// LanguageLabel is what the agent hosts put in planexec's Input.LanguageLabel, and
+// the runtime renders it into the "write user-facing copy in X" directive. The
+// label must therefore be the language's English NAME, not its code: a prompt
+// saying "write in ja" is not the instruction the directive intends. An empty
+// return is meaningful too — it omits the directive rather than emitting an empty
+// one.
+func TestLanguageLabel(t *testing.T) {
+	t.Run("names the language in the context", func(t *testing.T) {
+		i18n.Init(i18n.LangEN)
+		gt.Value(t, i18n.LanguageLabel(i18n.ContextWithLang(context.Background(), i18n.LangJA))).
+			Equal("Japanese")
+		gt.Value(t, i18n.LanguageLabel(i18n.ContextWithLang(context.Background(), i18n.LangEN))).
+			Equal("English")
+	})
+
+	t.Run("falls back to the configured default when the context names none", func(t *testing.T) {
+		i18n.Init(i18n.LangJA)
+		defer i18n.Init(i18n.LangEN)
+		gt.Value(t, i18n.LanguageLabel(context.Background())).Equal("Japanese")
+	})
+
+	t.Run("returns empty for an unsupported language, which omits the directive", func(t *testing.T) {
+		i18n.Init(i18n.LangEN)
+		gt.Value(t, i18n.LanguageLabel(i18n.ContextWithLang(context.Background(), i18n.Lang("fr")))).
+			Equal("")
+	})
+}
+
 func TestDetectLang(t *testing.T) {
 	tests := []struct {
 		locale string

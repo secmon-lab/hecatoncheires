@@ -19,6 +19,7 @@ import (
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/wsagent"
@@ -116,11 +117,28 @@ func (p *recordingProgress) lastRender() []string {
 // rather than silently repeating the last answer, so a strategy that looped is
 // caught instead of hanging.
 func durableLLM(replies ...string) gollem.LLMClient {
+	client, _ := recordingDurableLLM(replies...)
+	return client
+}
+
+// recordingDurableLLM is durableLLM plus the system prompt each call was made
+// under, in call order. The prompt is where the host's per-run decisions actually
+// land — the language directive above all — so it is the observable a test asserting
+// on them has to read.
+func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) {
 	var n atomic.Int32
-	return &mock.LLMClientMock{
-		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+	var mu sync.Mutex
+	var prompts []string
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, so it is read here and
+			// attributed to the calls this session makes.
+			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
 				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					mu.Lock()
+					prompts = append(prompts, cfg.SystemPrompt())
+					mu.Unlock()
 					i := int(n.Add(1)) - 1
 					if i >= len(replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
@@ -132,6 +150,13 @@ func durableLLM(replies ...string) gollem.LLMClient {
 				},
 			}, nil
 		},
+	}
+	return client, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]string, len(prompts))
+		copy(out, prompts)
+		return out
 	}
 }
 
@@ -296,6 +321,36 @@ func TestDurableStartTurnPostsTheAnswer(t *testing.T) {
 	gt.String(t, trail).Contains("Investigating")
 	gt.String(t, trail).Contains("Re-planning")
 	gt.String(t, trail).Contains("Writing the answer")
+}
+
+// Every call in the run must be told which language to answer in. The host is the
+// only thing that knows — planexec renders the directive from Input.LanguageLabel
+// and omits it entirely when that is empty — and a run with no directive answers a
+// Japanese thread in English, since every prompt around it is written in English.
+// There is no other symptom: the run succeeds and nothing logs.
+func TestDurableStartTurnTellsTheRunWhichLanguageToAnswerIn(t *testing.T) {
+	ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+	llm, prompts := recordingDurableLLM(
+		`{"direct":{"tools":[]}}`,
+		// The reply's own wording is not the contract here — the directive handed to
+		// the model is — so the fixture stays English.
+		`Still looking into it.`,
+	)
+	h := newDurableHarness(t, llm)
+
+	_, err := h.agent.StartTurn(ctx, durableRequest("1700000000.000210"))
+	gt.NoError(t, err).Required()
+
+	key := agentkernel.TriggerKey(durableChannelID, durableThreadTS, "1700000000.000210")
+	proc := h.awaitTerminal(t, h.spawned(t, key))
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The planner call and the direct-reply child: both carry the directive, and the
+	// second is the one whose text the user actually reads.
+	seen := prompts()
+	gt.Array(t, seen).Length(2).Required()
+	gt.String(t, seen[0]).Contains("**Japanese**")
+	gt.String(t, seen[1]).Contains("**Japanese**")
 }
 
 // A run the model never answers must tell the user the turn ended, rather than

@@ -166,8 +166,13 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 	}
 
 	_, err = d.agent.Spawn(ctx, d.kernel, planexec.Input{
-		SystemPrompt:  systemPrompt,
-		UserInput:     req.MentionText,
+		SystemPrompt: systemPrompt,
+		UserInput:    req.MentionText,
+		// Without this the run has no language directive at all: the planner, the
+		// terminal output and the direct reply are each left to infer the language
+		// from the thread, and a turn whose prompts are English (which they all are)
+		// answers a Japanese thread in English.
+		LanguageLabel: i18n.LanguageLabel(ctx),
 		KnownToolIDs:  knownToolIDs,
 		TaskContext:   taskContext,
 		Progress:      planexec.ProgressTarget{ChannelID: req.Session.ChannelID, ThreadTS: req.Session.ThreadTS},

@@ -42,21 +42,9 @@ func workspacePromptEntries(registry *model.WorkspaceRegistry) []plannerPromptWo
 	return out
 }
 
-// plannerLanguageLabel resolves the active language from ctx (falling back to
-// the package-level default) and returns the human-readable label the runtime
-// embeds in its language directive. Returns empty when neither the ctx nor the
-// default is set, which omits the directive.
+// plannerLanguageLabel resolves the label planexec embeds in its
+// user-facing-language directive. The mapping is shared with the other planexec
+// hosts (i18n.LanguageLabel) so a host cannot drift into a different answer.
 func plannerLanguageLabel(ctx context.Context) string {
-	lang := i18n.LangFromContext(ctx)
-	if lang == "" {
-		lang = i18n.DefaultLang()
-	}
-	switch lang {
-	case i18n.LangJA:
-		return "Japanese"
-	case i18n.LangEN:
-		return "English"
-	default:
-		return ""
-	}
+	return i18n.LanguageLabel(ctx)
 }

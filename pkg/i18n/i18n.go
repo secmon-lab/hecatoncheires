@@ -323,6 +323,32 @@ func DetectLang(slackLocale string) Lang {
 	return ""
 }
 
+// LanguageLabel resolves the active language from ctx (falling back to the
+// configured default) and returns its English name, which is what an agent
+// runtime embeds in the "write user-facing copy in X" directive of a prompt.
+// Returns empty when neither ctx nor the default names a supported language,
+// which the prompts read as "no directive".
+//
+// It lives here rather than in each agent host because a host that forgets to
+// fill it has no symptom other than replies arriving in the wrong language: the
+// run succeeds, nothing logs, and only a reader of the thread notices. Three
+// hosts fill the same field, so the mapping is shared to keep them from
+// diverging.
+func LanguageLabel(ctx context.Context) string {
+	lang := LangFromContext(ctx)
+	if lang == "" {
+		lang = DefaultLang()
+	}
+	switch lang {
+	case LangJA:
+		return "Japanese"
+	case LangEN:
+		return "English"
+	default:
+		return ""
+	}
+}
+
 // ParseLang validates and returns a Lang from a string (for CLI flags).
 func ParseLang(s string) (Lang, error) {
 	switch Lang(s) {
