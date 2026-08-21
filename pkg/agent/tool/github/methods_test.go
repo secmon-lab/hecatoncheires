@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 )
@@ -23,6 +25,103 @@ func newServerClient(t *testing.T, handler http.HandlerFunc) (*github.Client, *h
 	t.Cleanup(srv.Close)
 	c := github.NewTestClient(srv.URL, srv.Client())
 	return c, srv
+}
+
+// repoProbePath is the endpoint the repository-accessibility probe hits after
+// a sub-resource lookup has 404'd, for the foo/bar fixture used below.
+const repoProbePath = "/repos/foo/bar"
+
+// handler404ExceptRepo answers every request with 404 and the repository
+// probe with repoStatus, so a test can pick which of the two cases a 404 on a
+// sub-resource stands for: the repository is readable (200) and the resource
+// is genuinely absent, the repository is out of reach (404), or the probe
+// itself failed and settles nothing (anything else).
+func handler404ExceptRepo(repoStatus int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == repoProbePath {
+			if repoStatus == http.StatusOK {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"full_name":"foo/bar"}`))
+				return
+			}
+			http.Error(w, `{"message":"probe failed"}`, repoStatus)
+			return
+		}
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}
+}
+
+// notFoundCallers drives every method that reports a 404 through
+// notFoundError, so the accessibility split is asserted at each site rather
+// than only the one that produced the incident.
+var notFoundCallers = []struct {
+	name string
+	call func(context.Context, *github.Client) error
+}{
+	{"GetIssue", func(ctx context.Context, c *github.Client) error {
+		_, err := c.GetIssue(ctx, "foo", "bar", 99)
+		return err
+	}},
+	{"GetPullRequestDetail", func(ctx context.Context, c *github.Client) error {
+		_, err := c.GetPullRequestDetail(ctx, "foo", "bar", 99, false)
+		return err
+	}},
+	{"GetFileContent", func(ctx context.Context, c *github.Client) error {
+		_, err := c.GetFileContent(ctx, "foo", "bar", "missing", "")
+		return err
+	}},
+	{"ListCommits", func(ctx context.Context, c *github.Client) error {
+		_, err := c.ListCommits(ctx, github.ListCommitsOptions{Owner: "foo", Repo: "bar"})
+		return err
+	}},
+}
+
+// An unreachable repository and an absent sub-resource both arrive as a bare
+// 404, and the agent acts on them differently: it varies the issue number
+// after "not found", but has to correct the owner when the repository is out
+// of reach. Keeping them as one error is what sent a production turn through
+// three consecutive issue numbers under a bad owner (ARGUS-98).
+func TestNotFound_UnreachableRepositoryIsDistinguished(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range notFoundCallers {
+		t.Run(tc.name+"/repository unreachable", func(t *testing.T) {
+			t.Parallel()
+
+			c, _ := newServerClient(t, handler404ExceptRepo(http.StatusNotFound))
+
+			err := tc.call(context.Background(), c)
+			gt.Error(t, err).Is(github.ErrRepoNotAccessibleForTest)
+			gt.Bool(t, errors.Is(err, github.ErrNotFound)).False()
+			gt.Value(t, goerr.Values(err)["owner"]).Equal("foo")
+			gt.Value(t, goerr.Values(err)["repo"]).Equal("bar")
+		})
+
+		t.Run(tc.name+"/resource absent", func(t *testing.T) {
+			t.Parallel()
+
+			c, _ := newServerClient(t, handler404ExceptRepo(http.StatusOK))
+
+			err := tc.call(context.Background(), c)
+			gt.Error(t, err).Is(github.ErrNotFound)
+			gt.Bool(t, errors.Is(err, github.ErrRepoNotAccessibleForTest)).False()
+		})
+	}
+}
+
+// A probe that fails for a reason other than 404 settles nothing, so claiming
+// either answer would be a guess. The original 404 stands, and the probe's own
+// failure is carried as a value so an operator can see why it was not refined.
+func TestNotFound_UnresolvedProbeKeepsTheOriginalNotFound(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newServerClient(t, handler404ExceptRepo(http.StatusInternalServerError))
+
+	_, err := c.GetIssue(context.Background(), "foo", "bar", 99)
+	gt.Error(t, err).Is(github.ErrNotFound)
+	gt.Bool(t, errors.Is(err, github.ErrRepoNotAccessibleForTest)).False()
+	gt.Value(t, goerr.Values(err)["number"]).Equal(99)
+	gt.Value(t, goerr.Values(err)["repo_check_error"]).NotNil()
 }
 
 func TestSearchIssuesAndPRs_AppendsTypeQualifier(t *testing.T) {
@@ -121,17 +220,6 @@ func TestSearchIssuesAndPRs_RejectsEmptyQuery(t *testing.T) {
 
 	_, err := c.SearchIssuesAndPRs(context.Background(), github.SearchOptions{Query: "  "})
 	gt.Value(t, err).NotNil()
-}
-
-func TestGetIssue_NotFound(t *testing.T) {
-	t.Parallel()
-
-	c, _ := newServerClient(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-	})
-
-	_, err := c.GetIssue(context.Background(), "foo", "bar", 99)
-	gt.Error(t, err).Is(github.ErrNotFound)
 }
 
 // A single *Client is shared across concurrent agent runs, so every REST call
@@ -393,17 +481,6 @@ func TestGetFileContent_Truncates(t *testing.T) {
 	gt.Number(t, len(res.Content)).Equal(int(github.MaxFileBytesForTest))
 }
 
-func TestGetFileContent_NotFound(t *testing.T) {
-	t.Parallel()
-
-	c, _ := newServerClient(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-	})
-
-	_, err := c.GetFileContent(context.Background(), "foo", "bar", "missing", "")
-	gt.Error(t, err).Is(github.ErrNotFound)
-}
-
 func TestListCommits_PassesFilters(t *testing.T) {
 	t.Parallel()
 
@@ -439,20 +516,6 @@ func TestListCommits_PassesFilters(t *testing.T) {
 	gt.String(t, list.Items[0].AuthorName).Equal("Alice")
 	gt.String(t, receivedQuery).Contains("path=pkg")
 	gt.String(t, receivedQuery).Contains("author=alice")
-}
-
-func TestListCommits_NotFound(t *testing.T) {
-	t.Parallel()
-
-	c, _ := newServerClient(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-	})
-
-	_, err := c.ListCommits(context.Background(), github.ListCommitsOptions{
-		Owner: "foo",
-		Repo:  "bar",
-	})
-	gt.Error(t, err).Is(github.ErrNotFound)
 }
 
 func TestSafeTruncate_PreservesUTF8Boundary(t *testing.T) {

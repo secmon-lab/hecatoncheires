@@ -160,8 +160,8 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 	issue, resp, err := rest.Issues.Get(ctx, owner, repo, number)
 	if err != nil {
 		if isHTTP404(resp, err) {
-			return nil, goerr.Wrap(ErrNotFound, "issue not found",
-				goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("number", number))
+			return nil, c.notFoundError(ctx, owner, repo, "issue not found",
+				goerr.V("number", number))
 		}
 		return nil, goerr.Wrap(err, "failed to get issue",
 			goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("number", number))
@@ -234,8 +234,8 @@ func (c *Client) GetPullRequestDetail(ctx context.Context, owner, repo string, n
 	pr, resp, err := rest.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		if isHTTP404(resp, err) {
-			return nil, goerr.Wrap(ErrNotFound, "pull request not found",
-				goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("number", number))
+			return nil, c.notFoundError(ctx, owner, repo, "pull request not found",
+				goerr.V("number", number))
 		}
 		return nil, goerr.Wrap(err, "failed to get pull request",
 			goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("number", number))
@@ -392,8 +392,8 @@ func (c *Client) GetFileContent(ctx context.Context, owner, repo, path, ref stri
 	fileContent, _, resp, err := rest.Repositories.GetContents(ctx, owner, repo, path, getOpts)
 	if err != nil {
 		if isHTTP404(resp, err) {
-			return nil, goerr.Wrap(ErrNotFound, "file not found",
-				goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("path", path), goerr.V("ref", ref))
+			return nil, c.notFoundError(ctx, owner, repo, "file not found",
+				goerr.V("path", path), goerr.V("ref", ref))
 		}
 		return nil, goerr.Wrap(err, "failed to get file content",
 			goerr.V("owner", owner), goerr.V("repo", repo), goerr.V("path", path), goerr.V("ref", ref))
@@ -455,8 +455,8 @@ func (c *Client) ListCommits(ctx context.Context, opts ListCommitsOptions) (*Com
 	page, resp, err := rest.Repositories.ListCommits(ctx, opts.Owner, opts.Repo, listOpts)
 	if err != nil {
 		if isHTTP404(resp, err) {
-			return nil, goerr.Wrap(ErrNotFound, "repository or ref not found",
-				goerr.V("owner", opts.Owner), goerr.V("repo", opts.Repo), goerr.V("ref", opts.Ref))
+			return nil, c.notFoundError(ctx, opts.Owner, opts.Repo, "ref not found",
+				goerr.V("ref", opts.Ref))
 		}
 		return nil, goerr.Wrap(err, "failed to list commits",
 			goerr.V("owner", opts.Owner), goerr.V("repo", opts.Repo))
@@ -499,6 +499,46 @@ func isHTTP404(resp *ghapi.Response, err error) bool {
 		return true
 	}
 	return false
+}
+
+// repoReachable reports whether this App installation can read owner/repo.
+//
+// It costs one extra REST call, paid only when a sub-resource lookup has
+// already 404'd, so it never touches the rate limit on a successful path.
+func (c *Client) repoReachable(ctx context.Context, owner, repo string) (bool, error) {
+	_, resp, err := c.restClient.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		if isHTTP404(resp, err) {
+			return false, nil
+		}
+		return false, goerr.Wrap(err, "failed to check repository accessibility",
+			goerr.V("owner", owner), goerr.V("repo", repo))
+	}
+	return true, nil
+}
+
+// notFoundError turns a 404 on a repository sub-resource into the sentinel
+// naming which of the two things was actually missing. See
+// errRepoNotAccessible for why the agent needs them kept apart.
+//
+// msg describes the sub-resource and is used only when the repository itself
+// is readable. A probe that fails for any reason other than a 404 leaves the
+// question unanswered, so the original 404 is reported unqualified rather
+// than guessed at, with the probe's own failure attached as a value.
+func (c *Client) notFoundError(ctx context.Context, owner, repo, msg string, opts ...goerr.Option) error {
+	opts = append([]goerr.Option{goerr.V("owner", owner), goerr.V("repo", repo)}, opts...)
+
+	reachable, err := c.repoReachable(ctx, owner, repo)
+	switch {
+	case err != nil:
+		return goerr.Wrap(ErrNotFound, msg, append(opts, goerr.V("repo_check_error", err.Error()))...)
+	case !reachable:
+		return goerr.Wrap(errRepoNotAccessible,
+			"repository not found or not visible to this GitHub App installation; verify the owner and repository name",
+			opts...)
+	default:
+		return goerr.Wrap(ErrNotFound, msg, opts...)
+	}
 }
 
 func labelsToStrings(in []*ghapi.Label) []string {
