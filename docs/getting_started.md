@@ -53,8 +53,9 @@ go run . serve \
 - `--no-auth=<slack-user-id>` runs without OAuth and treats every request as the
   given user. **Development only.** See
   [CLI → Authentication Modes](cli.md#authentication-modes).
-- AI features stay disabled unless you also pass `--llm-provider`; see
-  [Deployment → LLM provider](deployment.md#3-llm-provider).
+- AI features stay disabled unless you declare a model in a global config file
+  and name it with `--llm-model`; see
+  [Deployment → LLM models](deployment.md#3-llm-models).
 
 ## 3. Open the web UI
 

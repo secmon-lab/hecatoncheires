@@ -27,9 +27,12 @@ driver, and the scenario schema / judging model stay the same.
 # Validate scenario files (no LLM / tools / network):
 hecatoncheires eval --dryrun scenarios/
 
-# Run scenarios (requires an LLM provider, shared by all roles):
+# Run scenarios. The model is shared by all roles (agent, judge, simulators) and
+# must be declared as an [[llm_model]] entry in --global-config, exactly as a
+# deployment declares it:
 hecatoncheires eval \
-  --llm-provider=claude --llm-claude-api-key=... \
+  --global-config=./global.toml \
+  --llm-model=main --llm-claude-api-key=... \
   --report out.json \
   scenarios/
 
@@ -53,11 +56,19 @@ recursively for `*.toml`).
 | `--dump-all` | Dump every scenario, not just those with failing checks. |
 | `--lang <en\|ja>` | Output language for judge reasons / `analysis.md` (default from `HECATONCHEIRES_DEFAULT_LANG`). Distinct from the agent's conversation language (`meta.language`). |
 | `--list-tools` | Print the tool catalog and exit. |
+| `--global-config <path>` | Global config file(s) holding the `[[llm_model]]` definitions (and optionally `[agent] default_budget_usd`). Required to run scenarios. |
 
 LLM / Slack / GitHub / Notion credentials reuse the **same flags and
 environment variables as `serve`** (`--llm-*` / `HECATONCHEIRES_LLM_*`,
 `--slack-user-oauth-token`, `--github-*`, `--notion-api-token`). A single LLM
 client is shared by the agent, the judge, and the simulators.
+
+The harness resolves models the way `serve` does: `--llm-model` names an
+`[[llm_model]]` entry, and a scenario Job that names its own `llm_model` reaches
+that model's client. Unlike `serve` it builds a client for **every** defined
+model, because each scenario brings its own workspace. A run's budget comes from
+`[agent] default_budget_usd`, or from a deliberately generous harness default
+($20) so a scenario fails on the agent's judgement rather than on a ceiling.
 
 Exit codes: `0` on completed runs (regardless of check verdicts), `2` on an
 execution error (parse failure, LLM/tool error, etc.).

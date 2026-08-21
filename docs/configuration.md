@@ -715,36 +715,54 @@ The `assist` command runs an AI agent that periodically reviews open cases and p
 ### Usage
 
 The assist feature requires:
-- An LLM provider (via `--llm-provider` and the matching credential flags). Supported providers: `openai`, `claude` (direct Anthropic API or Vertex AI), `gemini`.
+- A model declared as an `[[llm_model]]` entry in a global config file (see
+  [Model definitions](#model-definitions-llm_model)) and named with
+  `--llm-model`, plus the credentials that entry's `provider` requires.
 - Slack Bot Token (via `--slack-bot-token`)
+
+Declare the model once:
+
+```toml
+# global.toml — pass via --global-config
+
+[[llm_model]]
+alias    = "assist"
+provider = "gemini"
+model    = "gemini-3.7-flash"
+input_usd_per_mtok  = 0.75
+output_usd_per_mtok = 3.75
+```
 
 Run the assist command (Gemini on Vertex AI example):
 
 ```bash
 hecatoncheires assist \
   --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --llm-provider=gemini \
+  --global-config=./global.toml \
+  --llm-model=assist \
   --llm-gemini-project-id=YOUR_GCP_PROJECT \
   --llm-gemini-location=global \
   --workspace=risk
 ```
 
-Or with OpenAI:
+With an OpenAI model (`provider = "openai"` in the entry):
 
 ```bash
 hecatoncheires assist \
   --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --llm-provider=openai \
+  --global-config=./global.toml \
+  --llm-model=assist \
   --llm-openai-api-key=sk-YOUR_OPENAI_KEY \
   --workspace=risk
 ```
 
-Or with Claude on Vertex AI:
+With Claude on Vertex AI (`provider = "claude"` in the entry):
 
 ```bash
 hecatoncheires assist \
   --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --llm-provider=claude \
+  --global-config=./global.toml \
+  --llm-model=assist \
   --llm-gemini-project-id=YOUR_GCP_PROJECT \
   --llm-gemini-location=us-east5 \
   --workspace=risk
