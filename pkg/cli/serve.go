@@ -405,17 +405,23 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
-			// Initialize LLM client. Required for Slack-based features
-			// (agent / assist / mention-draft) — usecase.New enforces that
-			// strictly when slackService is configured. When LLM isn't set
-			// up (e.g. e2e tests without API keys) we run in a degraded
-			// mode that still serves the GraphQL API + frontend.
-			llmClient, err := llmCfg.NewClient(ctx)
+			// Resolve the models this deployment may use and the default budget
+			// one run may spend. Required for Slack-based features (agent /
+			// assist / mention-draft) — usecase.New enforces that strictly when
+			// slackService is configured. When no model is named (e.g. e2e tests
+			// without API keys) we run in a degraded mode that still serves the
+			// GraphQL API + frontend.
+			//
+			// It is resolved ONCE: the agent runtime further below is built from
+			// the same setup, so the client a tool reaches and the client an
+			// agent generates through cannot drift apart.
+			modelSetup, err := buildLLMSetup(ctx, c, &appCfg, &llmCfg, registry, agentCfg.BudgetOr)
 			if err != nil {
-				return goerr.Wrap(err, "failed to initialize LLM client")
+				return goerr.Wrap(err, "failed to resolve the LLM models")
 			}
-			if llmClient == nil {
-				logging.Default().Warn("LLM provider not configured; Slack-driven AI features will be unavailable")
+			llmClient := modelSetup.Default
+			if !modelSetup.enabled() {
+				logging.Default().Warn("no LLM model configured; Slack-driven AI features will be unavailable")
 			} else {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
 				logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
@@ -423,11 +429,11 @@ func cmdServe() *cli.Command {
 				// Embedding is mandatory whenever LLM is wired: agent /
 				// assist / mention-draft all rely on memory / knowledge
 				// similarity search, which uses the dedicated embedder.
-				// It is configured independently from --llm-provider so
+				// It is configured independently from the agent's models so
 				// chat completion and embedding can target different
 				// providers (embedding is Gemini-only).
 				if !embCfg.IsEnabled() {
-					return goerr.New("--embedding-gemini-project-id is required when --llm-provider is set")
+					return goerr.New("--embedding-gemini-project-id is required when --llm-model is set")
 				}
 				embedClient, err := embCfg.NewClient(ctx)
 				if err != nil {
@@ -526,11 +532,7 @@ func cmdServe() *cli.Command {
 			// Wire the event-driven Job runtime. The JobUseCase listens to
 			// CaseUseCase lifecycle events and dispatches Agent Jobs in the
 			// background. The ScheduledScanner / HTTP hook handler are wired
-			// further below.
-			llmClient, llmErr := llmCfg.NewClient(ctx)
-			if llmErr != nil {
-				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
-			}
+			// further below. It runs on the SAME modelSetup resolved above.
 			// Build the agentkit runtime. It is skipped entirely without an LLM
 			// client, for the same reason the Job runtime is: there is nothing
 			// for an agent to run.
@@ -580,7 +582,7 @@ func cmdServe() *cli.Command {
 				if tErr != nil {
 					return goerr.Wrap(tErr, "failed to register the task sub-agent")
 				}
-				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(), processHistory, agentProcessRepo, taskAgent); rErr != nil {
+				if rErr := uc.Agent.RegisterAgents(agentRegistry, budgets.Root.Limiter(modelSetup.Policy.Resolve), processHistory, agentProcessRepo, taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the agents")
 				}
 				// One locator serves every host that needs to tell "already live" from
@@ -591,7 +593,7 @@ func cmdServe() *cli.Command {
 					return goerr.Wrap(lErr, "failed to build the agent process locator")
 				}
 				durableJobs = &job.DurableRuntime{History: processHistory, Locator: locator}
-				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(), taskAgent); rErr != nil {
+				if rErr := durableJobs.Register(agentRegistry, budgets.Root.Limiter(modelSetup.Policy.Resolve), taskAgent); rErr != nil {
 					return goerr.Wrap(rErr, "failed to register the job agents")
 				}
 				// The case-draft agent is registered only when its usecase exists: it
@@ -604,7 +606,7 @@ func cmdServe() *cli.Command {
 						return goerr.Wrap(dErr, "failed to build the case-draft agent")
 					}
 					if rErr := d.Register(agentRegistry, taskAgent, nil,
-						budgets.Root.Limiter(), processHistory); rErr != nil {
+						budgets.Root.Limiter(modelSetup.Policy.Resolve), processHistory); rErr != nil {
 						return goerr.Wrap(rErr, "failed to register the case-draft agent")
 					}
 					durableDraft = d
@@ -633,6 +635,7 @@ func cmdServe() *cli.Command {
 					LLM:     llmClient,
 					Trace:   kernelTrace,
 					Budgets: budgets,
+					Models:  modelSetup.Policy,
 					Agents:  agentRegistry,
 					Slots:   jobSlots,
 					Tools:   toolDeps,

@@ -26,6 +26,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 	goslack "github.com/slack-go/slack" //nolint:depguard
 )
 
@@ -240,6 +241,28 @@ var testAgentBudget = budget.Config{
 	MaxSteps: 32, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
 }
 
+// testAgentRootBudget is the root tier of the same figures. Its spend ceiling is
+// money, which testAgentModelPolicy supplies.
+var testAgentRootBudget = budget.Root{MaxSteps: 32, NoticeRatio: 0.8}
+
+// testAgentModelPolicy is the one-model policy every test kernel here runs under:
+// a priced default model and a budget far above anything a fake LLM spends.
+func testAgentModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
+
 // startAgentRuntime wires and runs the agentkit runtime for the duration of the
 // test. Without it a mention turn is never executed: HandleAgentMention only
 // records the run, and the worker is what drives it to an answer.
@@ -267,9 +290,11 @@ func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.K
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
+	models := testAgentModelPolicy(t)
 	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(), history)
 	gt.NoError(t, err).Required()
-	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentBudget.Limiter(), history, procRepo, taskAgent)).Required()
+	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentRootBudget.Limiter(models.Resolve),
+		history, procRepo, taskAgent)).Required()
 
 	traceRepo := d.Trace
 	if traceRepo == nil {
@@ -280,7 +305,8 @@ func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.K
 		History: history,
 		LLM:     d.LLM,
 		Trace:   traceRepo,
-		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
+		Budgets: agentkernel.Budgets{Root: testAgentRootBudget, Task: testAgentBudget},
+		Models:  models,
 		Agents:  reg,
 		Tools: agentkernel.ToolDeps{
 			Repo: d.Repo, Registry: d.Registry,

@@ -856,16 +856,45 @@ continues from an answered round and check the retry sends the same shape.
 ## Budget
 
 The budget is **per Process**, enforced by the runtime rather than counted by
-each host. `budget.Config` (`pkg/agent/budget`) declares four numbers and turns
-them into an `agentkit.Limiter` the Kernel consults before every transition:
+each host. There are two tiers, and they are bounded by different quantities.
 
-- `MaxSteps` — committed transitions. It is the successor of the old
-  `PlannerLoopMax`, but it counts transitions, not planner rounds: one LLM call
-  or one tool call is one step.
-- `MaxInputTokens` / `MaxOutputTokens` — the two token counts read off
-  `Process.Metrics`, so they accumulate across claims and instances.
-- `NoticeRatio` — the fraction of any ceiling at which the Strategy is *told* it
-  is close, so it can wrap up instead of being cut off.
+**The root tier is bounded by MONEY.** `budget.Root` declares only `MaxSteps` and
+`NoticeRatio`; what a root run may SPEND is a `budget.RunLimit` — a
+`pricing.NanoUSD` ceiling plus the `pricing.Rate` of the model the run generates
+through — resolved PER RUN by a `budget.LimitResolver`. A token figure cannot do
+this job: which model a run uses is operator configuration (a Job names one), and
+the models a deployment may name differ in price by more than an order of
+magnitude, so any token ceiling is right for one of them and wrong for another.
+`MaxSteps` stays, but it is not a spend limit — it stops a run that never
+terminates even while it costs almost nothing.
+
+**The sub-agent tier keeps tokens.** `budget.Config` (steps + input tokens +
+output tokens + notice ratio) is unchanged and now applies to the Task tier only:
+it bounds one investigation's share of a turn, and the money ceiling on the root
+already bounds what the whole tree may cost. Input and output stay separate
+because output tokens cost several times what input tokens do.
+
+Three properties of the money path a change here must preserve:
+
+- **The resolver reads the run's metadata, and the price and the client come from
+  the same definition.** `agentkernel.ModelPolicy` answers both "which model does
+  this run generate through" (by rewriting `GenerateRequest.Role` in
+  `modelRoleMiddleware`) and "what is it judged against" (`Resolve`). They are one
+  value on purpose: resolving them separately is how a run ends up generating with
+  a cheap model while metered at an expensive one's rate. A run whose reference
+  name is no longer defined falls back to the DEFAULT model on both halves.
+- **A run whose ceiling cannot be resolved is stopped, not run unbounded.**
+  `Root.Limiter` answers `LimitStop("this run has no priced budget")` for a nil
+  resolver, a non-positive budget, or a rate that prices input or output at zero.
+  Startup validation (`ModelPolicyInput.Validate`,
+  `config.ValidateJobModels`) makes that unreachable for a configured deployment.
+- **Cost is computed from the four token counts**, not from a total:
+  `Rate.Cost` charges cache reads at their discount and cache writes at their
+  premium, and clamps the uncached remainder at zero so a provider reporting input
+  exclusive of its cache components cannot credit the budget.
+
+`NoticeRatio` is the fraction of the budget or the step ceiling at which the
+Strategy is *told* it is close, so it can wrap up instead of being cut off.
 
 Three consequences to keep in mind:
 

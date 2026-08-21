@@ -16,9 +16,13 @@ import (
 // are separate because a sub-agent is one investigation and a root run is the
 // whole turn; giving them one number would either starve the turn or let a
 // single task spend it all.
+//
+// They are also bounded by different quantities: a root run's spend ceiling is
+// money, resolved per run from the model it generates through, while a
+// sub-agent's is tokens. See the budget package for why.
 type Budgets struct {
 	// Root applies to every Process an application entry point spawns.
-	Root budget.Config
+	Root budget.Root
 	// Task applies to the sub-agent Processes a plan-execute run spawns.
 	Task budget.Config
 }
@@ -49,6 +53,10 @@ type Deps struct {
 	Tools ToolDeps
 	// Budgets are the ceilings Strategy.Limit answers with.
 	Budgets Budgets
+	// Models is which model each run generates through and what it may spend.
+	// Required: without it a run has neither a priced ceiling nor a way to reach
+	// a model other than the default one.
+	Models ModelPolicy
 	// Agents is the registry the application filled with its strategies before
 	// building the Kernel. agentkit requires every Register to complete before
 	// the first Spawn or Serve, so registration is the caller's job and this is
@@ -80,6 +88,9 @@ func (d *Deps) Validate() error {
 	}
 	if d.Agents == nil {
 		return goerr.New("agent registry is required")
+	}
+	if d.Models.IsZero() {
+		return goerr.New("model policy is required")
 	}
 	if err := d.Tools.Validate(); err != nil {
 		return goerr.Wrap(err, "tool deps are invalid")
@@ -142,8 +153,12 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 		return nil, goerr.Wrap(err, "build agent tool factory")
 	}
 
-	k, err := agentkit.New(d.Repo, d.LLM, d.Agents,
+	opts := []agentkit.KernelOption{
 		agentkit.WithToolFactory(factory),
+		// The role rewrite goes FIRST, so every middleware after it — and the
+		// resolution agentkit itself performs — sees the role the run's model
+		// selects rather than the one the strategy asked for.
+		agentkit.WithGenerateMiddleware(modelRoleMiddleware(d.Models)),
 		// The gate goes OUTSIDE the observability bracket: a claim refused for
 		// want of capacity did nothing, so opening a trace and a run-scoped
 		// logger for it would file an empty archive on every backoff.
@@ -163,7 +178,13 @@ func Build(d Deps) (*agentkit.Kernel, error) {
 		// against everything else — so neither renders into the other's output.
 		agentkit.WithToolCallMiddleware(toolErrorValuesMiddleware()),
 		agentkit.WithLogger(logging.Default()),
-	)
+	}
+	// One role binding per model a Job may name. They can only be given here:
+	// agentkit resolves a role by pointer identity against the map the Kernel was
+	// built with, so a binding added later would never be found.
+	opts = append(opts, d.Models.kernelOptions()...)
+
+	k, err := agentkit.New(d.Repo, d.LLM, d.Agents, opts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "build agent kernel")
 	}

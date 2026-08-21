@@ -57,6 +57,7 @@ func TestJobExecution_RunsJobAndCreatesAction(t *testing.T) {
 
 	e, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       actionCreatingJobLLM("Investigate portal 503 login", "Created an action to investigate the 503 login issue."),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.NoError(t, err)
@@ -92,6 +93,7 @@ func TestJobExecution_UnknownJob(t *testing.T) {
 
 	e, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       actionCreatingJobLLM("x", "y"),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.NoError(t, err)

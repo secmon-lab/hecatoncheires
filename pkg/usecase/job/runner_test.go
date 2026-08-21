@@ -34,6 +34,7 @@ import (
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 func newRunner(t *testing.T, wsID string, jobs []*model.Job, exec jobagent.JobExecutor) (*job.JobRunner, *model.WorkspaceRegistry, *model.Case) {
@@ -501,6 +502,25 @@ func wireDurableJobRuntime(
 	})
 }
 
+// testModelPolicy is the one-model policy the test kernels here run under: a
+// priced default model and a budget far above anything a fake LLM spends, so a
+// test never ends on the ceiling unless it is testing the ceiling.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
+
 // bindDurableJobRuntime wires the runtime but never claims anything, so a spawned
 // run stays exactly where Run left it. Use it to assert what the TRIGGER did — the
 // run record it opened, the Slack marker it posted — with a run still live and no
@@ -513,10 +533,14 @@ func bindDurableJobRuntime(
 	t.Helper()
 
 	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	// The root tier is bounded by money, so it needs a priced model rather than a
+	// token allowance.
+	root := budget.Root{MaxSteps: cfg.MaxSteps, NoticeRatio: cfg.NoticeRatio}
+	models := testModelPolicy(t)
 	reg := agentkit.NewRegistry()
 	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(), durable.History)
 	gt.NoError(t, tErr).Required()
-	gt.NoError(t, durable.Register(reg, cfg.Limiter(), taskAgent)).Required()
+	gt.NoError(t, durable.Register(reg, root.Limiter(models.Resolve), taskAgent)).Required()
 
 	procRepo := agentprocmemory.New()
 	locator, lErr := agentkernel.NewLocator(procRepo)
@@ -532,7 +556,8 @@ func bindDurableJobRuntime(
 		History: durable.History,
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: agentkernel.Budgets{Root: cfg, Task: cfg},
+		Budgets: agentkernel.Budgets{Root: root, Task: cfg},
+		Models:  models,
 		Agents:  reg,
 		Slots:   gate,
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry},

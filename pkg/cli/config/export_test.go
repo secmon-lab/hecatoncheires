@@ -45,14 +45,26 @@ func (x *Slack) SetAuthAPIForTest(api *MockSlackAuthAPI) {
 }
 
 // NewLLMForTest creates an LLM config for testing purposes.
-func NewLLMForTest(provider, model, openaiAPIKey, claudeAPIKey, geminiProjectID, geminiLocation string) *LLM {
+func NewLLMForTest(modelRef, openaiAPIKey, claudeAPIKey, geminiProjectID, geminiLocation string) *LLM {
 	return &LLM{
-		provider:        provider,
-		model:           model,
+		modelRef:        modelRef,
 		openaiAPIKey:    openaiAPIKey,
 		claudeAPIKey:    claudeAPIKey,
 		geminiProjectID: geminiProjectID,
 		geminiLocation:  geminiLocation,
+	}
+}
+
+// NewAgentForTest creates an Agent config with the budget flag set as given.
+// budgetUSD of 0 is "the flag was not passed", which is what BudgetOr reads.
+func NewAgentForTest(budgetUSD float64) *Agent {
+	return &Agent{
+		maxSteps:            defaultAgentMaxSteps,
+		defaultBudgetUSD:    budgetUSD,
+		taskMaxSteps:        defaultAgentTaskMaxSteps,
+		taskMaxInputTokens:  defaultAgentTaskMaxInputTokens,
+		taskMaxOutputTokens: defaultAgentTaskMaxOutputTokens,
+		noticeRatio:         defaultAgentNoticeRatio,
 	}
 }
 

@@ -177,6 +177,31 @@ func claimTraceMetadata(proc *agentkit.Process, sc Scope) trace.TraceMetadata {
 	return trace.TraceMetadata{Labels: labels}
 }
 
+// modelRoleMiddleware points a run's LLM calls at the model its scope names.
+//
+// It is a middleware because that is the only seam where a per-RUN model choice
+// can be made: agentkit binds a role to a client when the Kernel is built, and a
+// Strategy is registered once at startup and then serves every run — so neither
+// can carry a value that differs per Job. The role each strategy asks for
+// (planexec's planner and finalizer roles) is left in place when the run names
+// no model of its own, and those roles are deliberately unbound, so the call
+// falls through to the Kernel's default client exactly as before.
+//
+// A reference name with no role — an unknown one, or the default model's — is
+// left alone rather than refused. ModelPolicy prices such a run at the default
+// rate for the same reason, so the model it generates with and the rate it is
+// metered at stay the same model's.
+func modelRoleMiddleware(policy ModelPolicy) agentkit.GenerateMiddleware {
+	return func(next agentkit.GenerateHandler) agentkit.GenerateHandler {
+		return func(ctx context.Context, req *agentkit.GenerateRequest) (*agentkit.GenerateResult, error) {
+			if role := policy.roleFor(req.Effect.Metadata); role != nil {
+				req.Role = role
+			}
+			return next(ctx, req)
+		}
+	}
+}
+
 // promptCacheMiddleware turns provider prompt caching on for every Generate in
 // this application.
 //

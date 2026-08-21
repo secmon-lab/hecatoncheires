@@ -9,10 +9,12 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/driver"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/env"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/evaltype"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/scenario"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // scriptedLLM drives the planexec loop to a materialize decision with no
@@ -57,6 +59,25 @@ func (fakeCompleter) Complete(_ context.Context, _, _ string, _ *gollem.Paramete
 	return "", nil
 }
 
+// testModelPolicy is the one-model policy a scenario env runs under: a priced
+// default model and a budget far above anything a scripted LLM spends, so a
+// driver test never ends on the ceiling.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
+
 // recordingSim records whether the simulator was asked to answer. In the
 // no-question path it must never be called.
 type recordingSim struct{ called bool }
@@ -72,6 +93,7 @@ func TestThreadInitial_MaterializeNoQuestion(t *testing.T) {
 
 	e, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       scriptedLLM(),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.NoError(t, err)

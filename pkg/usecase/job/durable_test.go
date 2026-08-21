@@ -9,9 +9,11 @@ import (
 
 	"github.com/m-mizutani/gt"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // A one-shot sweep must execute the runs it dispatched before it exits.
@@ -80,6 +82,71 @@ func TestDurableRuntime_DrainExecutesTheRunsTheSweepDispatched(t *testing.T) {
 		gt.Array(t, logs).Length(1).Required()
 		gt.Value(t, logs[0].Stage).Equal(model.JobRunStageSuccess)
 	}
+}
+
+// TestDurableRuntime_SpawnCarriesTheJobsModelAndBudget pins how a per-Job model
+// and budget reach the runtime: on the run's own metadata, decided at spawn.
+//
+// They travel with the run rather than being looked up later because the
+// configuration can be replaced while the run is still going — a run must be
+// judged against what it started under, and must generate through the model it
+// was started with.
+func TestDurableRuntime_SpawnCarriesTheJobsModelAndBudget(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+
+	withModel := &model.Job{
+		ID:       "with_model",
+		Prompt:   "summarise the case",
+		LLMModel: "cheap",
+		Budget:   pricing.FromUSD(0.5),
+		Events:   model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	withoutModel := &model.Job{
+		ID:     "without_model",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{withModel, withoutModel},
+	})
+
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+	})
+	// No worker: the run stays where Run left it, so its metadata can be read
+	// with nothing racing to finish it.
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	scopeOf := func(j *model.Job) agentkernel.Scope {
+		t.Helper()
+		gt.NoError(t, runner.Run(ctx, j, job.Event{
+			Domain: model.JobEventDomainScheduled, WorkspaceID: "ws", CaseID: c.ID,
+			Timestamp: time.Now().UTC(),
+		})).Required()
+
+		busy, err := durable.Locator.Busy(ctx, agentkernel.JobRunSubject("ws", c.ID, j.ID))
+		gt.NoError(t, err).Required()
+		gt.Value(t, busy).NotNil().Required()
+
+		proc, err := k.GetProcess(ctx, busy.ProcessID)
+		gt.NoError(t, err).Required()
+		return agentkernel.ScopeFrom(proc.Metadata)
+	}
+
+	named := scopeOf(withModel)
+	gt.String(t, named.LLMModel).Equal("cheap")
+	gt.Value(t, named.Budget).Equal(pricing.FromUSD(0.5))
+
+	// A Job naming neither leaves both unset, which is what the runtime reads as
+	// "the deployment's default".
+	plain := scopeOf(withoutModel)
+	gt.String(t, plain.LLMModel).Equal("")
+	gt.Value(t, plain.Budget).Equal(pricing.NanoUSD(0))
 }
 
 // Drain waits for the runs THIS process started, not for whatever else is in the

@@ -8,15 +8,35 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/env"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/scenario"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 type fakeCompleter struct{}
 
 func (fakeCompleter) Complete(_ context.Context, _, _ string, _ *gollem.Parameter) (string, error) {
 	return "", nil
+}
+
+// testModelPolicy is the one-model policy a built env runs under: a priced
+// default model and a budget far above anything these tests spend.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
 }
 
 func loadScenario(t *testing.T) *scenario.Scenario {
@@ -35,6 +55,7 @@ func TestBuild_OK(t *testing.T) {
 	sc := loadScenario(t)
 	e, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       fakeLLM(),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.NoError(t, err)
@@ -50,6 +71,7 @@ func TestBuild_SeedsSources(t *testing.T) {
 	sc := loadScenario(t)
 	e, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       fakeLLM(),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.NoError(t, err)
@@ -96,6 +118,7 @@ func TestBuild_LiveSlackWithoutClient(t *testing.T) {
 
 	_, err := env.Build(context.Background(), sc, env.Options{
 		LLM:       fakeLLM(),
+		Models:    testModelPolicy(t),
 		Completer: fakeCompleter{},
 	})
 	gt.Error(t, err)

@@ -10,6 +10,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 func TestJobSection_Validate_RoundTrip(t *testing.T) {
@@ -563,6 +564,109 @@ events.case = { on = ["created"] }
 		gt.NoError(t, err).Required()
 		gt.Bool(t, j.Reflection).False()
 	})
+}
+
+// TestJobSection_ModelAndBudget pins what a Job may say about the model it runs
+// on and what it may spend. The reference name's SHAPE is checked here; whether
+// it is defined is a cross-document question (ValidateJobModels).
+func TestJobSection_ModelAndBudget(t *testing.T) {
+	t.Run("both are propagated to model.Job", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "daily_review"
+prompt = "x"
+llm_model = "cheap"
+budget_usd = 0.5
+events.scheduled = { cron = "0 9 * * *" }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.String(t, j.LLMModel).Equal("cheap")
+		gt.Value(t, j.Budget).Equal(pricing.FromUSD(0.5))
+	})
+
+	t.Run("omitted means the deployment default", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "daily_review"
+prompt = "x"
+events.scheduled = { cron = "0 9 * * *" }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.String(t, j.LLMModel).Equal("")
+		gt.Value(t, j.Budget).Equal(pricing.NanoUSD(0))
+	})
+
+	// A provider's own model name is a legitimate reference name, so the pattern
+	// has to admit dots, hyphens and at-signs.
+	t.Run("a provider model name is a valid reference", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "daily_review"
+prompt = "x"
+llm_model = "claude-opus-4-5@20251101"
+events.scheduled = { cron = "0 9 * * *" }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.String(t, j.LLMModel).Equal("claude-opus-4-5@20251101")
+	})
+
+	testCases := map[string]struct {
+		src    string
+		wantIs error
+	}{
+		"malformed reference name": {
+			src: `
+[[job]]
+id = "j"
+prompt = "x"
+llm_model = "two words"
+events.scheduled = { cron = "0 9 * * *" }
+`,
+			wantIs: config.ErrInvalidLLMModelRef,
+		},
+		"negative budget": {
+			src: `
+[[job]]
+id = "j"
+prompt = "x"
+budget_usd = -1.0
+events.scheduled = { cron = "0 9 * * *" }
+`,
+			wantIs: config.ErrInvalidBudget,
+		},
+		// Read as "not specified" it would silently take the deployment default,
+		// which is the opposite of what a figure this small asks for.
+		"budget too small to represent": {
+			src: `
+[[job]]
+id = "j"
+prompt = "x"
+budget_usd = 0.0000000001
+events.scheduled = { cron = "0 9 * * *" }
+`,
+			wantIs: config.ErrInvalidBudget,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			var app config.AppConfig
+			gt.NoError(t, toml.Unmarshal([]byte(tc.src), &app)).Required()
+			gt.Array(t, app.Jobs).Length(1).Required()
+			_, err := app.Jobs[0].Validate("")
+			gt.Error(t, err).Is(tc.wantIs)
+		})
+	}
 }
 
 func TestLoadWorkspaceConfigs_PromptFileRelativeToConfig(t *testing.T) {

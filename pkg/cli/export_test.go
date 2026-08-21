@@ -4,9 +4,12 @@ import (
 	"context"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/urfave/cli/v3"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -97,6 +100,51 @@ func HTTPStatusForGraphQLErrorCodesForTest(codes ...string) int {
 // interface the HTTP handler consumes, so the concrete type stays unexported.
 func NewDBConsistencyCheckerForTest(uc *usecase.UseCases) httpctrl.DBConsistencyChecker {
 	return newDBConsistencyChecker(uc)
+}
+
+// --- agent_models.go seams (model resolution at startup) ------------------
+
+// JobModelRefsForTest exposes jobModelRefs.
+var JobModelRefsForTest = jobModelRefs
+
+// LLMSetupForTest is what buildLLMSetup returns, flattened so a test can read it
+// without the unexported struct: the default client (nil when no LLM is
+// configured) and the policy every run is resolved through.
+type LLMSetupForTest struct {
+	Default gollem.LLMClient
+	Policy  agentkernel.ModelPolicy
+}
+
+// BuildLLMSetupForTest runs buildLLMSetup through a real flag parse, so the test
+// exercises the same --global-config / --llm-model path production does. args are
+// appended after the command name.
+func BuildLLMSetupForTest(ctx context.Context, registry *model.WorkspaceRegistry,
+	args ...string,
+) (LLMSetupForTest, error) {
+	var appCfg config.AppConfig
+	var llmCfg config.LLM
+	var agentCfg config.Agent
+
+	flags := appCfg.GlobalConfigFlags()
+	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, agentCfg.Flags()...)
+
+	var out LLMSetupForTest
+	var outErr error
+	cmd := &cli.Command{
+		Name:  "test",
+		Flags: flags,
+		Action: func(_ context.Context, c *cli.Command) error {
+			setup, err := buildLLMSetup(ctx, c, &appCfg, &llmCfg, registry, agentCfg.BudgetOr)
+			out = LLMSetupForTest(setup)
+			outErr = err
+			return nil
+		},
+	}
+	if err := cmd.Run(ctx, append([]string{"test"}, args...)); err != nil {
+		return LLMSetupForTest{}, err
+	}
+	return out, outErr
 }
 
 // --- eval.go / diagnosis.go command constructors --------------------------

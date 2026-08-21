@@ -49,6 +49,11 @@ const seedReporterID = "U-EVALSEED"
 type Options struct {
 	// LLM is the system-under-test agent's LLM client (required).
 	LLM gollem.LLMClient
+	// Models is which model each run generates through and what it may spend
+	// (required). A scenario Job naming a model reaches it the same way a
+	// deployed one does, so a scenario exercises the real resolution rather than
+	// a harness-only default.
+	Models agentkernel.ModelPolicy
 	// Completer drives the simulated tools (required when any tool is sim).
 	Completer evaltype.Completer
 	// Live* are real tool clients, used for tools marked live=true. Nil unless
@@ -185,9 +190,10 @@ var evalTaskBudget = budget.Config{
 	MaxSteps: 48, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000, NoticeRatio: 0.9,
 }
 
-var evalRootBudget = budget.Config{
-	MaxSteps: 480, MaxInputTokens: 5_000_000, MaxOutputTokens: 5_000_000, NoticeRatio: 0.9,
-}
+// evalRootBudget carries no spend ceiling of its own: what a root run may spend
+// is money, and the figure comes from the ModelPolicy the harness was given (the
+// [agent] section, or the harness default).
+var evalRootBudget = budget.Root{MaxSteps: 480, NoticeRatio: 0.9}
 
 // agentRuntime is the started runtime plus the handles a scenario needs from it:
 // the Job runtime the JobRunner dispatches onto, and the stop function.
@@ -209,7 +215,7 @@ type agentRuntime struct {
 // the trace all live and die with the Env, which is what keeps two scenarios from
 // seeing each other's runs.
 func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegistry,
-	uc *usecase.UseCases, llm gollem.LLMClient,
+	uc *usecase.UseCases, llm gollem.LLMClient, models agentkernel.ModelPolicy,
 ) (*agentRuntime, error) {
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
@@ -224,11 +230,11 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 	if err != nil {
 		return nil, goerr.Wrap(err, "env: register the task sub-agent")
 	}
-	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(), history, procRepo, taskAgent); err != nil {
+	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(models.Resolve), history, procRepo, taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the agents")
 	}
 	durable := &job.DurableRuntime{History: history, Locator: locator}
-	if err := durable.Register(reg, evalRootBudget.Limiter(), taskAgent); err != nil {
+	if err := durable.Register(reg, evalRootBudget.Limiter(models.Resolve), taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the job agents")
 	}
 
@@ -241,6 +247,7 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
 		Budgets: agentkernel.Budgets{Root: evalRootBudget, Task: evalTaskBudget},
+		Models:  models,
 		Agents:  reg,
 		Tools:   toolDeps,
 	})
@@ -287,6 +294,9 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, error) {
 	if opts.LLM == nil {
 		return nil, goerr.New("env: LLM client is required")
+	}
+	if opts.Models.IsZero() {
+		return nil, goerr.New("env: model policy is required")
 	}
 	if sc.Workspace == nil {
 		return nil, goerr.New("env: scenario has no workspace config")
@@ -343,7 +353,7 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 
 	// The runtime is built first: the Job agents must be registered before the
 	// Kernel exists, and the JobRunner needs the runtime to dispatch onto.
-	runtime, err := startAgentRuntime(repo, registry, uc, opts.LLM)
+	runtime, err := startAgentRuntime(repo, registry, uc, opts.LLM, opts.Models)
 	if err != nil {
 		return nil, err
 	}

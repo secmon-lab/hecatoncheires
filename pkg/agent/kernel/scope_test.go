@@ -6,6 +6,7 @@ import (
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // TestScopeRoundTrip pins that every field survives the trip through
@@ -30,6 +31,8 @@ func TestScopeRoundTrip(t *testing.T) {
 		EventType:   "mention",
 		SlotGated:   true,
 		PreviewTS:   "1700000000.000300",
+		LLMModel:    "cheap",
+		Budget:      pricing.FromUSD(0.5),
 	}
 
 	got := kernel.ScopeFrom(want.Metadata())
@@ -76,10 +79,19 @@ func TestScopeMetadataOmitsEmptyValues(t *testing.T) {
 		"ui_channel_id", "ui_thread_ts", "processing_ts", "preview_ts",
 		"session_id", "actor_user_id", "lang", "private_case",
 		"job_id", "job_run_id", "event_type", "slot_gated",
+		"llm_model", "budget_nano_usd",
 	} {
 		_, ok := m[key]
 		gt.Bool(t, ok).False()
 	}
+}
+
+// TestScopeFromMalformedBudget pins that a hand-edited budget value leaves the run
+// on the deployment default rather than refusing to run: a zero budget reads as
+// "not specified" everywhere downstream.
+func TestScopeFromMalformedBudget(t *testing.T) {
+	got := kernel.ScopeFrom(map[string]string{"budget_nano_usd": "one dollar"})
+	gt.Value(t, got.Budget).Equal(pricing.NanoUSD(0))
 }
 
 // TestScopeFromMalformedValues pins that a hand-edited or older record still
@@ -117,6 +129,13 @@ func TestScopeValidate(t *testing.T) {
 	}{
 		"valid": {
 			mutate: func(s kernel.Scope) kernel.Scope { return s },
+		},
+		"a budget of its own": {
+			mutate: func(s kernel.Scope) kernel.Scope { s.Budget = pricing.FromUSD(1); return s },
+		},
+		"negative budget": {
+			mutate:  func(s kernel.Scope) kernel.Scope { s.Budget = -1; return s },
+			wantErr: true,
 		},
 		"thread without channel": {
 			mutate:  func(s kernel.Scope) kernel.Scope { s.ChannelID = ""; return s },

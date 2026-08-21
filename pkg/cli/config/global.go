@@ -1,15 +1,19 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/pelletier/go-toml/v2"
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 	"github.com/urfave/cli/v3"
 )
 
@@ -37,6 +41,8 @@ type GlobalConfig struct {
 	Workspace       map[string]any          `toml:"workspace"`
 	WorkspaceGroups []WorkspaceGroupSection `toml:"workspace_group"`
 	Export          *ExportSection          `toml:"export"`
+	Agent           *AgentSection           `toml:"agent"`
+	LLMModels       []LLMModelSection       `toml:"llm_model"`
 }
 
 // WorkspaceGroupSection represents a single [[workspace_group]] table.
@@ -350,6 +356,320 @@ func LoadExportConfig(paths []string) (*ExportSection, error) {
 	}
 
 	return found, nil
+}
+
+// llmModelRefPattern is the character set of a model reference name. It allows
+// dots, at-signs and hyphens so a provider's own model name — "gemini-3.7-flash",
+// "claude-opus-4-5@20251101" — can be used as the reference name unchanged, which
+// is what an entry declaring no alias does.
+var llmModelRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]*$`)
+
+// maxLLMModelRefLength bounds the reference name. It appears in log fields, error
+// values and Process metadata, none of which benefit from an unbounded string.
+const maxLLMModelRefLength = 100
+
+// AgentSection is the [agent] section of a global config file: the
+// deployment-wide agent settings that belong in a document rather than on the
+// command line. Nil when no global config declares it.
+type AgentSection struct {
+	// DefaultBudgetUSD is what one agent run may spend when neither the Job nor
+	// the command line says otherwise. Zero means "not set here".
+	DefaultBudgetUSD float64 `toml:"default_budget_usd"`
+}
+
+// Validate checks the value range only. Zero is a legitimate "not set", so it is
+// accepted; a negative figure is not, and neither is one so small it rounds away
+// to nothing (which would read as "not set" and silently hand the run the
+// built-in default).
+func (s *AgentSection) Validate() error {
+	if s == nil {
+		return nil
+	}
+	if _, err := budgetFromUSD(s.DefaultBudgetUSD); err != nil {
+		return goerr.Wrap(err, "invalid [agent] default_budget_usd")
+	}
+	return nil
+}
+
+// DefaultBudget returns the configured budget, or 0 when the section sets none.
+func (s *AgentSection) DefaultBudget() pricing.NanoUSD {
+	if s == nil {
+		return 0
+	}
+	return pricing.FromUSD(s.DefaultBudgetUSD)
+}
+
+// LLMModelSection is one [[llm_model]] entry: a model this deployment may use,
+// and what it costs.
+//
+// Prices are written in dollars per 1M tokens — the unit every provider
+// publishes — and converted once, here. Writing them per token would mean
+// ten-digit figures nobody can check against a price page.
+type LLMModelSection struct {
+	// Alias is the name Jobs and --llm-model refer to this entry by. Optional:
+	// without it the reference name is Model.
+	Alias string `toml:"alias"`
+	// Provider is which client serves it: openai, claude or gemini.
+	Provider string `toml:"provider"`
+	// Model is the model name handed to that provider.
+	Model string `toml:"model"`
+	// InputUSDPerMTok and OutputUSDPerMTok are required and must be positive: a
+	// model priced at nothing has an unbounded budget.
+	InputUSDPerMTok  float64 `toml:"input_usd_per_mtok"`
+	OutputUSDPerMTok float64 `toml:"output_usd_per_mtok"`
+	// CacheReadUSDPerMTok and CacheWriteUSDPerMTok are optional (0 when the
+	// provider bills no per-token cache read or write).
+	CacheReadUSDPerMTok  float64 `toml:"cache_read_usd_per_mtok"`
+	CacheWriteUSDPerMTok float64 `toml:"cache_write_usd_per_mtok"`
+}
+
+// Validate checks one entry and returns its resolved form.
+func (s *LLMModelSection) Validate() (agentkernel.ModelDef, error) {
+	if s == nil {
+		return agentkernel.ModelDef{}, goerr.New("llm model section is nil")
+	}
+	ref := s.Alias
+	if ref == "" {
+		ref = s.Model
+	}
+	if ref == "" {
+		return agentkernel.ModelDef{}, goerr.Wrap(ErrInvalidLLMModel,
+			"[[llm_model]] model is required")
+	}
+	if !llmModelRefPattern.MatchString(ref) || len(ref) > maxLLMModelRefLength {
+		return agentkernel.ModelDef{}, goerr.Wrap(ErrInvalidLLMModelRef,
+			"model reference name must match ^[A-Za-z0-9][A-Za-z0-9._@-]*$ and be at most 100 characters",
+			goerr.V(LLMModelRefKey, ref))
+	}
+	rate, err := s.rate()
+	if err != nil {
+		return agentkernel.ModelDef{}, goerr.Wrap(err, "invalid [[llm_model]] price",
+			goerr.V(LLMModelRefKey, ref))
+	}
+	def := agentkernel.ModelDef{
+		Ref:      ref,
+		Provider: s.Provider,
+		Model:    s.Model,
+		Rate:     rate,
+	}
+	if err := def.Validate(); err != nil {
+		return agentkernel.ModelDef{}, goerr.Wrap(err, "invalid [[llm_model]]",
+			goerr.V(LLMModelRefKey, ref))
+	}
+	return def, nil
+}
+
+// rate converts the four published prices. A positive price that rounds away to
+// zero is refused rather than accepted as free: it is a unit mistake (a per-token
+// figure written where a per-million one belongs), and accepting it would price
+// the model at nothing.
+func (s *LLMModelSection) rate() (pricing.Rate, error) {
+	var rate pricing.Rate
+	type priceField struct {
+		name     string
+		usd      float64
+		out      *pricing.NanoUSD
+		required bool
+	}
+	for _, f := range []priceField{
+		{"input_usd_per_mtok", s.InputUSDPerMTok, &rate.Input, true},
+		{"output_usd_per_mtok", s.OutputUSDPerMTok, &rate.Output, true},
+		{"cache_read_usd_per_mtok", s.CacheReadUSDPerMTok, &rate.CacheRead, false},
+		{"cache_write_usd_per_mtok", s.CacheWriteUSDPerMTok, &rate.CacheWrite, false},
+	} {
+		if f.usd < 0 {
+			return pricing.Rate{}, goerr.Wrap(ErrInvalidLLMModelPrice,
+				"price must not be negative",
+				goerr.V("field", f.name), goerr.V("value", f.usd))
+		}
+		if f.required && f.usd == 0 {
+			return pricing.Rate{}, goerr.Wrap(ErrInvalidLLMModelPrice,
+				"price is required and must be positive",
+				goerr.V("field", f.name))
+		}
+		converted := pricing.FromUSDPerMTok(f.usd)
+		if f.usd > 0 && converted == 0 {
+			return pricing.Rate{}, goerr.Wrap(ErrInvalidLLMModelPrice,
+				"price is too small to represent; it is written in USD per 1M tokens",
+				goerr.V("field", f.name), goerr.V("value", f.usd))
+		}
+		*f.out = converted
+	}
+	return rate, nil
+}
+
+// budgetFromUSD converts a configured budget in dollars, refusing the two shapes
+// that would be read as "not set" by mistake: a negative figure, and a positive
+// one small enough to round away to zero.
+func budgetFromUSD(usd float64) (pricing.NanoUSD, error) {
+	if usd < 0 {
+		return 0, goerr.Wrap(ErrInvalidBudget, "budget must not be negative",
+			goerr.V("budget_usd", usd))
+	}
+	converted := pricing.FromUSD(usd)
+	if usd > 0 && converted == 0 {
+		return 0, goerr.Wrap(ErrInvalidBudget, "budget is too small to represent",
+			goerr.V("budget_usd", usd))
+	}
+	return converted, nil
+}
+
+// LoadLLMModels walks the given file/dir paths, parses each .toml as a
+// GlobalConfig, validates every [[llm_model]] section, and rejects duplicate
+// reference names across files. Zero files (an unset --global-config) yields an
+// empty slice with no error — a deployment with no LLM configured is a valid
+// state.
+//
+// Unlike [export], definitions are a SET and may be spread over several files:
+// two files declaring models do not conflict, and the only collision that
+// matters is a repeated reference name.
+func LoadLLMModels(paths []string) ([]agentkernel.ModelDef, error) {
+	tomlFiles, err := collectTOMLFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+
+	var defs []agentkernel.ModelDef
+	seenRefs := make(map[string]string) // reference name -> file path
+	for _, f := range tomlFiles {
+		gc, err := loadGlobalConfigFile(f)
+		if err != nil {
+			return nil, err
+		}
+		for i := range gc.LLMModels {
+			def, err := gc.LLMModels[i].Validate()
+			if err != nil {
+				return nil, goerr.Wrap(err, "invalid [[llm_model]]", goerr.V(ConfigPathKey, f))
+			}
+			if existing, ok := seenRefs[def.Ref]; ok {
+				return nil, goerr.Wrap(ErrDuplicateLLMModelRef,
+					"duplicate model reference name",
+					goerr.V(LLMModelRefKey, def.Ref),
+					goerr.V("first_file", existing),
+					goerr.V("second_file", f))
+			}
+			seenRefs[def.Ref] = f
+			defs = append(defs, def)
+		}
+	}
+	return defs, nil
+}
+
+// LoadAgentSection walks the given file/dir paths and returns the single [agent]
+// section found. It returns (nil, nil) when no file declares one, and an error
+// when more than one does — the deployment-wide agent settings must have a single
+// home, exactly as [export] does.
+func LoadAgentSection(paths []string) (*AgentSection, error) {
+	tomlFiles, err := collectTOMLFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+
+	var found *AgentSection
+	var foundFile string
+	for _, f := range tomlFiles {
+		gc, err := loadGlobalConfigFile(f)
+		if err != nil {
+			return nil, err
+		}
+		if gc.Agent == nil {
+			continue
+		}
+		if found != nil {
+			return nil, goerr.Wrap(ErrDuplicateAgentConfig,
+				"more than one global config file defines [agent]",
+				goerr.V("first_file", foundFile), goerr.V("second_file", f))
+		}
+		if err := gc.Agent.Validate(); err != nil {
+			return nil, goerr.Wrap(err, "invalid [agent] section", goerr.V(ConfigPathKey, f))
+		}
+		found = gc.Agent
+		foundFile = f
+	}
+	return found, nil
+}
+
+// loadGlobalConfigFile reads and parses one global config file, rejecting a
+// stray [workspace] section. It is shared by every loader here so they all
+// discover and reject the same way.
+func loadGlobalConfigFile(path string) (*GlobalConfig, error) {
+	// #nosec G304 - path is expected to be provided by CLI argument
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read global config file",
+			goerr.V(ConfigPathKey, path))
+	}
+	var gc GlobalConfig
+	if err := toml.Unmarshal(data, &gc); err != nil {
+		return nil, goerr.Wrap(err, "failed to parse global config TOML",
+			goerr.V(ConfigPathKey, path))
+	}
+	// A [workspace] section in a global config file is almost certainly a
+	// misplaced workspace definition. Reject it loudly rather than ignore it
+	// silently (the docs promise this file never carries [workspace]).
+	if gc.Workspace != nil {
+		return nil, goerr.Wrap(ErrGlobalConfigContainsWorkspace,
+			"global config file must not contain a [workspace] section",
+			goerr.V(ConfigPathKey, path))
+	}
+	return &gc, nil
+}
+
+// ConfigureLLMModels reads the --global-config flag and loads every model
+// definition. It mirrors ConfigureGroups / ConfigureExport so callers that do not
+// need models are untouched.
+func (a *AppConfig) ConfigureLLMModels(c *cli.Command) ([]agentkernel.ModelDef, error) {
+	paths := c.StringSlice("global-config")
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	return LoadLLMModels(paths)
+}
+
+// ConfigureAgentSection reads the --global-config flag and loads the [agent]
+// section, or (nil, nil) when none is declared.
+func (a *AppConfig) ConfigureAgentSection(c *cli.Command) (*AgentSection, error) {
+	paths := c.StringSlice("global-config")
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	return LoadAgentSection(paths)
+}
+
+// ValidateJobModels checks that every model a Job names is actually defined.
+//
+// It is a cross-document check — the Jobs come from --config, the definitions
+// from --global-config — so it cannot live in either document's own Validate. It
+// runs at startup, where a Job pointing at an undefined model must stop the
+// process rather than fail at the hour that Job is due, and in `validate`, where
+// an operator asks the same question without deploying.
+func ValidateJobModels(defs []agentkernel.ModelDef, ws *model.WorkspaceRegistry) error {
+	if ws == nil {
+		return nil
+	}
+	known := make(map[string]struct{}, len(defs))
+	for _, d := range defs {
+		known[d.Ref] = struct{}{}
+	}
+	for _, entry := range ws.List() {
+		if entry == nil {
+			continue
+		}
+		for _, j := range entry.Jobs {
+			if j == nil || j.Disabled || j.LLMModel == "" {
+				continue
+			}
+			if _, ok := known[j.LLMModel]; !ok {
+				return goerr.Wrap(ErrUnknownLLMModelRef,
+					"job references an undefined model",
+					goerr.V(WorkspaceIDKey, entry.Workspace.ID),
+					goerr.V("job_id", j.ID),
+					goerr.V(LLMModelRefKey, j.LLMModel),
+					goerr.V("known", slices.Sorted(maps.Keys(known))))
+			}
+		}
+	}
+	return nil
 }
 
 // ConfigureExport reads the --global-config flag, loads the [export] section,

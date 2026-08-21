@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -76,7 +77,11 @@ func toolNames() []string {
 // Config carries the runner inputs assembled by the CLI.
 type Config struct {
 	// LLM is shared by all roles (agent, judge, simulators) — FR-7.
-	LLM         gollem.LLMClient
+	LLM gollem.LLMClient
+	// Models is which model each agent run generates through and what it may
+	// spend. Required alongside LLM: a scenario Job that names a model resolves
+	// it through this, exactly as a deployed one does.
+	Models      agentkernel.ModelPolicy
 	Concurrency int
 	DryRun      bool
 	DumpDir     string
@@ -136,7 +141,10 @@ func Run(ctx context.Context, paths []string, cfg Config, stdout io.Writer) (int
 	}
 
 	if cfg.LLM == nil {
-		return ExitError, goerr.New("LLM client is required to run scenarios (configure --llm-provider)")
+		return ExitError, goerr.New("LLM client is required to run scenarios (set --llm-model)")
+	}
+	if cfg.Models.IsZero() {
+		return ExitError, goerr.New("model definitions are required to run scenarios: declare [[llm_model]] in --global-config")
 	}
 
 	logger.Info("eval suite starting", "scenarios", len(scenarios), "concurrency", cfg.Concurrency)
@@ -204,6 +212,7 @@ func runOne(ctx context.Context, sc *scenario.Scenario, registry *driver.Registr
 	completer := llmrun.New(cfg.LLM)
 	e, err := env.Build(ctx, sc, env.Options{
 		LLM:             cfg.LLM,
+		Models:          cfg.Models,
 		Completer:       completer,
 		LiveSlackSearch: cfg.LiveSlackSearch,
 		LiveNotion:      cfg.LiveNotion,

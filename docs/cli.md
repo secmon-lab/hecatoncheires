@@ -62,13 +62,12 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--webfetch-enabled` | `HECATONCHEIRES_WEBFETCH_ENABLED` | `true` | No | Enable the agent `webfetch` tool. Built only when an LLM client is also configured (the LLM screens fetched content for indirect prompt injection). Connections to non-public IPs are blocked (SSRF guard) |
 | `--webfetch-timeout` | `HECATONCHEIRES_WEBFETCH_TIMEOUT` | `10` | No | `webfetch` HTTP request timeout in seconds |
 | `--webfetch-max-size` | `HECATONCHEIRES_WEBFETCH_MAX_SIZE` | `262144` | No | `webfetch` maximum response body size in bytes (excess is truncated). Default 256 KiB keeps a single fetch within model context / cost limits |
-| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No\*\*\*\* | LLM provider: `openai`, `claude`, or `gemini`. Empty disables AI features |
-| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
-| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required when `--llm-provider=openai`) |
-| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No\*\*\*\* | Default model: the reference name of an `[[llm_model]]` entry in `--global-config` (its `alias`, or its `model` when it declares none). Empty disables AI features. See [Model definitions](#model-definitions) |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required for a model whose `provider` is `openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (for a `claude` model reached through Anthropic directly) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
-| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-provider` is set |
+| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-model` is set |
 | `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
 | `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
 | `--dashboard-stale-threshold` | `HECATONCHEIRES_DASHBOARD_STALE_THRESHOLD` | `336h` (14d) | No | Age after which an open Case with no update is flagged as "stalled" on the home dashboard. `0` disables the stalled flag |
@@ -88,8 +87,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--mcp-env` | `HECATONCHEIRES_MCP_ENV` | - | No | Names of environment variables to expose to the Rego policy as `input.env` (allow-list). Repeatable |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of **scheduled** Agent Job runs executing concurrently across the whole deployment. Set the same value on every instance (including `tick`). `0` disables the limit. See [operations.md](./operations.md) |
 | `--agent-max-steps` | `HECATONCHEIRES_AGENT_MAX_STEPS` | `128` | No | Maximum committed transitions one agent run may execute, sub-agents included. See [Agent runtime budgets](#agent-runtime-budgets) |
-| `--agent-max-input-tokens` | `HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS` | `500000` | No | Maximum input tokens one agent run may consume, sub-agents included |
-| `--agent-max-output-tokens` | `HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS` | `100000` | No | Maximum output tokens one agent run may produce, sub-agents included |
+| `--agent-default-budget-usd` | `HECATONCHEIRES_AGENT_DEFAULT_BUDGET_USD` | - | No | Maximum USD one agent run may spend, sub-agents included. Overrides `[agent] default_budget_usd` in `--global-config`; a Job's `budget_usd` overrides both. Unset falls back to the document, then to `2.0` |
 | `--agent-task-max-steps` | `HECATONCHEIRES_AGENT_TASK_MAX_STEPS` | `48` | No | Maximum committed transitions one sub-agent may execute |
 | `--agent-task-max-input-tokens` | `HECATONCHEIRES_AGENT_TASK_MAX_INPUT_TOKENS` | `100000` | No | Maximum input tokens one sub-agent may consume |
 | `--agent-task-max-output-tokens` | `HECATONCHEIRES_AGENT_TASK_MAX_OUTPUT_TOKENS` | `20000` | No | Maximum output tokens one sub-agent may produce |
@@ -99,38 +97,66 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--agent-worker-lease` | `HECATONCHEIRES_AGENT_WORKER_LEASE` | `120s` | No | How long a worker holds a claimed agent process before another instance may reclaim it |
 | `--agent-worker-poll-interval` | `HECATONCHEIRES_AGENT_WORKER_POLL_INTERVAL` | `2s` | No | How often a worker polls for runnable agent processes |
 
+### Model definitions
+
+Which models this deployment may use, and what each costs, is declared once in a
+`--global-config` file as `[[llm_model]]` entries. Nothing else may name a model:
+`--llm-model` picks the default one by reference name, and a Job's `llm_model`
+picks its own. A reference name that no entry defines fails at startup and in
+`hecatoncheires validate`.
+
+Prices are written in **USD per 1M tokens**, the unit every provider publishes,
+and are what the money budget below is measured against. The full field
+reference, the reference-name rules and the per-provider credentials are in
+[configuration.md](./configuration.md#model-definitions-llm_model).
+
 ### Agent runtime budgets
 
 An agent run is a durable process: each transition (one LLM call, or one tool
 call) is checkpointed before the next one starts, and any instance can pick the
-process up from the last checkpoint. Three ceilings bound a run, and reaching
-any one of them ends it:
+process up from the last checkpoint. The two tiers of a run are bounded by
+different quantities:
 
-- **Steps** — committed transitions.
-- **Input tokens**.
-- **Output tokens**.
+- **A root run** — what a mention, a Job or an assist pass starts — is bounded by
+  **money** (`--agent-default-budget-usd`, `[agent] default_budget_usd`, or a
+  Job's `budget_usd`) and by **steps** (`--agent-max-steps`).
+- **A sub-agent** — one planned task inside a run — is bounded by **steps** and
+  **tokens** (`--agent-task-max-*`).
 
-Input and output are bounded separately because output tokens cost several times
-what input tokens do. Under one combined ceiling, a large input allowance would
-hide an output run-away — the expensive half — until the whole budget was gone.
+The root ceiling is money because a token is not a unit of cost: one Job may run
+on a model twenty times dearer than another's, so any token figure is right for
+one of them and wrong for the other. Its step ceiling is not a spend limit — it
+exists so a run that never terminates is stopped even while it costs almost
+nothing. The task tier keeps token ceilings: they bound one investigation's share
+of a turn, and the money ceiling on the root already bounds what the whole tree
+may cost.
 
-All three are cumulative over the whole run, sub-agents included: a sub-agent's
-usage is added to its parent when it finishes, so the ceiling on a run covers
-everything it spawned. Read the two tiers together — `--agent-task-max-steps`
-bounds ONE investigation, `--agent-max-steps` bounds the planner plus all of
-them. Raising the task allowance without raising the root one buys nothing: the
-turn simply runs out sooner. The default pair (128 root, 48 task) affords the
+Each generate is priced by the four token counts the provider reports — uncached
+input, output, cache read and cache write — at the rate of the model the run
+actually used. A cache read is charged at its discount and a cache write at its
+premium, which is why `[[llm_model]]` carries four prices rather than one.
+
+Every ceiling is cumulative over the whole run, sub-agents included: a
+sub-agent's usage is added to its parent when it finishes, so the ceiling on a
+run covers everything it spawned. Read the two step tiers together —
+`--agent-task-max-steps` bounds ONE investigation, `--agent-max-steps` bounds the
+planner plus all of them. The default pair (128 root, 48 task) affords the
 planner's own work plus roughly two sub-agents at their full allowance, or
 several modest ones.
 
 Because a sub-agent's usage arrives in one addition when it finishes, a run can
 cross a ceiling by a whole sub-agent's worth at once; the reported figure is then
 past the ceiling rather than at it.
-Crossing `--agent-budget-notice-ratio` of any ceiling adds a line to the agent's
-next turn telling it to answer from what it already has and to stop calling
-tools; crossing the ceiling itself stops the run, and the user gets the same
-"couldn't reach a conclusion" reply as any other unfinished turn. The notice
-exists so the common case is a shorter answer rather than no answer.
+Crossing `--agent-budget-notice-ratio` of the budget or the step ceiling adds a
+line to the agent's next turn telling it to answer from what it already has and
+to stop calling tools; crossing the ceiling itself stops the run, and the user
+gets the same "couldn't reach a conclusion" reply as any other unfinished turn.
+The notice exists so the common case is a shorter answer rather than no answer.
+
+A run whose budget or model price cannot be resolved is stopped rather than run
+unbounded. Startup validation makes that unreachable for a configured
+deployment; reaching it means a run's metadata names something this build cannot
+price.
 
 ### A crashed run is not resumed
 
@@ -144,9 +170,26 @@ turn" reply. A run that merely returns an *error* is still retried normally;
 this applies only to a claim that vanished.
 
 The step defaults are derived from the loop bounds the previous agent runtime
-used. **The token defaults are not derived from measurement** — the previous
+used. **The task token defaults are not derived from measurement** — the previous
 runtime counted no tokens — so they are a starting point. Review them against
 the usage your deployment actually records before tightening them.
+
+### Migrating from the token-based agent budget
+
+Three settings were removed when the root ceiling became money. An environment
+variable for a flag that no longer exists is **silently ignored**, so a
+deployment that keeps them will run with defaults it did not choose:
+
+| Removed | Do this instead |
+|---|---|
+| `HECATONCHEIRES_LLM_PROVIDER` | Declare the model as an `[[llm_model]]` entry (the `provider` lives there) and set `HECATONCHEIRES_LLM_MODEL` to its reference name |
+| `HECATONCHEIRES_AGENT_MAX_INPUT_TOKENS` | Set `HECATONCHEIRES_AGENT_DEFAULT_BUDGET_USD`, or `[agent] default_budget_usd` |
+| `HECATONCHEIRES_AGENT_MAX_OUTPUT_TOKENS` | Same as above |
+
+`--llm-model` was previously an optional model name; it is now a reference name
+into `[[llm_model]]` and is what enables the AI features at all. A deployment
+that used a provider's default model must now name that model explicitly, so its
+price is known.
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -154,12 +197,14 @@ the usage your deployment actually records before tightening them.
 
 \*\*\* Required only to enable Slack webhook integration. Without this, webhook endpoints are not registered.
 
-\*\*\*\* `--llm-provider` is optional for `serve` (AI features will be disabled if unset). When set, the matching provider credentials become required:
+\*\*\*\* `--llm-model` is optional for `serve` (AI features will be disabled if unset). When set, it must name an `[[llm_model]]` entry, and that entry's `provider` decides which credentials become required:
 - `openai` → `--llm-openai-api-key`
 - `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
 - `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
 
-The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
+The same rule applies to every model a Job names: its client is built at startup, so its credentials must be present then. Declaring a model that no Job and no `--llm-model` names costs nothing — no client is built for it.
+
+The embedding client is configured separately and is **required whenever LLM is enabled** (`--llm-model` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-model`, `serve` runs in a degraded mode that does not need the embedder either.
 
 \*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
 
@@ -183,10 +228,10 @@ The `assist` command (alias: `a`) runs the AI assist agent for all open cases ac
 | `--repository-backend` | `HECATONCHEIRES_REPOSITORY_BACKEND` | `firestore` | No | Repository backend type (`firestore` or `memory`) |
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Firestore Project ID (required when using firestore backend) |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | - | No | Firestore Database ID |
-| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | Yes | LLM provider: `openai`, `claude`, or `gemini` (empty disables AI features). Required for `assist` |
-| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
-| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required when `--llm-provider=openai`) |
-| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (used when `--llm-provider=claude` with direct Anthropic access) |
+| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | Yes | Paths to global config files or directories holding the `[[llm_model]]` definitions. Required for `assist`: the model `--llm-model` names must be defined |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | Yes | Reference name of an `[[llm_model]]` entry. Required for `assist` |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required for a model whose `provider` is `openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (for a `claude` model reached through Anthropic directly) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI (e.g. `global`, `us-central1`) |
 | `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Yes | Google Cloud project ID for the Gemini embedding client |
@@ -234,13 +279,17 @@ The `validate` command (alias: `v`) validates configuration files and optionally
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
 | `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Paths to configuration files or directories (TOML). Can be specified multiple times |
-| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | No | Paths to deployment-wide config files/directories (TOML). Validated (including that group members reference known workspaces) when present |
+| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | No | Paths to deployment-wide config files/directories (TOML). Validated when present: workspace group members must reference known workspaces, `[[llm_model]]` entries must be well-formed and uniquely named, `[agent]` must carry a usable budget, and every `[[job]]` `llm_model` must name a defined model |
 | `--repository-backend` | `HECATONCHEIRES_REPOSITORY_BACKEND` | `firestore` | No | Repository backend type (`firestore` or `memory`) |
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Firestore Project ID (required when using firestore backend) |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | - | No | Firestore Database ID |
 | `--check-db` | `HECATONCHEIRES_CHECK_DB` | `false` | No | Perform database consistency check |
 
 When `--check-db` is not specified, only the configuration files are validated and the DB consistency check is skipped.
+
+The Job-to-model cross-check needs both documents: the Jobs come from `--config`
+and the definitions from `--global-config`, so it runs only when both are given.
+It is the same check `serve` performs at startup, available without deploying.
 
 ### What `--check-db` checks
 
@@ -281,6 +330,11 @@ They are **not detected** — which is different from not implemented:
 - **`[[job]]`, Source and Tag references.** Sources and Tags are stored entities
   rather than configuration, and a `JobRun` left behind by a deleted `[[job]]`
   falls under the removed-definition rule above.
+- **A Job's `llm_model` and `budget_usd`.** Neither is stored on an entity, so
+  there is nothing persisted to reconcile: an undefined model reference is
+  reported by `hecatoncheires validate` itself (without `--check-db`) and refused
+  at startup. A run record naming a model the configuration no longer declares is
+  a historical fact about that run, not an inconsistency.
 - **Whether a referenced Case may be referenced.** `case_ref_missing` checks
   existence only. Privacy and draft state gate references when they are written;
   applying that here would flag references that were legitimate at write time.
@@ -372,10 +426,10 @@ The dispatched runs execute on the same agent runtime `serve` uses, and the swee
 | `--repository-backend` | `HECATONCHEIRES_REPOSITORY_BACKEND` | `firestore` | No | Repository backend type (`firestore` or `memory`) |
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Firestore Project ID (required when using firestore backend) |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | - | No | Firestore Database ID |
-| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No | LLM provider: `openai`, `claude`, or `gemini` (empty disables AI features) |
-| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
-| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required when `--llm-provider=openai`) |
-| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (used when `--llm-provider=claude` with direct Anthropic access) |
+| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | Cond. | Paths to global config files or directories holding the `[[llm_model]]` definitions and `[agent]`. Required whenever `--llm-model` is set |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | Reference name of an `[[llm_model]]` entry (empty disables AI features) |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required for a model whose `provider` is `openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (for a `claude` model reached through Anthropic directly) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI (e.g. `global`, `us-central1`) |
 | `--job-max-concurrency` | `HECATONCHEIRES_JOB_MAX_CONCURRENCY` | `1` | No | Maximum number of scheduled Agent Job runs executing concurrently across the whole deployment. Must match the value given to `serve`. `0` disables the limit |

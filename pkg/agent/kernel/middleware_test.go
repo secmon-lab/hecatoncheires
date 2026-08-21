@@ -203,12 +203,14 @@ func newProbeRuntime(t *testing.T, tool ...gollem.Tool) *probeRuntime {
 
 	traces := agentarchive.NewMemoryTraceRepository()
 	budgets := kernel.Budgets{
-		Root: budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8},
+		Root: budget.Root{MaxSteps: 8, NoticeRatio: 0.8},
 		Task: budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8},
 	}
+	models := kernel.ModelPolicyForTest()
 
 	reg := agentkit.NewRegistry()
-	handle, err := agentkit.Register(reg, "probe", 1, probeStrategy{limiter: budgets.Root.Limiter()})
+	handle, err := agentkit.Register(reg, "probe", 1,
+		probeStrategy{limiter: budgets.Root.Limiter(models.Resolve)})
 	gt.NoError(t, err).Required()
 
 	llm := &probeLLM{}
@@ -219,6 +221,7 @@ func newProbeRuntime(t *testing.T, tool ...gollem.Tool) *probeRuntime {
 		LLM:     llm.client(),
 		Trace:   traces,
 		Budgets: budgets,
+		Models:  models,
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
 			Repo:      repo,
@@ -531,7 +534,8 @@ func TestRunTimelineLinksAToolCallAcrossAClaimBoundary(t *testing.T) {
 		History: agentarchive.NewMemoryHistoryStore(),
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Budgets: kernel.Budgets{Root: rootOf(cfg), Task: cfg},
+		Models:  kernel.ModelPolicyForTest(),
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
 			Repo:      repo,
@@ -686,7 +690,8 @@ func TestARejectedToolCallTellsTheModelWhatItSent(t *testing.T) {
 		History: agentarchive.NewMemoryHistoryStore(),
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Budgets: kernel.Budgets{Root: rootOf(cfg), Task: cfg},
+		Models:  kernel.ModelPolicyForTest(),
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
 			Repo:      repo,
@@ -1043,7 +1048,8 @@ func TestAFailedToolCallTellsTheModelWhyItFailed(t *testing.T) {
 		History: agentarchive.NewMemoryHistoryStore(),
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: kernel.Budgets{Root: cfg, Task: cfg},
+		Budgets: kernel.Budgets{Root: rootOf(cfg), Task: cfg},
+		Models:  kernel.ModelPolicyForTest(),
 		Agents:  reg,
 		Tools: kernel.ToolDeps{
 			Repo:      repo,

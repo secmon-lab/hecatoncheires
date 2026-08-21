@@ -106,14 +106,17 @@ func bindDraftRuntimeWithoutWorker(
 
 	d, err := proposal.NewDurable(repo, registry, uc.DurableDraftHost(), locator)
 	gt.NoError(t, err).Required()
-	gt.NoError(t, d.Register(reg, taskAgent, nil, testAgentBudget.Limiter(), history)).Required()
+	models := testAgentModelPolicy(t)
+	gt.NoError(t, d.Register(reg, taskAgent, nil,
+		testAgentRootBudget.Limiter(models.Resolve), history)).Required()
 
 	k, err := agentkernel.Build(agentkernel.Deps{
 		Repo:    procRepo,
 		History: history,
 		LLM:     llm,
 		Trace:   agentarchive.NewMemoryTraceRepository(),
-		Budgets: agentkernel.Budgets{Root: testAgentBudget, Task: testAgentBudget},
+		Budgets: agentkernel.Budgets{Root: testAgentRootBudget, Task: testAgentBudget},
+		Models:  models,
 		Agents:  reg,
 		Tools:   agentkernel.ToolDeps{Repo: repo, Registry: registry, SlackBot: slackSvc},
 	})

@@ -10,13 +10,20 @@ import (
 	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/urfave/cli/v3"
+
+	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 )
 
-// LLM holds CLI configuration for LLM clients backed by gollem.
-// It supports OpenAI, Anthropic Claude (direct API or Vertex AI), and Google Gemini.
+// LLM holds the CLI configuration for the agent's LLM access: which defined
+// model is the default, and the credentials each provider needs.
+//
+// It deliberately does NOT name a provider. Which provider serves a model — and
+// what that model costs — is declared once per model in the global config's
+// [[llm_model]] sections; naming it here as well would put the same fact in two
+// places and make disagreement between them possible. What stays here is the
+// credentials, because a secret does not belong in a configuration document.
 type LLM struct {
-	provider        string
-	model           string
+	modelRef        string
 	openaiAPIKey    string
 	claudeAPIKey    string
 	geminiProjectID string
@@ -27,26 +34,21 @@ type LLM struct {
 func (x *LLM) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Name:        "llm-provider",
-			Usage:       "LLM provider: openai, claude, or gemini (empty disables AI features)",
-			Sources:     cli.EnvVars("HECATONCHEIRES_LLM_PROVIDER"),
-			Destination: &x.provider,
-		},
-		&cli.StringFlag{
-			Name:        "llm-model",
-			Usage:       "LLM model name (provider default if empty)",
+			Name: "llm-model",
+			Usage: "Default model: the reference name of an [[llm_model]] entry in the global config " +
+				"(its alias, or its model name). Empty disables AI features",
 			Sources:     cli.EnvVars("HECATONCHEIRES_LLM_MODEL"),
-			Destination: &x.model,
+			Destination: &x.modelRef,
 		},
 		&cli.StringFlag{
 			Name:        "llm-openai-api-key",
-			Usage:       "OpenAI API key (required when --llm-provider=openai)",
+			Usage:       "OpenAI API key (required for a model whose provider is openai)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_LLM_OPENAI_API_KEY"),
 			Destination: &x.openaiAPIKey,
 		},
 		&cli.StringFlag{
 			Name:        "llm-claude-api-key",
-			Usage:       "Anthropic Claude API key (used when --llm-provider=claude with direct Anthropic access)",
+			Usage:       "Anthropic Claude API key (for a claude model reached through Anthropic directly)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_LLM_CLAUDE_API_KEY"),
 			Destination: &x.claudeAPIKey,
 		},
@@ -66,110 +68,99 @@ func (x *LLM) Flags() []cli.Flag {
 	}
 }
 
-// IsEnabled reports whether an LLM provider has been configured.
-func (x *LLM) IsEnabled() bool { return x.provider != "" }
+// IsEnabled reports whether a default model has been named. It is what decides
+// whether the AI features are wired at all, the role --llm-provider used to play.
+func (x *LLM) IsEnabled() bool { return x.modelRef != "" }
 
-// LogAttrs returns log attributes for the LLM configuration. Secrets are never included.
-// Provider-specific attributes are emitted only when relevant to the active provider.
+// ModelRef returns the reference name of the default model.
+func (x *LLM) ModelRef() string { return x.modelRef }
+
+// LogAttrs returns log attributes for the LLM configuration. Secrets are never
+// included. The resolved provider and model are logged by the caller that
+// resolves them, since this struct names only the reference.
 func (x *LLM) LogAttrs() []slog.Attr {
-	attrs := []slog.Attr{
-		slog.String("provider", x.provider),
-	}
-	if x.model != "" {
-		attrs = append(attrs, slog.String("model", x.model))
-	}
-
-	switch x.provider {
-	case "claude":
-		// Only Vertex AI mode uses GCP project/location.
-		if x.geminiProjectID != "" {
-			attrs = append(attrs,
-				slog.String("gcp_project_id", x.geminiProjectID),
-				slog.String("gcp_location", x.geminiLocation),
-			)
-		}
-	case "gemini":
-		if x.geminiProjectID != "" {
-			attrs = append(attrs, slog.String("gcp_project_id", x.geminiProjectID))
-		}
-		if x.geminiLocation != "" {
-			attrs = append(attrs, slog.String("gcp_location", x.geminiLocation))
-		}
+	attrs := []slog.Attr{slog.String("model_ref", x.modelRef)}
+	if x.geminiProjectID != "" {
+		attrs = append(attrs,
+			slog.String("gcp_project_id", x.geminiProjectID),
+			slog.String("gcp_location", x.geminiLocation),
+		)
 	}
 	return attrs
 }
 
-// NewClient builds a gollem.LLMClient for the configured provider. Returns
-// (nil, nil) when the LLM feature is disabled (no provider configured).
-func (x *LLM) NewClient(ctx context.Context) (gollem.LLMClient, error) {
-	if !x.IsEnabled() {
-		return nil, nil
+// NewClientFor builds the gollem client that serves one defined model.
+//
+// The credential rules are the provider's, not the model's: a claude model is
+// reached either through Anthropic directly (an API key) or through Vertex AI (a
+// GCP project), and naming both is a configuration mistake rather than a choice
+// this code may make on the operator's behalf.
+func (x *LLM) NewClientFor(ctx context.Context, def agentkernel.ModelDef) (gollem.LLMClient, error) {
+	if err := def.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid model definition")
 	}
 
-	switch x.provider {
-	case "openai":
+	switch def.Provider {
+	case agentkernel.ProviderOpenAI:
 		if x.openaiAPIKey == "" {
-			return nil, goerr.New("--llm-openai-api-key is required when --llm-provider=openai")
+			return nil, goerr.New("--llm-openai-api-key is required for an openai model",
+				goerr.V(LLMModelRefKey, def.Ref))
 		}
-		var opts []openai.Option
-		if x.model != "" {
-			opts = append(opts, openai.WithModel(x.model))
-		}
-		client, err := openai.New(ctx, x.openaiAPIKey, opts...)
+		client, err := openai.New(ctx, x.openaiAPIKey, openai.WithModel(def.Model))
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create OpenAI client")
+			return nil, goerr.Wrap(err, "failed to create OpenAI client",
+				goerr.V(LLMModelRefKey, def.Ref))
 		}
 		return client, nil
 
-	case "claude":
+	case agentkernel.ProviderClaude:
 		hasAPIKey := x.claudeAPIKey != ""
 		hasGCP := x.geminiProjectID != ""
-		if hasAPIKey && hasGCP {
-			return nil, goerr.New("--llm-claude-api-key and --llm-gemini-project-id are mutually exclusive when --llm-provider=claude")
-		}
 		switch {
+		case hasAPIKey && hasGCP:
+			return nil, goerr.New("--llm-claude-api-key and --llm-gemini-project-id are mutually exclusive for a claude model",
+				goerr.V(LLMModelRefKey, def.Ref))
 		case hasAPIKey:
-			var opts []claude.Option
-			if x.model != "" {
-				opts = append(opts, claude.WithModel(x.model))
-			}
-			client, err := claude.New(ctx, x.claudeAPIKey, opts...)
+			client, err := claude.New(ctx, x.claudeAPIKey, claude.WithModel(def.Model))
 			if err != nil {
-				return nil, goerr.Wrap(err, "failed to create Claude client")
+				return nil, goerr.Wrap(err, "failed to create Claude client",
+					goerr.V(LLMModelRefKey, def.Ref))
 			}
 			return client, nil
 		case hasGCP:
 			if x.geminiLocation == "" {
-				return nil, goerr.New("--llm-gemini-location is required when --llm-provider=claude with --llm-gemini-project-id")
+				return nil, goerr.New("--llm-gemini-location is required for a claude model on Vertex AI",
+					goerr.V(LLMModelRefKey, def.Ref))
 			}
-			var opts []claude.VertexOption
-			if x.model != "" {
-				opts = append(opts, claude.WithVertexModel(x.model))
-			}
-			client, err := claude.NewWithVertex(ctx, x.geminiLocation, x.geminiProjectID, opts...)
+			client, err := claude.NewWithVertex(ctx, x.geminiLocation, x.geminiProjectID,
+				claude.WithVertexModel(def.Model))
 			if err != nil {
-				return nil, goerr.Wrap(err, "failed to create Claude (Vertex AI) client")
+				return nil, goerr.Wrap(err, "failed to create Claude (Vertex AI) client",
+					goerr.V(LLMModelRefKey, def.Ref))
 			}
 			return client, nil
 		default:
-			return nil, goerr.New("--llm-provider=claude requires either --llm-claude-api-key or --llm-gemini-project-id")
+			return nil, goerr.New("a claude model requires either --llm-claude-api-key or --llm-gemini-project-id",
+				goerr.V(LLMModelRefKey, def.Ref))
 		}
 
-	case "gemini":
+	case agentkernel.ProviderGemini:
 		if x.geminiProjectID == "" || x.geminiLocation == "" {
-			return nil, goerr.New("--llm-provider=gemini requires both --llm-gemini-project-id and --llm-gemini-location")
+			return nil, goerr.New("a gemini model requires both --llm-gemini-project-id and --llm-gemini-location",
+				goerr.V(LLMModelRefKey, def.Ref))
 		}
-		var opts []gemini.Option
-		if x.model != "" {
-			opts = append(opts, gemini.WithModel(x.model))
-		}
-		client, err := gemini.New(ctx, x.geminiProjectID, x.geminiLocation, opts...)
+		client, err := gemini.New(ctx, x.geminiProjectID, x.geminiLocation,
+			gemini.WithModel(def.Model))
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create Gemini client")
+			return nil, goerr.Wrap(err, "failed to create Gemini client",
+				goerr.V(LLMModelRefKey, def.Ref))
 		}
 		return client, nil
 
 	default:
-		return nil, goerr.New("unsupported --llm-provider value", goerr.V("provider", x.provider))
+		// ModelDef.Validate has already rejected every other value; this arm
+		// exists so a provider added there without a client here fails loudly.
+		return nil, goerr.New("unsupported model provider",
+			goerr.V(LLMModelRefKey, def.Ref), goerr.V("provider", def.Provider))
 	}
 }

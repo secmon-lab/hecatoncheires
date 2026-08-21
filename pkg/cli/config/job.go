@@ -59,8 +59,18 @@ type JobSection struct {
 	// Slack form → resume). Defaults to false. Requires strategy="planexec";
 	// the combination with simple is rejected at config load time by
 	// model.Job.Validate.
-	Interactive bool             `toml:"interactive"`
-	Events      JobEventsSection `toml:"events"`
+	Interactive bool `toml:"interactive"`
+	// LLMModel names which model this Job generates through: the reference name
+	// of an [[llm_model]] entry in the global config (its alias, or its model
+	// name when it declares no alias). Empty uses the deployment's default
+	// model. Only the NAME's shape is checked here — whether it is defined
+	// lives in another document, and is checked by ValidateJobModels.
+	LLMModel string `toml:"llm_model"`
+	// BudgetUSD is the greatest amount in USD one run of this Job may spend,
+	// sub-agents included. Zero (the default) uses the deployment's default
+	// budget.
+	BudgetUSD float64          `toml:"budget_usd"`
+	Events    JobEventsSection `toml:"events"`
 }
 
 // JobEventsSection mirrors the `events.<domain> = { ... }` map. At least
@@ -119,6 +129,16 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 			goerr.V("strategy", s.Strategy))
 	}
 
+	if s.LLMModel != "" && !llmModelRefPattern.MatchString(s.LLMModel) {
+		return nil, goerr.Wrap(ErrInvalidLLMModelRef,
+			"job llm_model must be a model reference name",
+			goerr.V("job_id", s.ID), goerr.V("llm_model", s.LLMModel))
+	}
+	budget, err := budgetFromUSD(s.BudgetUSD)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid job budget", goerr.V("job_id", s.ID))
+	}
+
 	job := &model.Job{
 		ID:          s.ID,
 		Name:        s.Name,
@@ -129,6 +149,8 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 		Strategy:    strategy,
 		Interactive: s.Interactive,
 		Reflection:  s.Reflection,
+		LLMModel:    s.LLMModel,
+		Budget:      budget,
 		Events:      *events,
 	}
 	// In structural-validation mode (baseDir == "") the prompt lives in a

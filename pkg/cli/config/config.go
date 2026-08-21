@@ -957,16 +957,26 @@ func parseWorkspaceConfig(src WorkspaceConfigSource) (*WorkspaceConfig, error) {
 
 // Flags returns CLI flags for workspace configuration.
 func (a *AppConfig) Flags() []cli.Flag {
-	return []cli.Flag{
+	return append([]cli.Flag{
 		&cli.StringSliceFlag{
 			Name:    "config",
 			Usage:   "Paths to configuration files or directories (TOML). Can be specified multiple times.",
 			Value:   []string{"./config.toml"},
 			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
 		},
+	}, a.GlobalConfigFlags()...)
+}
+
+// GlobalConfigFlags returns the --global-config flag on its own, for a command
+// that reads deployment-wide settings but loads no workspace configs. The eval
+// harness needs the model definitions ([[llm_model]]) while taking its scenarios
+// as positional arguments.
+func (a *AppConfig) GlobalConfigFlags() []cli.Flag {
+	return []cli.Flag{
 		&cli.StringSliceFlag{
-			Name:    "global-config",
-			Usage:   "Paths to global (deployment-wide) config files or directories (TOML) holding [[workspace_group]] definitions. Optional; unset leaves workspace groups dormant.",
+			Name: "global-config",
+			Usage: "Paths to global (deployment-wide) config files or directories (TOML) holding " +
+				"[[workspace_group]], [export], [agent] and [[llm_model]] definitions. Optional.",
 			Sources: cli.EnvVars("HECATONCHEIRES_GLOBAL_CONFIG"),
 		},
 	}

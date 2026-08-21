@@ -128,6 +128,32 @@ var (
 	// ErrDuplicateExportConfig is returned when more than one global config file
 	// defines an [export] section.
 	ErrDuplicateExportConfig = goerr.New("duplicate [export] section across global config files")
+
+	// --- Global config ([agent], [[llm_model]]) ---
+
+	// ErrDuplicateAgentConfig is returned when more than one global config file
+	// defines an [agent] section. Like [export], the deployment-wide agent
+	// settings must have a single home.
+	ErrDuplicateAgentConfig = goerr.New("duplicate [agent] section across global config files")
+	// ErrInvalidBudget is returned when a configured budget is negative, or so
+	// small it rounds away to zero (which would read as "not set").
+	ErrInvalidBudget = goerr.New("invalid budget")
+	// ErrInvalidLLMModel is returned when an [[llm_model]] entry is malformed,
+	// e.g. it names no model.
+	ErrInvalidLLMModel = goerr.New("invalid [[llm_model]] entry")
+	// ErrInvalidLLMModelRef is returned when a model reference name — an
+	// [[llm_model]] alias, or a Job's llm_model — does not match the allowed
+	// pattern or exceeds the length limit.
+	ErrInvalidLLMModelRef = goerr.New("invalid model reference name")
+	// ErrInvalidLLMModelPrice is returned when an [[llm_model]] price is
+	// negative, missing where required, or too small to represent.
+	ErrInvalidLLMModelPrice = goerr.New("invalid model price")
+	// ErrDuplicateLLMModelRef is returned when the same model reference name is
+	// defined more than once across the global config files.
+	ErrDuplicateLLMModelRef = goerr.New("duplicate model reference name")
+	// ErrUnknownLLMModelRef is returned when a Job — or the --llm-model flag —
+	// names a model that no [[llm_model]] entry defines.
+	ErrUnknownLLMModelRef = goerr.New("model reference name is not defined")
 )
 
 // Context keys for error values
@@ -145,4 +171,5 @@ const (
 	WorkspaceGroupIDKey = "workspace_group_id"
 	GroupMemberKey      = "group_member"
 	ExportDatasetKey    = "dataset"
+	LLMModelRefKey      = "llm_model"
 )

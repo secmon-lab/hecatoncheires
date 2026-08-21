@@ -1033,6 +1033,8 @@ prompt = "Post a status digest to the case Slack channel."
 | `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
 | `interactive` | bool     | no       | Defaults to `false`. Set `true` to let the Job pause mid-run and ask the user a question in Slack, resuming when they answer. **Requires `strategy = "planexec"`.** See *Interactive Jobs* below. |
 | `reflection`  | bool     | no       | Defaults to `false`. Set `true` to run a post-execution reflection pass after a successful run. See *Reflection* below. |
+| `llm_model`   | string   | no       | Reference name of an `[[llm_model]]` entry in the global config (its `alias`, or its `model`). Empty uses the deployment's default model. A name no entry defines fails at startup and in `validate`. See *Model definitions* below. |
+| `budget_usd`  | float    | no       | Greatest amount in USD one run of this Job may spend, sub-agents included. Omitted (or `0`) uses the deployment's default budget. See *Model definitions* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
 
@@ -1475,7 +1477,7 @@ type = "url"
 
 ---
 
-## Global Configuration (Workspace Groups)
+## Global Configuration
 
 Everything above lives in a **workspace** config file passed via `--config`,
 where the rule is **one TOML file = one workspace**. Some settings, however,
@@ -1483,19 +1485,27 @@ span workspaces rather than belonging to any single one. Those live in a
 separate **global** config file passed via `--global-config`
 (`HECATONCHEIRES_GLOBAL_CONFIG`).
 
-Today the global config holds **workspace groups** only. A workspace group
-bundles multiple workspaces for organization and navigation. Grouping is
-**orthogonal**: which group(s) a workspace belongs to never changes the
-workspace's own behavior, and groups are entirely optional — omit
-`--global-config` and the system runs exactly as before.
+The global config holds **workspace groups**, the **`[export]`** configuration
+(see [export.md](./export.md)), the **model definitions** every agent may use,
+and the deployment-wide **`[agent]`** settings.
 
 - A global config file MUST NOT contain a `[workspace]` section, and a
   workspace file MUST NOT contain `[[workspace_group]]`. Do not place the
   global config under a `--config` path.
 - `--global-config` accepts one or more file/directory paths (directories are
   walked for `.toml`), just like `--config`.
-- Unset `--global-config` leaves workspace groups dormant; the GraphQL
-  `workspaceGroups` query returns an empty list.
+- Sections that are a **set** — `[[workspace_group]]`, `[[llm_model]]` — may be
+  spread across several files; only a repeated identifier is a conflict. Sections
+  that configure the deployment as a whole — `[export]`, `[agent]` — must be
+  declared in exactly one file.
+
+### Workspace Groups
+
+A workspace group bundles multiple workspaces for organization and navigation.
+Grouping is **orthogonal**: which group(s) a workspace belongs to never changes
+the workspace's own behavior, and groups are entirely optional. Unset
+`--global-config` leaves workspace groups dormant; the GraphQL `workspaceGroups`
+query returns an empty list.
 
 ### `[[workspace_group]]` keys
 
@@ -1533,6 +1543,85 @@ hecatoncheires serve \
 ```
 
 See `examples/global.toml` for a complete example.
+
+### Model definitions (`[[llm_model]]`)
+
+Which models this deployment may use — and what each costs — is declared here,
+and **only** here. A Job's `llm_model` and the `--llm-model` flag both name one
+of these entries by reference name; a name no entry defines is refused at startup
+and by `hecatoncheires validate`.
+
+```toml
+# global.toml
+
+[agent]
+# What one agent run may spend when neither the Job nor the command line says.
+# Optional; omitted falls back to the built-in $2.00.
+default_budget_usd = 3.0
+
+[[llm_model]]
+provider = "claude"
+model    = "claude-opus-5"        # no alias → the reference name is "claude-opus-5"
+input_usd_per_mtok       = 5.0
+output_usd_per_mtok      = 25.0
+cache_read_usd_per_mtok  = 0.5
+cache_write_usd_per_mtok = 6.25
+
+[[llm_model]]
+alias    = "cheap"                # the reference name is "cheap"
+provider = "gemini"
+model    = "gemini-3.7-flash"
+input_usd_per_mtok      = 0.75
+output_usd_per_mtok     = 3.75
+cache_read_usd_per_mtok = 0.075
+```
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `alias` | string | No | The name Jobs and `--llm-model` refer to this entry by. Omitted, the reference name is `model`. Must match `^[A-Za-z0-9][A-Za-z0-9._@-]*$` and be at most 100 characters, and must be unique across every `--global-config` file |
+| `provider` | string | **Yes** | `openai`, `claude` or `gemini`. It decides which credentials the entry needs (see below) |
+| `model` | string | **Yes** | The model name handed to that provider |
+| `input_usd_per_mtok` | float | **Yes** | Price of one million uncached input tokens, in USD. Must be positive |
+| `output_usd_per_mtok` | float | **Yes** | Price of one million generated tokens, in USD. Must be positive |
+| `cache_read_usd_per_mtok` | float | No | Price of one million tokens served from the prompt cache. Defaults to `0` |
+| `cache_write_usd_per_mtok` | float | No | Price of one million tokens written to the prompt cache. Defaults to `0`. Only Claude reports cache writes; the value is never charged for other providers |
+
+**Write the prices from the provider's own pricing page**, in dollars per 1M
+tokens — the unit those pages use. Two rules follow from what the figure is for:
+
+- **A model whose price varies by prompt length: write the HIGHER tier.**
+  Under-charging lets a run spend past its budget; over-charging only ends a run
+  a little early, with whatever it found so far.
+- **A price of zero is refused.** A model priced at nothing has an unbounded
+  budget, which is the failure the money ceiling exists to prevent. So is a
+  positive figure so small it rounds away — usually a per-token price written
+  where a per-million one belongs.
+
+**Credentials stay on the command line**, not in this file: `openai` needs
+`--llm-openai-api-key`, `gemini` needs `--llm-gemini-project-id` and
+`--llm-gemini-location`, and `claude` needs either `--llm-claude-api-key` (direct
+Anthropic API) or `--llm-gemini-project-id` (Vertex AI) — the two are mutually
+exclusive. A client is built at startup for the default model and for every model
+an enabled Job names, so those credentials must be present then. Declaring a
+model nobody names costs nothing.
+
+### Agent settings (`[agent]`)
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `default_budget_usd` | float | No | What one agent run may spend, sub-agents included, when the Job names no `budget_usd`. Must not be negative |
+
+The effective budget for a run is resolved in this order, narrowest first:
+
+1. The Job's own `budget_usd`.
+2. `--agent-default-budget-usd` / `HECATONCHEIRES_AGENT_DEFAULT_BUDGET_USD`.
+3. `[agent] default_budget_usd` in this file.
+4. The built-in `2.0` USD.
+
+The deployment-wide intent belongs in this document, next to the model prices it
+is spent against; the flag exists so one environment can be raised temporarily
+without editing it. The startup log reports the figure in force and which of the
+four it came from.
 
 ---
 
