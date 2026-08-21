@@ -42,11 +42,30 @@ Storage bucket so sessions survive across instances and turns:
 The object layout and required IAM are documented in
 [Architecture → Agent thread session](develop/architecture.md#agent-thread-session-internals).
 
-## 3. LLM provider
+## 3. LLM models
 
-AI features are disabled unless `--llm-provider` is set. When set, the matching
-provider credentials become required. An embedding client (Gemini) is also
-required whenever the LLM is enabled.
+The models a deployment may use are declared in a global config file, one
+`[[llm_model]]` entry each, with their prices. `--llm-model` then names which of
+them is the default; AI features are disabled unless it is set.
+
+```toml
+# global.toml — pass via --global-config
+
+[[llm_model]]
+alias    = "main"
+provider = "gemini"                 # openai | claude | gemini
+model    = "gemini-3.7-flash"
+input_usd_per_mtok  = 0.75          # USD per 1M tokens, from the provider's price page
+output_usd_per_mtok = 3.75
+```
+
+Prices are required because an agent run's budget is denominated in money (see
+[CLI → Agent runtime budgets](cli.md#agent-runtime-budgets)). The full field
+reference is in
+[Configuration → Model definitions](configuration.md#model-definitions-llm_model).
+
+Credentials stay on the command line, and which ones are required follows the
+entry's `provider`:
 
 | Provider | Required credentials |
 |---|---|
@@ -54,10 +73,14 @@ required whenever the LLM is enabled.
 | `claude` | either `--llm-claude-api-key` (direct Anthropic) **or** `--llm-gemini-project-id` (Claude via Vertex AI) — mutually exclusive |
 | `gemini` | `--llm-gemini-project-id` and `--llm-gemini-location` |
 
-The embedding client is configured separately via
-`--embedding-gemini-project-id` / `--embedding-gemini-location` /
-`--embedding-model` (default `gemini-embedding-2`). See
-[CLI → `serve`](cli.md#serve) for the full flag list and conditions.
+A client is built at startup for the default model and for every model an enabled
+Job names, so those credentials must be present then.
+
+An embedding client (Gemini) is also required whenever the LLM is enabled. It is
+configured separately via `--embedding-gemini-project-id` /
+`--embedding-gemini-location` / `--embedding-model` (default
+`gemini-embedding-2`). See [CLI → `serve`](cli.md#serve) for the full flag list
+and conditions.
 
 ## 4. Slack App
 
@@ -81,7 +104,9 @@ hecatoncheires serve \
   --repository-backend=firestore \
   --firestore-project-id=YOUR_PROJECT_ID \
   --cloud-storage-bucket=YOUR_BUCKET \
-  --llm-provider=gemini \
+  --config=./config.toml \
+  --global-config=./global.toml \
+  --llm-model=main \
   --llm-gemini-project-id=YOUR_PROJECT_ID \
   --embedding-gemini-project-id=YOUR_PROJECT_ID \
   --addr=:8080
