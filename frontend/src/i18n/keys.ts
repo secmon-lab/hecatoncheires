@@ -554,6 +554,7 @@ export const msgKeys = {
   jobRunLogMetaDuration: 'jobRunLogMetaDuration',
   jobRunLogMetaModel: 'jobRunLogMetaModel',
   jobRunLogMetaJobId: 'jobRunLogMetaJobId',
+  jobRunLogMetaCost: 'jobRunLogMetaCost',
   jobRunLogMetaSources: 'jobRunLogMetaSources',
   jobRunLogMetaTrigger: 'jobRunLogMetaTrigger',
   jobRunLogIdRunId: 'jobRunLogIdRunId',

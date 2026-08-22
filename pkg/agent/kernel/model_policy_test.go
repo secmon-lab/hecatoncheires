@@ -236,7 +236,11 @@ func TestModelPolicyResolve(t *testing.T) {
 			limit := p.Resolve(proc)
 			gt.Value(t, limit.Budget).Equal(tc.wantBudget)
 			gt.Value(t, limit.Rate).Equal(tc.wantRate)
-			gt.String(t, p.ModelOf(proc)).Equal(tc.wantModel)
+			// The scope the run carries and the Process it is read from must
+			// resolve to the same model; the record and the ceiling are priced
+			// through different entry points.
+			gt.String(t, p.ModelName(tc.scope)).Equal(tc.wantModel)
+			gt.String(t, p.ModelName(kernel.ScopeFrom(proc.Metadata))).Equal(tc.wantModel)
 		})
 	}
 }
@@ -251,48 +255,54 @@ func TestModelPolicyResolveHandlesANilProcess(t *testing.T) {
 	limit := p.Resolve(nil)
 	gt.Value(t, limit.Budget).Equal(pricing.FromUSD(2))
 	gt.Value(t, limit.Rate).Equal(opusRate)
-	gt.Value(t, p.CostOf(nil)).Equal(pricing.NanoUSD(0))
 }
 
-// TestModelPolicyCostOfPricesTheRunsOwnModel is what the run record stores: the
+// TestModelPolicyCostPricesTheRunsOwnModel is what the run record stores: the
 // same token counts cost different amounts depending on which model ran.
-func TestModelPolicyCostOfPricesTheRunsOwnModel(t *testing.T) {
+func TestModelPolicyCostPricesTheRunsOwnModel(t *testing.T) {
 	p, err := kernel.NewModelPolicy(validPolicyInput())
 	gt.NoError(t, err).Required()
 
 	metrics := agentkit.Metrics{InputTokens: 100_000, OutputTokens: 10_000}
 
-	onDefault := &agentkit.Process{Metadata: kernel.Scope{}.Metadata(), Metrics: metrics}
 	// 100,000 * 5000 + 10,000 * 25000 = $0.75
-	gt.Value(t, p.CostOf(onDefault)).Equal(pricing.FromUSD(0.75))
+	gt.Value(t, p.Cost(kernel.Scope{}, metrics)).Equal(pricing.FromUSD(0.75))
 
-	onCheap := &agentkit.Process{
-		Metadata: kernel.Scope{LLMModel: "cheap"}.Metadata(),
-		Metrics:  metrics,
-	}
 	// 100,000 * 750 + 10,000 * 3750 = $0.1125
-	gt.Value(t, p.CostOf(onCheap)).Equal(pricing.FromUSD(0.1125))
+	gt.Value(t, p.Cost(kernel.Scope{LLMModel: "cheap"}, metrics)).Equal(pricing.FromUSD(0.1125))
+
+	// A model the configuration no longer defines is priced at the default rate,
+	// which is also the model such a run actually generates through.
+	gt.Value(t, p.Cost(kernel.Scope{LLMModel: "was-removed"}, metrics)).
+		Equal(pricing.FromUSD(0.75))
 }
 
-// TestModelPolicyCostOfChargesCacheAtItsOwnRate pins that the four token kinds
-// are priced separately, which is the reason Rate has four components.
-func TestModelPolicyCostOfChargesCacheAtItsOwnRate(t *testing.T) {
+// TestModelPolicyCostChargesCacheAtItsOwnRate pins that the four token kinds are
+// priced separately, which is the reason Rate has four components.
+func TestModelPolicyCostChargesCacheAtItsOwnRate(t *testing.T) {
 	p, err := kernel.NewModelPolicy(validPolicyInput())
 	gt.NoError(t, err).Required()
 
-	proc := &agentkit.Process{
-		Metadata: kernel.Scope{}.Metadata(),
-		Metrics: agentkit.Metrics{
-			InputTokens:              100_000,
-			CacheReadInputTokens:     80_000,
-			CacheCreationInputTokens: 10_000,
-			OutputTokens:             1_000,
-		},
+	metrics := agentkit.Metrics{
+		InputTokens:              100_000,
+		CacheReadInputTokens:     80_000,
+		CacheCreationInputTokens: 10_000,
+		OutputTokens:             1_000,
 	}
 
 	// 10,000 uncached * 5000 + 80,000 read * 500 + 10,000 write * 6250 + 1,000 out * 25000
 	want := pricing.NanoUSD(10_000*5000 + 80_000*500 + 10_000*6250 + 1_000*25000)
-	gt.Value(t, p.CostOf(proc)).Equal(want)
+	gt.Value(t, p.Cost(kernel.Scope{}, metrics)).Equal(want)
+}
+
+// TestModelPolicyCostOfAnEmptyPolicy pins that the zero value — what a
+// deployment with no LLM configured holds — prices nothing rather than panicking.
+func TestModelPolicyCostOfAnEmptyPolicy(t *testing.T) {
+	var p kernel.ModelPolicy
+	metrics := agentkit.Metrics{InputTokens: 1000, OutputTokens: 1000}
+
+	gt.Value(t, p.Cost(kernel.Scope{}, metrics)).Equal(pricing.NanoUSD(0))
+	gt.String(t, p.ModelName(kernel.Scope{})).Equal("")
 }
 
 // TestModelRoleMiddlewarePointsARunAtItsModel pins the one mechanism that makes a

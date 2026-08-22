@@ -1045,6 +1045,15 @@ type JobRunLog {
   # the Event that started this Run.
   eventType: String!
   eventTriggerAt: Time!
+  # What this Run spent, in USD, priced at the rate of the model it ran on.
+  # It is stored on the Run rather than computed here: the token counts alone
+  # do not say which model produced them, and a configured price may be
+  # corrected afterwards. 0 for a Run recorded before costs were tracked.
+  costUsd: Float!
+  # The provider's own name for the model this Run generated through (e.g.
+  # "gemini-3.7-flash"), which is the value that can be matched against a
+  # provider's billing. Empty for a Run recorded before it was tracked.
+  model: String!
 }
 
 enum JobRunEventKind {

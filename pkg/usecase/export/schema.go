@@ -172,6 +172,10 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 		{Name: "cache_read_input_tokens", Type: TypeInt, Nullable: true},
 		{Name: "llm_call_count", Type: TypeInt, Nullable: true},
 		{Name: "tool_call_count", Type: TypeInt, Nullable: true},
+		// The cost is exported in nano-USD, the unit it is stored in: an integer
+		// sums exactly across runs, which is what a spend query does with it.
+		{Name: "cost_nano_usd", Type: TypeInt, Nullable: true},
+		{Name: "model", Type: TypeString, Nullable: true},
 	}
 	rows := make([]map[string]any, 0, len(logs))
 	for _, l := range logs {
@@ -196,6 +200,8 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 			"cache_read_input_tokens":     l.CacheReadInputTokens,
 			"llm_call_count":              l.LLMCallCount,
 			"tool_call_count":             l.ToolCallCount,
+			"cost_nano_usd":               l.CostNanoUSD,
+			"model":                       l.Model,
 		})
 	}
 	return &Table{Name: "job_run_logs", Columns: cols, Rows: rows}

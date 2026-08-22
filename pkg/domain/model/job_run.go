@@ -263,6 +263,20 @@ type JobRunLog struct {
 	// Together with LLMCallCount it gives the run's step count without
 	// reading the event timeline.
 	ToolCallCount int64
+	// CostNanoUSD is what the run spent, in 1e-9 USD, priced at the rate of the
+	// model it generated through. It is STORED rather than derived from the token
+	// counts at read time: the price of a model is configuration and may be
+	// corrected later, and a past run's cost is a fact about that run. It is also
+	// the figure the run's budget was judged against.
+	//
+	// Runs recorded before this field existed stay at zero — there is no
+	// backfill, because the model those runs used was not recorded either.
+	CostNanoUSD int64
+	// Model is the provider's own name for the model the run generated through
+	// (e.g. "gemini-3.7-flash"), not the reference name the configuration calls
+	// it by: this is the value that can be matched against a provider's billing.
+	// Empty for a run recorded before the field existed.
+	Model string
 
 	// PendingInteraction is set ONLY while Stage == AWAITING_INPUT: it holds
 	// the question put to the user and the Slack message coordinates needed
@@ -368,6 +382,9 @@ func (l *JobRunLog) Validate() error {
 	if l.CacheCreationInputTokens < 0 {
 		return goerr.New("cache creation input tokens is negative",
 			goerr.V("cache_creation_input_tokens", l.CacheCreationInputTokens))
+	}
+	if l.CostNanoUSD < 0 {
+		return goerr.New("cost is negative", goerr.V("cost_nano_usd", l.CostNanoUSD))
 	}
 	if l.CacheReadInputTokens < 0 {
 		return goerr.New("cache read input tokens is negative",

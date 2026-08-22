@@ -230,10 +230,11 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 	if err != nil {
 		return nil, goerr.Wrap(err, "env: register the task sub-agent")
 	}
-	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(models.Resolve), history, procRepo, taskAgent); err != nil {
+	if err := uc.Agent.RegisterAgents(reg, evalRootBudget.Limiter(models.Resolve), models,
+		history, procRepo, taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the agents")
 	}
-	durable := &job.DurableRuntime{History: history, Locator: locator}
+	durable := &job.DurableRuntime{History: history, Locator: locator, Models: models}
 	if err := durable.Register(reg, evalRootBudget.Limiter(models.Resolve), taskAgent); err != nil {
 		return nil, goerr.Wrap(err, "env: register the job agents")
 	}

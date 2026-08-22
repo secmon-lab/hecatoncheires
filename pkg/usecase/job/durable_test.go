@@ -149,6 +149,62 @@ func TestDurableRuntime_SpawnCarriesTheJobsModelAndBudget(t *testing.T) {
 	gt.Value(t, plain.Budget).Equal(pricing.NanoUSD(0))
 }
 
+// TestDurableRuntime_RecordsWhatTheRunCost pins the record a finished run leaves:
+// the tokens it consumed AND what they cost at the rate of the model it ran on,
+// plus that model's own name.
+//
+// The cost is stored rather than derived later because it cannot be recomputed:
+// the token counts alone do not say which model produced them, and a configured
+// price may be corrected after the run is over.
+func TestDurableRuntime_RecordsWhatTheRunCost(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+
+	j := &model.Job{
+		ID:     "priced",
+		Prompt: "summarise the case",
+		Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j},
+	})
+
+	// 1200 input and 340 output tokens on the test model ($1 / $5 per MTok).
+	llm := singleReplyLLM("the case looks fine", 1200, 340)
+	durable := &job.DurableRuntime{
+		History: agentarchive.NewMemoryHistoryStore(),
+		Models:  testModelPolicy(t),
+	}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+	})
+	bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+	durable.TrackSpawns()
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainScheduled, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: time.Now().UTC(),
+	})).Required()
+	gt.NoError(t, durable.Drain(ctx)).Required()
+
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	logs, err := repo.JobRunLog().List(ctx, key, 10)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	got := logs[0]
+
+	gt.Value(t, got.Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, got.Model).Equal("test-model")
+	// The recorded cost is the recorded tokens priced at that model's rate, so the
+	// two halves of the record cannot disagree.
+	want := pricing.Rate{Input: 1000, Output: 5000}.Cost(
+		got.InputTokens, got.OutputTokens,
+		got.CacheReadInputTokens, got.CacheCreationInputTokens)
+	gt.Value(t, got.CostNanoUSD).Equal(int64(want))
+	gt.Number(t, got.CostNanoUSD).Greater(0)
+}
+
 // Drain waits for the runs THIS process started, not for whatever else is in the
 // store. A sweep that waited on another instance's runs would hang for as long as
 // they take, and a sweep that tracked nothing would exit having executed nothing.

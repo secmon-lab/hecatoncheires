@@ -24,6 +24,15 @@ type Usage struct {
 	CacheReadInputTokens     int64
 	LLMCalls                 int64
 	ToolCalls                int64
+	// CostNanoUSD is what those tokens cost, priced at the rate of the model the
+	// run generated through. It is carried rather than derived because the token
+	// counts alone cannot be priced later: which model ran is the run's own fact,
+	// and a configured price may change afterwards.
+	CostNanoUSD int64
+	// Model is the provider's own name for the model the run generated through —
+	// the value an operator can match against a provider's billing. Empty when
+	// the caller could not resolve it.
+	Model string
 }
 
 // FinishRun ends a run record from a process that does not hold its Recorder.
@@ -67,6 +76,15 @@ func FinishRun(
 	log.CacheReadInputTokens += usage.CacheReadInputTokens
 	log.LLMCallCount += usage.LLMCalls
 	log.ToolCallCount += usage.ToolCalls
+	// The cost accumulates like the token counts, so an interactive run that
+	// suspends and resumes reports what the whole exchange spent.
+	log.CostNanoUSD += usage.CostNanoUSD
+	// The model is set rather than accumulated: it is the same for every turn of
+	// a run. An empty value leaves whatever the run recorded before, so a caller
+	// that cannot resolve it does not erase what an earlier turn knew.
+	if usage.Model != "" {
+		log.Model = usage.Model
+	}
 
 	status := model.JobRunStatusSuccess
 	if execErr != nil {

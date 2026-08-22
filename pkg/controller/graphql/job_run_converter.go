@@ -7,6 +7,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // toGraphQLJobRunLog maps the domain JobRunLog to its GraphQL form,
@@ -31,6 +32,10 @@ func toGraphQLJobRunLog(log *model.JobRunLog, jobName string) *graphql1.JobRunLo
 		SystemPrompt:   log.SystemPrompt,
 		EventType:      log.EventType,
 		EventTriggerAt: log.EventTriggerAt,
+		// The wire carries dollars: GraphQL's Int is 32-bit, which a nano-USD
+		// figure overflows, and this value is read to be displayed.
+		CostUsd: pricing.NanoUSD(log.CostNanoUSD).USDValue(),
+		Model:   log.Model,
 	}
 	if !log.EndedAt.IsZero() {
 		ended := log.EndedAt

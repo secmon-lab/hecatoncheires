@@ -23,7 +23,26 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
+
+// testModelPolicy is the one-model policy these turns are priced at. Its figures
+// are what the run-record assertions expect: $1 / $5 per MTok.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
 
 // hostCall records one Slack-facing call the finished turn made.
 type hostCall struct {
@@ -127,7 +146,7 @@ func newHarness(t *testing.T, llm gollem.LLMClient, tools ...gollem.Tool) *harne
 	locator, err := agentkernel.NewLocator(procRepo)
 	gt.NoError(t, err).Required()
 
-	uc, err := casebound.New(repo, host, locator)
+	uc, err := casebound.New(repo, host, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	reg := agentkit.NewRegistry()
@@ -266,6 +285,11 @@ func TestStartTurnPostsTheReplyAndRecordsTheRun(t *testing.T) {
 	gt.Value(t, log.InputTokens).Equal(int64(120))
 	gt.Value(t, log.OutputTokens).Equal(int64(34))
 	gt.Value(t, log.LLMCallCount).Equal(int64(1))
+	// The same usage priced at testModelPolicy's rate: 120*1000 + 34*5000 nanoUSD.
+	// A host that recorded no cost, or priced it at another model's rate, fails
+	// here rather than showing an em dash on the run-detail page.
+	gt.Value(t, log.CostNanoUSD).Equal(int64(290_000))
+	gt.String(t, log.Model).Equal("test-model")
 
 	stored, err := h.repo.Session().GetByThread(ctx, testChannelID, testThreadTS)
 	gt.NoError(t, err).Required()
@@ -399,7 +423,7 @@ func TestStartTurnRefusesWhenUnbound(t *testing.T) {
 	repo := memory.New()
 	locator, err := agentkernel.NewLocator(agentprocmemory.New())
 	gt.NoError(t, err).Required()
-	uc, err := casebound.New(repo, &recordingHost{}, locator)
+	uc, err := casebound.New(repo, &recordingHost{}, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	_, err = uc.StartTurn(ctx, casebound.TurnRequest{})
@@ -409,11 +433,12 @@ func TestStartTurnRefusesWhenUnbound(t *testing.T) {
 func TestNewRejectsMissingDependencies(t *testing.T) {
 	locator, err := agentkernel.NewLocator(agentprocmemory.New())
 	gt.NoError(t, err).Required()
+	models := testModelPolicy(t)
 
-	_, err = casebound.New(nil, &recordingHost{}, locator)
+	_, err = casebound.New(nil, &recordingHost{}, locator, models)
 	gt.Error(t, err)
 
-	_, err = casebound.New(memory.New(), nil, locator)
+	_, err = casebound.New(memory.New(), nil, locator, models)
 	gt.Error(t, err)
 }
 

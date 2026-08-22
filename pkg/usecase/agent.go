@@ -131,9 +131,14 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 // and building the Kernel needs the filled registry.
 // taskAgent is the shared per-task sub-agent (agentkernel.RegisterTaskAgent),
 // registered by the caller so the Job runtime can be handed the same handle.
+// models prices each finished run for its record. It is passed alongside the
+// limiter rather than derived from it because the two answer different questions
+// — what a run may spend, and what it did spend — and the limiter is an opaque
+// function by the time it arrives here.
 func (uc *AgentUseCase) RegisterAgents(
 	reg *agentkit.Registry,
 	limiter agentkit.Limiter,
+	models agentkernel.ModelPolicy,
 	store agentkit.HistoryStore,
 	procRepo agentkit.Repository,
 	taskAgent agentkit.Agent[react.Input],
@@ -142,7 +147,7 @@ func (uc *AgentUseCase) RegisterAgents(
 	if err != nil {
 		return goerr.Wrap(err, "build the agent process locator")
 	}
-	cb, err := casebound.New(uc.deps.Repo, caseboundHost{uc: uc}, locator)
+	cb, err := casebound.New(uc.deps.Repo, caseboundHost{uc: uc}, locator, models)
 	if err != nil {
 		return goerr.Wrap(err, "build the case-channel agent")
 	}
@@ -166,7 +171,7 @@ func (uc *AgentUseCase) RegisterAgents(
 	}
 	uc.durableWorkspaceAgent = wa
 
-	tc, err := threadcase.NewDurable(uc.deps.Repo, uc.deps.Registry, threadcaseHost{uc: uc}, locator)
+	tc, err := threadcase.NewDurable(uc.deps.Repo, uc.deps.Registry, threadcaseHost{uc: uc}, locator, models)
 	if err != nil {
 		return goerr.Wrap(err, "build the thread-mode agents")
 	}

@@ -392,6 +392,8 @@ type JobRunLog struct {
 	SystemPrompt   string      `json:"systemPrompt"`
 	EventType      string      `json:"eventType"`
 	EventTriggerAt time.Time   `json:"eventTriggerAt"`
+	CostUsd        float64     `json:"costUsd"`
+	Model          string      `json:"model"`
 }
 
 type JobRunLogConnection struct {

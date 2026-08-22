@@ -43,6 +43,8 @@ func TestFinishRunClosesALogItDidNotOpen(t *testing.T) {
 		CacheReadInputTokens:     900,
 		LLMCalls:                 3,
 		ToolCalls:                5,
+		CostNanoUSD:              4_250_000,
+		Model:                    "claude-opus-5",
 	}, nil, ended)
 
 	log, err := repo.JobRunLog().Get(ctx, durableKey(), "run-abc")
@@ -55,6 +57,8 @@ func TestFinishRunClosesALogItDidNotOpen(t *testing.T) {
 	gt.Value(t, log.CacheReadInputTokens).Equal(int64(900))
 	gt.Value(t, log.LLMCallCount).Equal(int64(3))
 	gt.Value(t, log.ToolCallCount).Equal(int64(5))
+	gt.Value(t, log.CostNanoUSD).Equal(int64(4_250_000))
+	gt.String(t, log.Model).Equal("claude-opus-5")
 	gt.String(t, log.Error).Equal("")
 
 	// The summary doc is what the case agent page lists from, so a finished run
@@ -97,4 +101,34 @@ func TestFinishRunToleratesAMissingLog(t *testing.T) {
 	runtrace.FinishRun(ctx, repo, durableKey(), "never-opened", runtrace.Usage{}, nil, time.Now().UTC())
 	runtrace.FinishRun(ctx, repo, durableKey(), "", runtrace.Usage{}, nil, time.Now().UTC())
 	runtrace.FinishRun(ctx, nil, durableKey(), "run-abc", runtrace.Usage{}, nil, time.Now().UTC())
+}
+
+// TestFinishRunAccumulatesCostAcrossTurns pins how an interactive run reports
+// what it spent: the suspending turn and the resumed turn each fold their own
+// figure in, so the record shows the cost of the whole exchange rather than of
+// the last turn only.
+//
+// The model, by contrast, is set rather than added — it is the same model for
+// every turn — and a turn that cannot name it must not erase what an earlier turn
+// recorded.
+func TestFinishRunAccumulatesCostAcrossTurns(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	started := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+
+	openDurableRun(t, repo, started)
+	runtrace.FinishRun(ctx, repo, durableKey(), "run-abc", runtrace.Usage{
+		InputTokens: 1000, CostNanoUSD: 1_000_000, Model: "gemini-3.7-flash",
+	}, nil, started.Add(time.Minute))
+
+	// The resumed turn: same run id, its own spend, and no model to report.
+	runtrace.FinishRun(ctx, repo, durableKey(), "run-abc", runtrace.Usage{
+		InputTokens: 500, CostNanoUSD: 250_000,
+	}, nil, started.Add(2*time.Minute))
+
+	log, err := repo.JobRunLog().Get(ctx, durableKey(), "run-abc")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.InputTokens).Equal(int64(1500))
+	gt.Value(t, log.CostNanoUSD).Equal(int64(1_250_000))
+	gt.String(t, log.Model).Equal("gemini-3.7-flash")
 }

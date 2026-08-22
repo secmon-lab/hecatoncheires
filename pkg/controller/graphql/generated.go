@@ -350,6 +350,7 @@ type ComplexityRoot struct {
 
 	JobRunLog struct {
 		CaseID         func(childComplexity int) int
+		CostUsd        func(childComplexity int) int
 		DurationMs     func(childComplexity int) int
 		EndedAt        func(childComplexity int) int
 		ErrorMessage   func(childComplexity int) int
@@ -357,6 +358,7 @@ type ComplexityRoot struct {
 		EventType      func(childComplexity int) int
 		JobID          func(childComplexity int) int
 		JobName        func(childComplexity int) int
+		Model          func(childComplexity int) int
 		RunID          func(childComplexity int) int
 		Stage          func(childComplexity int) int
 		StartedAt      func(childComplexity int) int
@@ -2073,6 +2075,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.JobRunLog.CaseID(childComplexity), true
+	case "JobRunLog.costUsd":
+		if e.ComplexityRoot.JobRunLog.CostUsd == nil {
+			break
+		}
+
+		return e.ComplexityRoot.JobRunLog.CostUsd(childComplexity), true
 	case "JobRunLog.durationMs":
 		if e.ComplexityRoot.JobRunLog.DurationMs == nil {
 			break
@@ -2115,6 +2123,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.JobRunLog.JobName(childComplexity), true
+	case "JobRunLog.model":
+		if e.ComplexityRoot.JobRunLog.Model == nil {
+			break
+		}
+
+		return e.ComplexityRoot.JobRunLog.Model(childComplexity), true
 	case "JobRunLog.runId":
 		if e.ComplexityRoot.JobRunLog.RunID == nil {
 			break
@@ -4909,6 +4923,15 @@ type JobRunLog {
   # the Event that started this Run.
   eventType: String!
   eventTriggerAt: Time!
+  # What this Run spent, in USD, priced at the rate of the model it ran on.
+  # It is stored on the Run rather than computed here: the token counts alone
+  # do not say which model produced them, and a configured price may be
+  # corrected afterwards. 0 for a Run recorded before costs were tracked.
+  costUsd: Float!
+  # The provider's own name for the model this Run generated through (e.g.
+  # "gemini-3.7-flash"), which is the value that can be matched against a
+  # provider's billing. Empty for a Run recorded before it was tracked.
+  model: String!
 }
 
 enum JobRunEventKind {
@@ -5748,6 +5771,10 @@ func (ec *executionContext) childFields_JobRunLog(ctx context.Context, field gra
 		return ec.fieldContext_JobRunLog_eventType(ctx, field)
 	case "eventTriggerAt":
 		return ec.fieldContext_JobRunLog_eventTriggerAt(ctx, field)
+	case "costUsd":
+		return ec.fieldContext_JobRunLog_costUsd(ctx, field)
+	case "model":
+		return ec.fieldContext_JobRunLog_model(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type JobRunLog", field.Name)
 }
@@ -13740,6 +13767,52 @@ func (ec *executionContext) _JobRunLog_eventTriggerAt(ctx context.Context, field
 }
 func (ec *executionContext) fieldContext_JobRunLog_eventTriggerAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("JobRunLog", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _JobRunLog_costUsd(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_JobRunLog_costUsd(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CostUsd, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v float64) graphql.Marshaler {
+			return ec.marshalNFloat2float64(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_JobRunLog_costUsd(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("JobRunLog", field, false, false, errors.New("field of type Float does not have child fields"))
+}
+
+func (ec *executionContext) _JobRunLog_model(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_JobRunLog_model(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Model, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_JobRunLog_model(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("JobRunLog", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _JobRunLogConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLogConnection) (ret graphql.Marshaler) {
@@ -25481,6 +25554,16 @@ func (ec *executionContext) _JobRunLog(ctx context.Context, sel ast.SelectionSet
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "costUsd":
+			out.Values[i] = ec._JobRunLog_costUsd(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "model":
+			out.Values[i] = ec._JobRunLog_model(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -29113,6 +29196,22 @@ func (ec *executionContext) marshalNFieldValue2ᚖgithubᚗcomᚋsecmonᚑlabᚋ
 func (ec *executionContext) unmarshalNFieldValueInput2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInput(ctx context.Context, v any) (*graphql1.FieldValueInput, error) {
 	res, err := ec.unmarshalInputFieldValueInput(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNFloat2float64(ctx context.Context, v any) (float64, error) {
+	res, err := graphql.UnmarshalFloatContext(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNFloat2float64(ctx context.Context, sel ast.SelectionSet, v float64) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalFloatContext(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return graphql.WrapContextMarshaler(ctx, res)
 }
 
 func (ec *executionContext) marshalNGitHubRepoValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepoValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.GitHubRepoValidationResult) graphql.Marshaler {

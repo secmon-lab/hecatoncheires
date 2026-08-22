@@ -85,7 +85,7 @@ dataset names must be unique.
 | `actions` | Actions (archived included) | only actions whose parent Case is exported |
 | `memos` | Memos (archived included) | `field_<id>` per workspace memo field; only memos of exported cases |
 | `job_runs` | Latest run state per (case, job) | only runs of exported cases |
-| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt and its token / step totals |
+| `job_run_logs` | One row per agent run against a case | only runs of exported cases; includes mention-triggered runs; carries the run's system prompt, its token / step totals, and what it cost |
 | `job_run_events` | One row per LLM call, tool execution or run error | the full timeline of every exported run, payload bodies included |
 | `knowledge` | Knowledge | workspace-level; embedding vector excluded |
 | `tags` | Tags | workspace-level |
@@ -112,17 +112,43 @@ per-turn `job_id`), while Job runs carry their triggering event domain (`case`,
 #### Run totals on `job_run_logs`
 
 `input_tokens` / `output_tokens` / `llm_call_count` / `tool_call_count` are the
-run's totals across everything it did — planner, sub-agents and the reflection
-pass included — accumulated while the run executes and stored on the run record,
-so cost and size are available without touching `job_run_events`. A run's step
-count is `llm_call_count + tool_call_count`. Interactive runs that paused for a
-question accumulate across both turns. **Runs that finished before these columns
-existed report zero; there is no backfill.**
+run's totals across the calls the agent runtime itself made — the planner and its
+sub-agents — accumulated while the run executes and stored on the run record, so
+cost and size are available without touching `job_run_events`. A run's step count
+is `llm_call_count + tool_call_count`. Interactive runs that paused for a question
+accumulate across both turns. **Runs that finished before these columns existed
+report zero; there is no backfill.**
+
+Two kinds of LLM call sit **outside** these totals, and therefore outside
+`cost_nano_usd` as well. Neither goes through the agent runtime, so neither
+reaches the metrics it accumulates:
+
+- **The reflection pass** (`reflection = true` on a Job). It re-sends the finished
+  run's whole transcript — often the largest single input the run produces — and
+  starts only after the run record has been closed. On the durable runtime, which
+  is every production path, it also produces no `job_run_events` rows.
+- **A call a tool makes on its own**, such as the web-fetch page screen or a
+  knowledge tool's embedding. These *are* on the `job_run_events` timeline, nested
+  in their tool's span.
+
+So `SUM(cost_nano_usd)` is what the agent runtime spent, which is less than the
+provider's bill for the same deployment, and a run's totals here can be lower
+than what its own timeline shows.
 
 Note that `input_tokens` and `output_tokens` also exist on `job_run_events`, where
 they are one call's figures rather than the run's total. Do not sum the
 `job_run_logs` columns across a run's events, or compare the two without
 qualifying which table you mean.
+
+`cost_nano_usd` is what the run spent, in 1e-9 USD, and `model` is the provider's
+own name for the model it generated through. The cost is an integer in nano-USD so
+a spend query sums it exactly (`SUM(cost_nano_usd) / 1e9` for dollars); it is
+priced when the run ends, at the rate the deployment had configured for that model
+then, so **correcting a price later does not restate past runs**. The two columns
+are what makes spend attributable — group by `model`, `job_id` or `event_type` to
+see where it went, within the scope the section above defines. Runs finished
+before these columns existed report zero and an empty model, and are not
+backfilled: the model they used was not recorded either.
 
 `cache_creation_input_tokens` / `cache_read_input_tokens` split out the
 prompt-cache share of `input_tokens`, which **already includes both** — do not add
