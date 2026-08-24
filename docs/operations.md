@@ -39,6 +39,24 @@ headers. Panics propagate through the middleware (`Repanic: true`) so chi's
 `Recoverer` still produces a `500` response after Sentry has captured the
 event.
 
+### What is not reported
+
+An error tagged `errutil.TagBenign` is a normal-flow occurrence rather than a
+defect: it is logged at `INFO` and **not** sent to Sentry. Rejected
+credentials, a validation failure on an inbound request, and a Notion
+`404 object_not_found` are tagged this way. The Notion case is the one worth
+knowing about when triaging: the agent supplies page and database ids itself —
+from a search hit that has since been unshared, from page content, or from a
+data source id sent where a database id belongs — so a wrong id is the model's
+to correct, and the strategies report every tool failure, which without the tag
+files one Sentry issue per probe. The model is unaffected: the failure is still
+returned and still fed back to it verbatim. Every other Notion status stays
+reportable — `401` / `403` name a token or sharing defect an operator must fix,
+and `5xx` names Notion being down.
+
+So an agent that cannot read a Notion page or database leaves no Sentry issue.
+Search the structured log at `INFO` for `endpoint` and `status=404` to find it.
+
 ### Operational troubleshoot
 
 - **Slack `missing_scope` even after adding the scope**: re-install the

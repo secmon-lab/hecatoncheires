@@ -275,6 +275,18 @@ type notionErrorBody struct {
 // the message overlapping this one by up to apiErrorDetailLimit; the overlap is
 // accepted rather than removed from either side, because the message must stay
 // self-contained and the value must stay untruncated for the operator.
+//
+// A 404 is tagged benign, so it is logged at Info and not reported to Sentry.
+// Notion answers object_not_found for every id the integration cannot see, and
+// the ids reaching these endpoints come from the model — a search hit that has
+// since been unshared, an id lifted from page content, a data source id sent
+// where a database id belongs (the two are not interchangeable since Notion's
+// 2025-09-03 split), or one it invented. None of those is an operator's defect,
+// and the strategies report every tool failure to Sentry, so an agent probing a
+// wrong id files an issue per probe (ARGUS-9E). The model is unaffected: the
+// tag rides on the error, which is still returned and still fed back verbatim.
+// Every other status stays reportable — 401/403 name a token or sharing defect
+// an operator must fix, and 5xx names Notion being down.
 func newAPIError(ctx context.Context, endpoint string, resp *http.Response, opts ...goerr.Option) error {
 	body := readErrorBody(ctx, resp.Body)
 
@@ -293,12 +305,17 @@ func newAPIError(ctx context.Context, endpoint string, resp *http.Response, opts
 		msg += ": " + truncate(detail, apiErrorDetailLimit)
 	}
 
-	return goerr.New(msg, append(opts,
+	opts = append(opts,
 		goerr.V("endpoint", endpoint),
 		goerr.V("status", resp.StatusCode),
 		goerr.V("code", decoded.Code),
 		goerr.V("body", body),
-	)...)
+	)
+	if resp.StatusCode == http.StatusNotFound {
+		opts = append(opts, goerr.T(errutil.TagBenign))
+	}
+
+	return goerr.New(msg, opts...)
 }
 
 func firstNonEmpty(values ...string) string {
