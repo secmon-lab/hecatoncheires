@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 func TestNewClient(t *testing.T) {
@@ -520,6 +522,10 @@ func TestGetPageMarkdown(t *testing.T) {
 		gt.String(t, err.Error()).Contains("404")
 		gt.String(t, err.Error()).Contains("object_not_found")
 		gt.String(t, err.Error()).Contains("page not found")
+
+		// A page id reaches this endpoint from the model too, so it is demoted
+		// on the same grounds as a database id.
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
 	})
 
 	t.Run("falls back to the raw body when the error payload is not Notion JSON", func(t *testing.T) {
@@ -610,6 +616,55 @@ func TestGetDatabase(t *testing.T) {
 		gt.String(t, err.Error()).Contains("404")
 		gt.String(t, err.Error()).Contains("object_not_found")
 		gt.String(t, err.Error()).Contains("database not found")
+
+		// An id the integration cannot see is the model's to correct, not an
+		// operator's defect: the failure is still returned and still fed back to
+		// the model, but errutil.Handle demotes it out of Sentry.
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
+	})
+
+	t.Run("keeps a benign 404 benign along the chain that reports it", func(t *testing.T) {
+		// The error reaching errutil.Handle is not the one returned here: the
+		// tool wraps it, kernel's toolErrorValuesMiddleware wraps THAT in a
+		// non-goerr type of its own, and react wraps the result again
+		// (pkg/agent/react/react.go). A tag readable only on the innermost
+		// error, or lost across the non-goerr link, would never demote anything.
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/databases/missing", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"object":"error","status":404,"code":"object_not_found","message":"database not found"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.GetDatabase(context.Background(), "missing")
+		gt.Value(t, err).NotNil().Required()
+
+		wrapped := goerr.Wrap(
+			&nonGoerrWrapper{cause: goerr.Wrap(err, "failed to fetch notion database")},
+			"react: tool call")
+		gt.Bool(t, goerr.HasTag(wrapped, errutil.TagBenign)).True()
+	})
+
+	t.Run("leaves a non-404 reportable", func(t *testing.T) {
+		// 401/403 name a token or sharing defect and 5xx names Notion being
+		// down; both are an operator's to act on, so they must stay in Sentry.
+		for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError} {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v1/databases/refused", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"object":"error","code":"unauthorized","message":"API token is invalid"}`))
+			})
+			srv := httptest.NewServer(mux)
+
+			c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+			_, err := c.GetDatabase(context.Background(), "refused")
+			gt.Value(t, err).NotNil().Required()
+			gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).False()
+
+			srv.Close()
+		}
 	})
 
 	t.Run("returns error when databaseID is empty", func(t *testing.T) {
@@ -729,3 +784,13 @@ func TestQueryDataSource(t *testing.T) {
 		gt.Value(t, err).NotNil()
 	})
 }
+
+// nonGoerrWrapper stands in for kernel's toolErrorValuesError: a wrapper that is
+// not a *goerr.Error but keeps the chain reachable through Unwrap.
+type nonGoerrWrapper struct {
+	cause error
+}
+
+func (e *nonGoerrWrapper) Error() string { return e.cause.Error() }
+
+func (e *nonGoerrWrapper) Unwrap() error { return e.cause }
