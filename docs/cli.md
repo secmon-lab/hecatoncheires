@@ -163,9 +163,17 @@ unanswered, which a provider rejects outright.
 
 Crossing the ceiling itself stops the run, and the user gets the same "couldn't
 reach a conclusion" reply as any other unfinished turn. The reserve exists so the
-common case is a completed action and a shorter answer rather than neither. If
-your budgets are small enough that a tenth cannot cover two generates, lower this
-flag to widen the reserve.
+common case is a completed action and a shorter answer rather than neither.
+
+**Check the ratio against your tightest ceiling, not against the money one.** The
+ratio applies to every ceiling, and the sub-agent input-token ceiling is where a
+tenth is thinnest: at the default `--agent-task-max-input-tokens` of 100000 the
+reserve is 10000 input tokens, and each generate re-sends the whole conversation
+rather than the last turn of it. A sub-agent whose conversation has grown past
+about ten thousand tokens therefore crosses its ceiling on the reserve's first
+generate and is stopped before the tool call — the run ends the way it did before
+the reserve existed. Raise `--agent-task-max-input-tokens`, or lower this ratio,
+if your sub-agents run long enough for that.
 
 A run whose budget or model price cannot be resolved is stopped rather than run
 unbounded. Startup validation makes that unreachable for a configured
