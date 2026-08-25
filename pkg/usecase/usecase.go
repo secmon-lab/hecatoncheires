@@ -25,6 +25,7 @@ type UseCases struct {
 	slackAdminService        slack.AdminService
 	slackSearch              slacktool.SearchService
 	slackRetriever           slacktool.MessageRetriever
+	slackToolLimits          slacktool.Limits
 	githubClient             *github.Client
 	jiraTools                []gollem.Tool
 	webfetchSettings         *webfetch.ClientConfig
@@ -142,6 +143,17 @@ func WithSlackSearchService(svc slacktool.SearchService) Option {
 func WithSlackMessageRetriever(svc slacktool.MessageRetriever) Option {
 	return func(uc *UseCases) {
 		uc.slackRetriever = svc
+	}
+}
+
+// WithSlackToolLimits configures the size bounds the Slack read tools apply to
+// their results. The zero value leaves both bounds disabled, so a deployment
+// that wires Slack tools without calling this gets the pre-existing unbounded
+// behaviour rather than a hidden default chosen here — the defaults live on the
+// CLI flags (config.SlackTool).
+func WithSlackToolLimits(limits slacktool.Limits) Option {
+	return func(uc *UseCases) {
+		uc.slackToolLimits = limits
 	}
 }
 
@@ -368,6 +380,14 @@ func (uc *UseCases) SlackSearchService() slacktool.SearchService {
 // wiring can let slack__get_messages read channels the bot has not joined.
 func (uc *UseCases) SlackMessageRetriever() slacktool.MessageRetriever {
 	return uc.slackRetriever
+}
+
+// SlackToolLimits returns the size bounds the Slack read tools apply to their
+// results. Exposed so the Job runtime wiring binds the same bounds the agent
+// Kernel gets — an in-process Job that skipped them would be the one path where
+// the flag does not hold.
+func (uc *UseCases) SlackToolLimits() slacktool.Limits {
+	return uc.slackToolLimits
 }
 
 // NotionToolClient returns the agent-tool Notion client (nil when no Notion

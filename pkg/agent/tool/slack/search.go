@@ -16,12 +16,13 @@ import (
 // Requires a User OAuth Token with the search:read scope (provided as SearchService).
 type searchMessagesTool struct {
 	search SearchService
+	limits Limits
 }
 
 func (t *searchMessagesTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "slack__search_messages",
-		Description: "Search Slack messages workspace-wide. Supports Slack search operators such as 'from:@user', 'in:#channel', 'before:YYYY-MM-DD', 'after:YYYY-MM-DD'. Requires a User OAuth Token with search:read scope.",
+		Description: "Search Slack messages workspace-wide. Supports Slack search operators such as 'from:@user', 'in:#channel', 'before:YYYY-MM-DD', 'after:YYYY-MM-DD'. Requires a User OAuth Token with search:read scope. Results are size-bounded: a long message carries 'text_truncated', and 'truncated' / 'omitted' report messages dropped to keep the response within its size limit. Those fields say nothing about the 'count' cutoff — compare 'returned' with 'total' (Slack's full match count) to see how many matches were left unread.",
 		Parameters: map[string]*gollem.Parameter{
 			"query": {
 				Type:        gollem.TypeString,
@@ -65,22 +66,50 @@ func (t *searchMessagesTool) Run(ctx context.Context, args map[string]any) (map[
 		return nil, err
 	}
 
+	// Bound what reaches the model context. `count` is a tool parameter, so the
+	// model chooses how many results it asks for — but not how long each one is,
+	// and neither bound is something an operator could otherwise set.
+	budget := newResultBudget(t.limits.MaxResultBytes)
 	messages := make([]map[string]any, 0, len(res.Messages))
 	for _, m := range res.Messages {
-		messages = append(messages, map[string]any{
+		text, textTruncated := truncateText(m.Text, t.limits.MaxTextBytes)
+		entry := map[string]any{
 			"channel_id":   m.ChannelID,
 			"channel_name": m.ChannelName,
 			"user_id":      m.UserID,
 			"username":     m.Username,
-			"text":         m.Text,
+			"text":         text,
 			"ts":           m.Timestamp,
 			"permalink":    m.Permalink,
-		})
+		}
+		if textTruncated {
+			entry["text_truncated"] = true
+		}
+		fits, err := budget.admit(entry)
+		if err != nil {
+			return nil, err
+		}
+		if !fits {
+			break
+		}
+		messages = append(messages, entry)
 	}
+	omitted := len(res.Messages) - len(messages)
 
+	// `truncated` / `returned` / `omitted` are always reported, including when
+	// nothing was dropped: a result that says so is one the agent can treat as
+	// complete, whereas an absent field leaves it guessing.
+	//
+	// They describe the SIZE bounds only. `count` is a separate cutoff the model
+	// itself chose, and `total` (Slack's full match count) is what reveals it —
+	// so a call that returns 20 of 500 matches is `truncated: false`, because
+	// nothing was dropped to fit a limit.
 	return map[string]any{
-		"total":    res.Total,
-		"messages": messages,
+		"total":     res.Total,
+		"messages":  messages,
+		"returned":  len(messages),
+		"omitted":   omitted,
+		"truncated": omitted > 0,
 	}, nil
 }
 
@@ -95,6 +124,7 @@ func (t *searchMessagesTool) Run(ctx context.Context, args map[string]any) (map[
 type getMessagesTool struct {
 	slack     slackservice.Service
 	retriever MessageRetriever
+	limits    Limits
 }
 
 const (
@@ -109,7 +139,7 @@ func (t *getMessagesTool) Spec() gollem.ToolSpec {
 	maxTargets := getMessagesMaxTargets
 	return gollem.ToolSpec{
 		Name:        "slack__get_messages",
-		Description: "Fetch one or more Slack messages and their thread context in bulk (max 10 per call). Each target is fetched in parallel; per-target failures are reported in the response without aborting the whole call.",
+		Description: "Fetch one or more Slack messages and their thread context in bulk (max 10 per call). Each target is fetched in parallel; per-target failures are reported in the response without aborting the whole call. Results are size-bounded: a long message carries 'text_truncated', and a target whose messages did not all fit carries 'omitted' alongside the response-level 'truncated'.",
 		Parameters: map[string]*gollem.Parameter{
 			"targets": {
 				Type:        gollem.TypeArray,
@@ -214,9 +244,56 @@ func (t *getMessagesTool) Run(ctx context.Context, args map[string]any) (map[str
 		)
 	}
 
+	omitted, err := t.applyResultBudget(results)
+	if err != nil {
+		return nil, err
+	}
+
 	return map[string]any{
-		"results": results,
+		"results":   results,
+		"omitted":   omitted,
+		"truncated": omitted > 0,
 	}, nil
+}
+
+// applyResultBudget drops the messages that do not fit MaxResultBytes and
+// returns how many were dropped across the whole call.
+//
+// It runs after the fan-out rather than inside fetchOne because the bound is on
+// what the CALL returns: a budget shared by the goroutines would hand each
+// target a share decided by which one happened to finish first, so the same
+// request would return different messages on different runs. Charging the
+// results in target order instead makes the outcome depend only on the request.
+// A target that keeps none of its messages is reported as such rather than
+// silently emptied.
+func (t *getMessagesTool) applyResultBudget(results []map[string]any) (int, error) {
+	budget := newResultBudget(t.limits.MaxResultBytes)
+	total := 0
+	for _, r := range results {
+		msgs, ok := r["messages"].([]map[string]any)
+		if !ok {
+			// A failed target carries "error" and no messages.
+			continue
+		}
+		kept := make([]map[string]any, 0, len(msgs))
+		for _, m := range msgs {
+			fits, err := budget.admit(m)
+			if err != nil {
+				return 0, err
+			}
+			if !fits {
+				break
+			}
+			kept = append(kept, m)
+		}
+		dropped := len(msgs) - len(kept)
+		if dropped > 0 {
+			r["messages"] = kept
+			r["omitted"] = dropped
+			total += dropped
+		}
+	}
+	return total, nil
 }
 
 func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, includeThread bool, threadLimit int) map[string]any {
@@ -261,7 +338,7 @@ func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, inclu
 		msgs = msgs[:1]
 	}
 
-	out["messages"] = convertConversationMessages(msgs)
+	out["messages"] = convertConversationMessages(msgs, t.limits.MaxTextBytes)
 	return out
 }
 
@@ -275,15 +352,19 @@ func (t *getMessagesTool) fetchReplies(ctx context.Context, channelID, threadTS 
 	return t.slack.GetConversationReplies(ctx, channelID, threadTS, limit)
 }
 
-func convertConversationMessages(msgs []slackservice.ConversationMessage) []map[string]any {
+func convertConversationMessages(msgs []slackservice.ConversationMessage, maxTextBytes int) []map[string]any {
 	out := make([]map[string]any, len(msgs))
 	for i, m := range msgs {
+		text, textTruncated := truncateText(m.Text, maxTextBytes)
 		out[i] = map[string]any{
 			"user_id":   m.UserID,
 			"username":  m.UserName,
-			"text":      m.Text,
+			"text":      text,
 			"ts":        m.Timestamp,
 			"thread_ts": m.ThreadTS,
+		}
+		if textTruncated {
+			out[i]["text_truncated"] = true
 		}
 	}
 	return out

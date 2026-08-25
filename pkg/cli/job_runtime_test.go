@@ -308,17 +308,19 @@ func slackConfigFromEnv(t *testing.T, botToken, userToken string) *config.Slack 
 func TestTickIntegrationConfigs_Validate(t *testing.T) {
 	full := func() cli.TickIntegrationConfigsForTest {
 		return cli.TickIntegrationConfigsForTest{
-			Slack:    &config.Slack{},
-			Jira:     &config.Jira{},
-			WebFetch: &config.WebFetch{},
+			Slack:     &config.Slack{},
+			SlackTool: &config.SlackTool{},
+			Jira:      &config.Jira{},
+			WebFetch:  &config.WebFetch{},
 		}
 	}
 	gt.NoError(t, full().Validate())
 
 	testCases := map[string]func(*cli.TickIntegrationConfigsForTest){
-		"slack":    func(c *cli.TickIntegrationConfigsForTest) { c.Slack = nil },
-		"jira":     func(c *cli.TickIntegrationConfigsForTest) { c.Jira = nil },
-		"webfetch": func(c *cli.TickIntegrationConfigsForTest) { c.WebFetch = nil },
+		"slack":      func(c *cli.TickIntegrationConfigsForTest) { c.Slack = nil },
+		"slack tool": func(c *cli.TickIntegrationConfigsForTest) { c.SlackTool = nil },
+		"jira":       func(c *cli.TickIntegrationConfigsForTest) { c.Jira = nil },
+		"webfetch":   func(c *cli.TickIntegrationConfigsForTest) { c.WebFetch = nil },
 	}
 	for name, drop := range testCases {
 		t.Run("missing "+name, func(t *testing.T) {
@@ -335,10 +337,11 @@ func TestTickIntegrationConfigs_Validate(t *testing.T) {
 func TestConfigureTickIntegrations_UnconfiguredLeavesClientsNil(t *testing.T) {
 	slackSvc, jiraTools, opts, err := cli.ConfigureTickIntegrationsForTest(
 		context.Background(), cli.TickIntegrationConfigsForTest{
-			Slack:    &config.Slack{},
-			Jira:     &config.Jira{},
-			WebFetch: &config.WebFetch{},
-			BaseURL:  "https://hecatoncheires.example.com",
+			Slack:     &config.Slack{},
+			Jira:      &config.Jira{},
+			WebFetch:  &config.WebFetch{},
+			SlackTool: &config.SlackTool{},
+			BaseURL:   "https://hecatoncheires.example.com",
 		})
 	gt.NoError(t, err).Required()
 	gt.Value(t, slackSvc).Nil()
@@ -361,9 +364,10 @@ func TestConfigureTickIntegrations_SlackBotTokenWiresTheService(t *testing.T) {
 	slackCfg := slackConfigFromEnv(t, "xoxb-test-token", "")
 	slackSvc, _, opts, err := cli.ConfigureTickIntegrationsForTest(
 		context.Background(), cli.TickIntegrationConfigsForTest{
-			Slack:    slackCfg,
-			Jira:     &config.Jira{},
-			WebFetch: &config.WebFetch{},
+			Slack:     slackCfg,
+			Jira:      &config.Jira{},
+			WebFetch:  &config.WebFetch{},
+			SlackTool: &config.SlackTool{},
 		})
 	gt.NoError(t, err).Required()
 	gt.Value(t, slackSvc).NotNil()
@@ -386,9 +390,10 @@ func TestConfigureTickIntegrations_UserTokenWiresTheReadClients(t *testing.T) {
 	slackCfg := slackConfigFromEnv(t, "xoxb-test-token", "xoxp-test-token")
 	_, _, opts, err := cli.ConfigureTickIntegrationsForTest(
 		context.Background(), cli.TickIntegrationConfigsForTest{
-			Slack:    slackCfg,
-			Jira:     &config.Jira{},
-			WebFetch: &config.WebFetch{},
+			Slack:     slackCfg,
+			Jira:      &config.Jira{},
+			WebFetch:  &config.WebFetch{},
+			SlackTool: &config.SlackTool{},
 		})
 	gt.NoError(t, err).Required()
 
@@ -404,6 +409,7 @@ func TestConfigureTickIntegrations_NotionTokenWiresTheToolClient(t *testing.T) {
 	_, _, opts, err := cli.ConfigureTickIntegrationsForTest(
 		context.Background(), cli.TickIntegrationConfigsForTest{
 			Slack:       &config.Slack{},
+			SlackTool:   &config.SlackTool{},
 			Jira:        &config.Jira{},
 			WebFetch:    &config.WebFetch{},
 			NotionToken: "secret_test_token",

@@ -67,6 +67,12 @@ type Options struct {
 	// JiraTools carries the already-expanded Jira read tools (see
 	// pkg/agent/tool/jira). Live-only, like GitHub.
 	JiraTools []gollem.Tool
+	// SlackToolLimits bounds what a Slack read tool's result may inject into
+	// the model context, exactly as it does in serve. It applies to the
+	// simulated Slack tools too: a scenario whose simulated result would be
+	// truncated in production must be truncated here, or the harness measures
+	// behaviour production never sees. The zero value disables both bounds.
+	SlackToolLimits slacktool.Limits
 }
 
 // Env is a prepared single-scenario environment.
@@ -325,6 +331,7 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 		usecase.WithSlackService(fake),
 		usecase.WithSlackSearchService(slackSearch),
 		usecase.WithSlackMessageRetriever(toolsim.SlackRetriever(recorder)),
+		usecase.WithSlackToolLimits(opts.SlackToolLimits),
 		usecase.WithNotionToolClient(notionClient),
 		usecase.WithHistoryRepository(historyRepo),
 		usecase.WithTraceRepository(traceRepo),

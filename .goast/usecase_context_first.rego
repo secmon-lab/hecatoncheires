@@ -75,6 +75,7 @@ exempt_name := {
 	"WebFetchClient",
 	"SlackSearchService",
 	"SlackMessageRetriever",
+	"SlackToolLimits",
 	"NotionToolClient",
 	"GitHubToolClient",
 	"PlannerLoopMax",

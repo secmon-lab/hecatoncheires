@@ -40,6 +40,7 @@ func cmdTick() *cli.Command {
 	// GitHub is absent on purpose: a sweep runs only Job agents, and the Job tool
 	// palette withholds the github toolset from an unattended run.
 	var slackCfg config.Slack
+	var slackToolCfg config.SlackTool
 	var jiraCfg config.Jira
 	var webfetchCfg config.WebFetch
 	var notionToken string
@@ -69,6 +70,7 @@ func cmdTick() *cli.Command {
 	// RuntimeFlags, not Flags: a sweep serves no endpoints, so the OAuth client
 	// pair and the webhook signing secret would be credentials it can never use.
 	flags = append(flags, slackCfg.RuntimeFlags()...)
+	flags = append(flags, slackToolCfg.Flags()...)
 	flags = append(flags, jiraCfg.Flags()...)
 	flags = append(flags, webfetchCfg.Flags()...)
 
@@ -86,6 +88,7 @@ func cmdTick() *cli.Command {
 			deps, err := buildTickRuntime(ctx, &appCfg, &repoCfg, &llmCfg, &embCfg, &jobCfg,
 				&agentCfg, &storageCfg, tickIntegrationConfigs{
 					Slack:       &slackCfg,
+					SlackTool:   &slackToolCfg,
 					Jira:        &jiraCfg,
 					WebFetch:    &webfetchCfg,
 					NotionToken: notionToken,

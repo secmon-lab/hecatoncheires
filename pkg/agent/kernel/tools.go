@@ -43,7 +43,10 @@ type ToolDeps struct {
 	// SlackPoster backs the channel-pinned poster an unattended run reports
 	// through. It is a narrower interface than SlackBot on purpose: an LLM holding
 	// the post tool must not reach the wider Slack surface.
-	SlackPoster    slackpost.Poster
+	SlackPoster slackpost.Poster
+	// SlackLimits bounds how much of a Slack read tool's result reaches the
+	// model context. The zero value leaves both bounds disabled.
+	SlackLimits    slacktool.Limits
 	NotionClient   notiontool.Client
 	GitHubClient   *githubtool.Client
 	WebFetchClient *webfetch.Client
@@ -261,6 +264,7 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 			Bot:       d.SlackBot,
 			Search:    d.SlackSearch,
 			Retriever: d.SlackRetriever,
+			Limits:    d.SlackLimits,
 		},
 		Notion:   notiontool.Deps{Client: d.NotionClient},
 		GitHub:   d.GitHubClient,

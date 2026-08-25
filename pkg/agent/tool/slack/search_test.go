@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
@@ -307,4 +308,298 @@ func TestGetMessagesTool_PartialFailureLogsButReturnsResults(t *testing.T) {
 	// Drain the small async sleep ticker many tools rely on; nothing
 	// important here, but keeps lint-style waitgroup hygiene tidy.
 	_ = time.Millisecond
+}
+
+// searchToolWith returns the slack__search_messages tool built over a scripted
+// SearchResult and the given size bounds.
+func searchToolWith(t *testing.T, limits slacktool.Limits, res *slacktool.SearchResult) gollem.Tool {
+	t.Helper()
+	search := &fakeSearchService{
+		searchFn: func(_ context.Context, _ string, _ slacktool.SearchOptions) (*slacktool.SearchResult, error) {
+			return res, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Search: search, Limits: limits})
+	return pickToolByName(t, tools, "slack__search_messages")
+}
+
+func TestSearchMessagesTool_UnboundedByDefault(t *testing.T) {
+	// The zero Limits is what a caller that wires no bounds gets. It must leave
+	// the result exactly as it was before the bounds existed, so a deployment
+	// that has not adopted the flags sees no behaviour change.
+	long := strings.Repeat("a", 10000)
+	tool := searchToolWith(t, slacktool.Limits{}, &slacktool.SearchResult{
+		Total:    1,
+		Messages: []slacktool.SearchMessage{{ChannelID: "C1", Text: long, Timestamp: "1700.0001"}},
+	})
+
+	out, err := tool.Run(context.Background(), map[string]any{"query": "incident"})
+	gt.NoError(t, err).Required()
+
+	msgs, ok := out["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(1).Required()
+	gt.Value(t, msgs[0]["text"]).Equal(long)
+	_, marked := msgs[0]["text_truncated"]
+	gt.Bool(t, marked).False()
+	gt.Value(t, out["truncated"]).Equal(false)
+	gt.Value(t, out["returned"]).Equal(1)
+	gt.Value(t, out["omitted"]).Equal(0)
+}
+
+func TestSearchMessagesTool_LongTextIsCutAndMarked(t *testing.T) {
+	// A single long message is what drives an outlier call, and the model
+	// cannot ask for a shorter one — only for fewer results. The cut must be
+	// visible in the entry so the agent does not read a partial message as the
+	// whole of what someone wrote.
+	tool := searchToolWith(t, slacktool.Limits{MaxTextBytes: 10}, &slacktool.SearchResult{
+		Total: 2,
+		Messages: []slacktool.SearchMessage{
+			{ChannelID: "C1", Text: "0123456789abcdef", Timestamp: "1700.0001"},
+			{ChannelID: "C2", Text: "short", Timestamp: "1700.0002"},
+		},
+	})
+
+	out, err := tool.Run(context.Background(), map[string]any{"query": "incident"})
+	gt.NoError(t, err).Required()
+
+	msgs, ok := out["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(2).Required()
+
+	gt.Value(t, msgs[0]["text"]).Equal("0123456789")
+	gt.Value(t, msgs[0]["text_truncated"]).Equal(true)
+
+	// A message under the cap is untouched and carries no marker.
+	gt.Value(t, msgs[1]["text"]).Equal("short")
+	_, marked := msgs[1]["text_truncated"]
+	gt.Bool(t, marked).False()
+
+	// Cutting text is not dropping messages: the call is still complete.
+	gt.Value(t, out["truncated"]).Equal(false)
+	gt.Value(t, out["omitted"]).Equal(0)
+}
+
+func TestSearchMessagesTool_TextIsCutOnARuneBoundary(t *testing.T) {
+	// The cut reaches the model, the run timeline and the trace archive, so a
+	// broken rune would corrupt all three. 8 bytes lands mid-character in a
+	// 3-byte-per-rune string, so the cut backs off to the last whole rune that
+	// fits — 6 bytes, not a third character split across the boundary.
+	tool := searchToolWith(t, slacktool.Limits{MaxTextBytes: 8}, &slacktool.SearchResult{
+		Total:    1,
+		Messages: []slacktool.SearchMessage{{ChannelID: "C1", Text: "ありがとう", Timestamp: "1700.0001"}},
+	})
+
+	out, err := tool.Run(context.Background(), map[string]any{"query": "incident"})
+	gt.NoError(t, err).Required()
+
+	msgs, ok := out["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	text, ok := msgs[0]["text"].(string)
+	gt.Bool(t, ok).True().Required()
+	gt.Bool(t, utf8.ValidString(text)).True()
+	gt.String(t, text).Equal("あり")
+	gt.Number(t, len(text)).LessOrEqual(8)
+}
+
+func TestSearchMessagesTool_ResultSizeCapDropsAndReportsMessages(t *testing.T) {
+	// The per-message cap does not bound a call that returns many short
+	// messages, which is the other half of what an operator has no control
+	// over: `count` is a tool parameter the model fills in.
+	msgs := make([]slacktool.SearchMessage, 0, 20)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs, slacktool.SearchMessage{
+			ChannelID: "C1",
+			Text:      strings.Repeat("x", 100),
+			Timestamp: "1700.0001",
+		})
+	}
+	tool := searchToolWith(t, slacktool.Limits{MaxResultBytes: 600}, &slacktool.SearchResult{
+		Total: 20, Messages: msgs,
+	})
+
+	out, err := tool.Run(context.Background(), map[string]any{"query": "incident"})
+	gt.NoError(t, err).Required()
+
+	got, ok := out["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+
+	// Each encoded entry is over 100 bytes and none is over 600, so the budget
+	// admits at least one and stops well short of all 20.
+	gt.Number(t, len(got)).GreaterOrEqual(1)
+	gt.Number(t, len(got)).LessOrEqual(4)
+
+	gt.Value(t, out["truncated"]).Equal(true)
+	gt.Value(t, out["returned"]).Equal(len(got))
+	gt.Value(t, out["omitted"]).Equal(20 - len(got))
+	// `total` keeps reporting what Slack matched, not what survived the cap.
+	gt.Value(t, out["total"]).Equal(20)
+}
+
+func TestSearchMessagesTool_AnOversizedFirstMessageIsStillReturned(t *testing.T) {
+	// With the per-message cap disabled and the per-call one on, one message can
+	// exceed the whole budget. Dropping it would return an empty result the
+	// agent cannot get past: asking for fewer results puts the same message
+	// first again.
+	tool := searchToolWith(t, slacktool.Limits{MaxResultBytes: 100}, &slacktool.SearchResult{
+		Total: 2,
+		Messages: []slacktool.SearchMessage{
+			{ChannelID: "C1", Text: strings.Repeat("z", 500), Timestamp: "1700.0001"},
+			{ChannelID: "C2", Text: "short", Timestamp: "1700.0002"},
+		},
+	})
+
+	out, err := tool.Run(context.Background(), map[string]any{"query": "incident"})
+	gt.NoError(t, err).Required()
+
+	msgs, ok := out["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(1).Required()
+	gt.Value(t, msgs[0]["channel_id"]).Equal("C1")
+	gt.Value(t, msgs[0]["text"]).Equal(strings.Repeat("z", 500))
+
+	// The floor is one entry, not a licence to ignore the budget: the second
+	// message is still dropped and reported.
+	gt.Value(t, out["returned"]).Equal(1)
+	gt.Value(t, out["omitted"]).Equal(1)
+	gt.Value(t, out["truncated"]).Equal(true)
+}
+
+func TestGetMessagesTool_LongTextIsCutAndMarked(t *testing.T) {
+	// The same bound applies to slack__get_messages: its thread_limit bounds
+	// the number of replies, never their length.
+	bot := &fakeBotService{
+		getPermalinkFn: func(_ context.Context, channelID, _ string) (string, error) {
+			return "https://example.slack.com/archives/" + channelID + "/p1", nil
+		},
+		getRepliesFn: func(_ context.Context, _, threadTS string, _ int) ([]slackservice.ConversationMessage, error) {
+			return []slackservice.ConversationMessage{
+				{UserID: "U1", Text: "0123456789abcdef", Timestamp: threadTS},
+				{UserID: "U2", Text: "short", Timestamp: threadTS},
+			}, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Bot: bot, Limits: slacktool.Limits{MaxTextBytes: 10}})
+	tool := pickToolByName(t, tools, "slack__get_messages")
+
+	out, err := tool.Run(context.Background(), map[string]any{
+		"targets": []any{map[string]any{"channel_id": "C1", "ts": "t1"}},
+	})
+	gt.NoError(t, err).Required()
+
+	results, ok := out["results"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, results).Length(1).Required()
+
+	msgs, ok := results[0]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(2).Required()
+	gt.Value(t, msgs[0]["text"]).Equal("0123456789")
+	gt.Value(t, msgs[0]["text_truncated"]).Equal(true)
+	gt.Value(t, msgs[1]["text"]).Equal("short")
+	_, marked := msgs[1]["text_truncated"]
+	gt.Bool(t, marked).False()
+
+	gt.Value(t, out["truncated"]).Equal(false)
+	gt.Value(t, out["omitted"]).Equal(0)
+}
+
+func TestGetMessagesTool_ResultSizeCapIsSharedAcrossTargets(t *testing.T) {
+	// The bound is on what the CALL returns, so a first target that fills the
+	// budget must leave the second one reporting what it lost rather than
+	// silently returning an empty thread.
+	bot := &fakeBotService{
+		getPermalinkFn: func(_ context.Context, channelID, _ string) (string, error) {
+			return "https://example.slack.com/archives/" + channelID + "/p1", nil
+		},
+		getRepliesFn: func(_ context.Context, _, threadTS string, _ int) ([]slackservice.ConversationMessage, error) {
+			out := make([]slackservice.ConversationMessage, 0, 5)
+			for i := 0; i < 5; i++ {
+				out = append(out, slackservice.ConversationMessage{
+					UserID: "U1", Text: strings.Repeat("y", 100), Timestamp: threadTS,
+				})
+			}
+			return out, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Bot: bot, Limits: slacktool.Limits{MaxResultBytes: 400}})
+	tool := pickToolByName(t, tools, "slack__get_messages")
+
+	out, err := tool.Run(context.Background(), map[string]any{
+		"targets": []any{
+			map[string]any{"channel_id": "C1", "ts": "t1"},
+			map[string]any{"channel_id": "C2", "ts": "t2"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	results, ok := out["results"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, results).Length(2).Required()
+
+	first, ok := results[0]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	second, ok := results[1]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+
+	// 10 messages of >100 encoded bytes each against a 400-byte budget: some
+	// are kept, and the budget runs out before the second target is served in
+	// full.
+	kept := len(first) + len(second)
+	gt.Number(t, kept).GreaterOrEqual(1)
+	gt.Number(t, kept).LessOrEqual(3)
+
+	gt.Value(t, out["truncated"]).Equal(true)
+	gt.Value(t, out["omitted"]).Equal(10 - kept)
+
+	// The target that lost messages says so; the reporting is per target so
+	// the agent knows WHICH thread it is missing.
+	gt.Value(t, results[1]["omitted"]).Equal(5 - len(second))
+
+	// The budget is charged in target order, so the same request returns the
+	// same messages on every run.
+	gt.Number(t, len(first)).GreaterOrEqual(len(second))
+}
+
+func TestGetMessagesTool_FailedTargetIsNotChargedToTheBudget(t *testing.T) {
+	// A failed target carries "error" and no messages. The budget must skip it
+	// rather than treat the absent list as an empty one it has to annotate.
+	bot := &fakeBotService{
+		getPermalinkFn: func(_ context.Context, channelID, _ string) (string, error) {
+			if channelID == "C_BAD" {
+				return "", goerr.New("not found")
+			}
+			return "https://example.slack.com/archives/" + channelID + "/p1", nil
+		},
+		getRepliesFn: func(_ context.Context, _, threadTS string, _ int) ([]slackservice.ConversationMessage, error) {
+			return []slackservice.ConversationMessage{{UserID: "U1", Text: "hello", Timestamp: threadTS}}, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Bot: bot, Limits: slacktool.Limits{MaxResultBytes: 4096}})
+	tool := pickToolByName(t, tools, "slack__get_messages")
+
+	ctx, _ := ctxWithCapturingLogger(t)
+	out, err := tool.Run(ctx, map[string]any{
+		"targets": []any{
+			map[string]any{"channel_id": "C_BAD", "ts": "t1"},
+			map[string]any{"channel_id": "C_OK", "ts": "t2"},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	results, ok := out["results"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, results).Length(2).Required()
+
+	gt.Value(t, results[0]["error"]).NotEqual(nil)
+	_, hasOmitted := results[0]["omitted"]
+	gt.Bool(t, hasOmitted).False()
+
+	msgs, ok := results[1]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(1).Required()
+	gt.Value(t, msgs[0]["text"]).Equal("hello")
+
+	gt.Value(t, out["truncated"]).Equal(false)
+	gt.Value(t, out["omitted"]).Equal(0)
 }

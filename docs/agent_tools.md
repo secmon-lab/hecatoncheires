@@ -102,6 +102,16 @@ closes a Case by moving it to a closed board status:
 | `slack__post_message` | W | Post a message to the case's Slack channel (supports `thread_ts`). | Used by the assist / mention flow, where the agent posts where it directs. Not suppressed by a Job's `quiet`. |
 | `slack__post_to_case_channel` | W | Post a message to the case's bound channel. | **The only Slack *write* tool a Job gets** (Jobs also get the read tools above). The channel id is hard-pinned to `Case.SlackChannelID`; arbitrary channels are not reachable. Wired only when a Slack service is configured and the case has a bound channel. Both `serve` and `tick` must be given a Slack bot token — a sweep executes the runs it dispatches, so a `tick` without one leaves this tool unbuilt. The same holds for every other integration on the Job palette (Notion, GitHub, Jira, WebFetch): see [cli.md](cli.md#tick). |
 
+**Both Slack read tools are size-bounded.** `--slack-tool-max-text-size` cuts one
+message's `text`, and `--slack-tool-max-result-size` bounds the combined size of
+the messages one call returns; the response then reports `text_truncated` per
+message and `returned` / `omitted` / `truncated` for the call, so a partial
+result is not read as a complete one. The bounds exist because `count` is a tool
+parameter the model fills in, while per-message length is bounded by nothing at
+all, and a sub-agent re-sends its accumulated tool results on every later turn.
+See [cli.md](cli.md#slack-agent-tool-limits) for the defaults and the response
+fields.
+
 **A planner is only offered toolsets that resolve to a tool.** The palettes above
 are the *ceiling* on what a host may advertise, not what it does advertise: before
 each Spawn, a plan-execute host filters its palette through

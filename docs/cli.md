@@ -56,6 +56,8 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--slack-user-oauth-token` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | - | No | Slack User OAuth Token for admin API (`xoxp-...`, required for cross-workspace channel connect in Enterprise Grid) |
 | `--slack-signing-secret` | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | - | No\*\*\* | Slack signing secret for webhook verification |
 | `--slack-notification-slot-duration` | `HECATONCHEIRES_NOTIFICATION_SLOT_DURATION` | `1h` | No | Rolling window during which Action/Step change notifications are aggregated into a single editable channel message. Set `0` to disable aggregation (legacy `reply_broadcast` per event). See [user_guide.md](./user_guide.md) |
+| `--slack-tool-max-text-size` | `HECATONCHEIRES_SLACK_TOOL_MAX_TEXT_SIZE` | `4096` | No | Maximum bytes of a single Slack message's `text` in an agent tool result. A longer message is cut on a rune boundary and its entry carries `text_truncated: true`. Applies to both `slack__search_messages` and `slack__get_messages`. `0` disables the bound. See [Slack agent tool limits](#slack-agent-tool-limits) |
+| `--slack-tool-max-result-size` | `HECATONCHEIRES_SLACK_TOOL_MAX_RESULT_SIZE` | `32768` | No | Maximum combined bytes of the messages one Slack agent tool call returns. Messages past the cap are dropped and reported in the response. Applies to both Slack read tools. `0` disables the bound. See [Slack agent tool limits](#slack-agent-tool-limits) |
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
@@ -97,6 +99,47 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--agent-worker-poll-concurrency` | `HECATONCHEIRES_AGENT_WORKER_POLL_CONCURRENCY` | `2` | No | Number of parallel poll loops looking for runnable agent processes |
 | `--agent-worker-lease` | `HECATONCHEIRES_AGENT_WORKER_LEASE` | `120s` | No | How long a worker holds a claimed agent process before another instance may reclaim it |
 | `--agent-worker-poll-interval` | `HECATONCHEIRES_AGENT_WORKER_POLL_INTERVAL` | `2s` | No | How often a worker polls for runnable agent processes |
+
+### Slack agent tool limits
+
+`slack__search_messages` and `slack__get_messages` return message text straight
+into the model context, and the number of results is chosen by the model
+(`count` is a tool parameter) rather than by the operator. Two flags bound what
+one call may inject; both apply to **both** tools, so an operator configures one
+budget for Slack reads rather than one per tool.
+
+| Bound | Flag | What it does |
+|---|---|---|
+| Per message | `--slack-tool-max-text-size` | Cuts one message's `text` at the byte limit, on a rune boundary. The entry then carries `text_truncated: true`. |
+| Per call | `--slack-tool-max-result-size` | Stops admitting messages once their combined JSON size reaches the limit. |
+
+Every response reports what survived, so a partial result is never mistaken for
+a complete one:
+
+- `slack__search_messages` returns `returned`, `omitted` and `truncated`
+  alongside `total` (which keeps reporting what Slack matched, not what fit).
+- `slack__get_messages` returns `omitted` and `truncated` at the top level, and
+  repeats `omitted` on each target that lost messages, so the agent knows which
+  thread it is missing. The per-call budget is shared across the targets of one
+  call and charged in target order, so the same request returns the same
+  messages every time.
+
+Setting either flag to `0` disables that bound; a negative value is rejected at
+startup rather than read as "disabled". The two are independent: the per-message
+cap is what catches an outlier long message, while the per-call cap is what
+bounds a call returning many short ones. Both matter because a sub-agent re-sends
+its accumulated tool results on every later turn, so an unbounded call is paid
+for repeatedly.
+
+The first message of a call is always returned, even when it alone exceeds
+`--slack-tool-max-result-size`. Dropping it would leave the agent an empty result
+it cannot get past — asking for fewer results returns the same oversized message
+first again. This only arises when the per-message cap is disabled and the
+per-call one is not; with both at their defaults a single entry cannot exceed the
+per-call budget.
+
+The same flags are registered on `serve`, `tick`, `assist` and `eval`, so a
+scheduled run and a scenario see the same bounds a mention turn does.
 
 ### Model definitions
 
@@ -263,6 +306,10 @@ The `assist` command (alias: `a`) runs the AI assist agent for all open cases ac
 
 `assist` also accepts every `--agent-*` flag listed under [`serve`](#serve); they
 bound the assist agent's run the same way. See [Agent runtime budgets](#agent-runtime-budgets).
+
+It accepts the Slack tool flags (`--slack-tool-max-*`) too. The assist agent gets
+`slack__get_messages` from the bot token alone, so its Slack reads are bounded
+exactly as `serve`'s are — see [Slack agent tool limits](#slack-agent-tool-limits).
 
 The `[assist]` TOML section (prompt, language) is documented in [configuration.md](./configuration.md).
 
@@ -466,8 +513,12 @@ The dispatched runs execute on the same agent runtime `serve` uses, and the swee
 | `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Required whenever an LLM provider is configured (same rule as `serve`). The knowledge tools' similarity search runs on this embedder |
 
 `tick` also accepts every `--agent-*` flag listed under [`serve`](#serve), plus the
-Jira (`--jira-*`) and WebFetch (`--webfetch-*`) flags documented there. See
-[Agent runtime budgets](#agent-runtime-budgets).
+Jira (`--jira-*`), WebFetch (`--webfetch-*`) and Slack tool
+(`--slack-tool-max-*`) flags documented there. See
+[Agent runtime budgets](#agent-runtime-budgets) and
+[Slack agent tool limits](#slack-agent-tool-limits). Set the Slack tool limits to
+the same values as `serve`, or a scheduled run reads Slack under different bounds
+than a mention turn does.
 
 **Configure the integrations here, not only on `serve`.** The sweep executes the
 runs it dispatches, so the Job agent's tools are built from *this* process's
