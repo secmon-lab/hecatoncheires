@@ -75,6 +75,11 @@ type state struct {
 	// conversation, so the next Generate continues from it and sends no input.
 	ToolsAnswered bool     `json:"tools_answered,omitempty"`
 	Texts         []string `json:"texts,omitempty"`
+	// ReserveToolRounds counts how many times the model asked for tools AFTER the
+	// budget crossed into its reserve. It decides which of the two reserve
+	// instructions the next call carries, so it has to survive a handoff like
+	// everything else the next transition needs.
+	ReserveToolRounds int `json:"reserve_tool_rounds,omitempty"`
 }
 
 // Option configures the strategy.
@@ -169,16 +174,17 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 
 	// A budget that is close to its ceiling has to be TOLD to the model, not
 	// merely enforced against it. Enforcement alone produces the worst outcome:
-	// the run is cut off mid-investigation with no answer at all. Given the
-	// notice, the model can spend its last call on a conclusion instead of
-	// another tool.
+	// the run is cut off mid-investigation with nothing done and nothing said.
+	// Given the notice, the model can spend what is left on the call the task
+	// still needs and then on a result.
 	//
 	// It rides in the system prompt for this call, not as an input: the crossing
 	// happens mid-run, exactly when a turn is likely to be reporting tool results,
 	// and such a turn may carry nothing else.
+	inReserve := sys.LimitStatus().Kind() == agentkit.LimitKindNotice
 	systemPrompt := st.SystemPrompt
-	if notice := sys.LimitStatus(); notice.Kind() == agentkit.LimitKindNotice {
-		systemPrompt += "\n\n" + noticeInstruction(notice.Message())
+	if inReserve {
+		systemPrompt += "\n\n" + noticeInstruction(sys.LimitStatus().Message(), st.ReserveToolRounds)
 	}
 
 	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(systemPrompt)}
@@ -202,6 +208,9 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 		return st, agentkit.Done(Output{Texts: st.Texts}), nil
 	}
 
+	if inReserve {
+		st.ReserveToolRounds++
+	}
 	st.Pending = res.FunctionCalls
 	st.Phase = phaseTool
 	return st, agentkit.Continue[Output](), nil
@@ -212,14 +221,45 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 // the conversation, and repeating it invites the same answer again.
 const continueInstruction = "Continue from what you have so far."
 
+// reserveToolRoundsMax is how many tool rounds the reserve pays for: one. Past
+// it the model is told to stop asking, which is a NUDGE and not a gate — see
+// stepTool for why an over-budget call is still run and answered.
+const reserveToolRoundsMax = 1
+
+// reserveInstruction is what the model is told on the first call after the run
+// crossed into its budget reserve.
+//
+// It names ONE action and offers no alternative. The conditional it replaced
+// ("if something is outstanding call it, otherwise answer now") handed the model
+// a way to skip straight to the answer with the side effect the task was for
+// still unperformed — which is the exact outcome the reserve exists to prevent.
+// Nothing here can force the call; withholding the tools is the only thing that
+// could, and agentkit's WithTools only ever appends.
+const reserveInstruction = "This run has spent its working budget; only a small reserve is left. " +
+	"Do not start any new investigation. THIS turn is your final tool call: make the one call this " +
+	"task still needs in order to take effect. Do not write your result on this turn — the call's " +
+	"outcome comes back on the next turn, and that is where you write it."
+
+// reserveSpentInstruction is what the model is told once the reserve's one tool
+// round has been spent. It asks for the result to be SHORT rather than complete:
+// what is left has to cover this call and nothing more.
+const reserveSpentInstruction = "The budget reserve is spent: you have already made your final " +
+	"tool call. Do not call any tool again and do not look anything else up. Write your result now " +
+	"from what you already have, as briefly as it can be understood."
+
 // noticeInstruction turns a budget notice into an instruction the model can act
 // on. The limiter's message says what is nearly spent; this says what to do
-// about it.
-func noticeInstruction(msg string) string {
-	if msg == "" {
-		return "This run is close to its budget. Answer now from what you already have, and do not call any more tools."
+// about it. toolRoundsUsed is how many tool rounds this run has already spent
+// inside the reserve, which decides whether the final one is still available.
+func noticeInstruction(msg string, toolRoundsUsed int) string {
+	instruction := reserveInstruction
+	if toolRoundsUsed >= reserveToolRoundsMax {
+		instruction = reserveSpentInstruction
 	}
-	return msg + "\nThis run is close to its budget. Answer now from what you already have, and do not call any more tools."
+	if msg == "" {
+		return instruction
+	}
+	return msg + "\n" + instruction
 }
 
 // stepTool runs exactly one pending tool call and answers it in the conversation.

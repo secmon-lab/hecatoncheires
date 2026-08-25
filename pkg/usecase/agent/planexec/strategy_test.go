@@ -642,6 +642,90 @@ func TestBudgetNoticeWrapsTheRunUp(t *testing.T) {
 	out := decodeText(t, proc.Output)
 	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
 	gt.String(t, out.Text).Contains("partial answer")
+
+	// The opening plan call is nowhere near the ceiling and must not be nagged;
+	// the terminal call is past the threshold and must be told what the reserve is
+	// for. It reaches the call through the SYSTEM prompt, which is the only route
+	// that also works when the terminal call sends no user turn.
+	prompts := planner.seenSystemPrompts()
+	gt.Array(t, prompts).Length(3).Required()
+	gt.Bool(t, strings.Contains(prompts[0], "reserve")).False()
+	gt.String(t, prompts[2]).Contains("THIS turn is your final tool call")
+}
+
+// TestTheReserveAllowsATerminalToolCall pins the two moves the reserve is for on
+// the plan-execute path: the call the turn still needs, and then the terminal
+// output. The side effects a turn was asked for are tool calls, so a reserve that
+// only bought a terminal output would let the run describe work it never did.
+func TestTheReserveAllowsATerminalToolCall(t *testing.T) {
+	writer := &recordingTool{name: "case__update_case"}
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		// No replan reply is scripted: reaching one would fail the test, which is
+		// how the run is pinned to going straight to the terminal call.
+		&gollem.FunctionCall{ID: "w1", Name: "case__update_case", Arguments: map[string]any{"id": "case-1"}},
+		`the final answer`,
+	}}
+	// Notice at 15% of 20 steps = 3 committed transitions, which the first round
+	// and its child cross together.
+	cfg := budget.Config{MaxSteps: 20, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.15}
+	rt := newTextRuntime(t, planner.client(), cfg, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{writer}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.String(t, out.Text).Contains("final answer")
+
+	// The call actually ran: the reserve's instruction is not a dry run.
+	gt.Array(t, writer.calls()).Length(1)
+
+	prompts := planner.systemSeen()
+	gt.Array(t, prompts).Length(4).Required()
+	// The reserve's first move asks for the call and forbids writing the output.
+	gt.String(t, prompts[2]).Contains("THIS turn is your final tool call")
+	gt.Bool(t, strings.Contains(prompts[2], "Do not call any tool again")).False()
+	// The second move carries that call's result and the opposite instruction.
+	gt.String(t, prompts[3]).Contains("The budget reserve is spent")
+	gt.String(t, prompts[3]).Contains("Do not call any tool again")
+	// It carries the result and nothing else: a call answering a tool round may
+	// not send a user turn as well.
+	gt.String(t, planner.seen()[3]).Equal("")
+	gt.Value(t, planner.answeredWith()[3]).Equal([]string{"w1"})
+}
+
+// TestTheReserveDoesNotStarveTheTerminalPrompt pins that the reserve instruction
+// is ADDED to the terminal prompt rather than replacing it. The call that follows
+// the tool round sends no user turn, so its whole brief — the observation trail
+// and the output format — rides in the system prompt; a reserve instruction that
+// displaced it would leave the model told to stop calling tools and never told
+// what to write.
+func TestTheReserveDoesNotStarveTheTerminalPrompt(t *testing.T) {
+	writer := &recordingTool{name: "case__update_case"}
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		&gollem.FunctionCall{ID: "w1", Name: "case__update_case", Arguments: map[string]any{"id": "case-1"}},
+		`the final answer`,
+	}}
+	cfg := budget.Config{MaxSteps: 20, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.15}
+	rt := newTextRuntime(t, planner.client(), cfg, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{writer}, nil
+		})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	prompts := planner.systemSeen()
+	gt.Array(t, prompts).Length(4).Required()
+	gt.String(t, prompts[3]).Contains("The investigation loop has finished")
+	gt.String(t, prompts[3]).Contains("Emit plain natural-language text")
+	gt.String(t, prompts[3]).Contains("The budget reserve is spent")
 }
 
 // recordingTool answers a planner lookup and records that it was called.
