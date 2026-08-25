@@ -56,9 +56,14 @@ const (
 	defaultAgentTaskMaxSteps        = 48
 	defaultAgentTaskMaxInputTokens  = 100_000
 	defaultAgentTaskMaxOutputTokens = 20_000
-	// defaultAgentNoticeRatio leaves a fifth of the budget for wrapping up,
-	// which is more than the one or two transitions a terminal answer needs.
-	defaultAgentNoticeRatio = 0.8
+	// defaultAgentNoticeRatio leaves a TENTH of the budget as the reserve a run
+	// concludes out of. What the reserve has to cover is two generates and one
+	// tool call: the run is told to make the call its task still needs, and the
+	// call that carries the result back is where it writes its output. The figure
+	// was a fifth while the run was merely told to answer and stop calling tools;
+	// it buys a smaller reserve for a larger job, which is deliberate — a
+	// deployment whose budget is small enough for that to bite lowers this flag.
+	defaultAgentNoticeRatio = 0.9
 
 	// defaultAgentWorkerConcurrency bounds how many transitions one instance
 	// drives at once, counting both polled claims and the eager dispatch a
@@ -137,8 +142,9 @@ func (a *Agent) Flags() []cli.Flag {
 			Destination: &a.taskMaxOutputTokens,
 		},
 		&cli.FloatFlag{
-			Name:        "agent-budget-notice-ratio",
-			Usage:       "Fraction of a budget at which the agent is told to finish with what it has (0 < r < 1)",
+			Name: "agent-budget-notice-ratio",
+			Usage: "Fraction of a budget an agent may spend before it is told to conclude; " +
+				"what is left is the reserve it makes its final tool call and writes its output from (0 < r < 1)",
 			Value:       defaultAgentNoticeRatio,
 			Sources:     cli.EnvVars("HECATONCHEIRES_AGENT_BUDGET_NOTICE_RATIO"),
 			Destination: &a.noticeRatio,

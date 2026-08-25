@@ -579,10 +579,10 @@ func TestAnsweredToolCallsSurviveAFailedGenerate(t *testing.T) {
 }
 
 // TestBudgetNoticeReachesTheModel pins that crossing the notice ratio TELLS the
-// model to wrap up, rather than only being enforced against it later. Without
-// this the documented behaviour ("tells the agent to produce its answer from what
-// it already has") would be a promise the runtime does not keep, and a run would
-// get cut off mid-investigation with no answer at all.
+// model what to do with what is left, rather than only being enforced against it
+// later. Without this the documented behaviour would be a promise the runtime
+// does not keep, and a run would get cut off mid-investigation having neither
+// performed the call its task needed nor said anything.
 func TestBudgetNoticeReachesTheModel(t *testing.T) {
 	tool := &recordingTool{name: "probe__ping"}
 	call := func() *gollem.Response {
@@ -602,18 +602,114 @@ func TestBudgetNoticeReachesTheModel(t *testing.T) {
 	seen := inputs()
 	gt.Array(t, seen).Length(3).Required()
 	// The opening call is nowhere near the ceiling, so it must not be nagged.
-	gt.Bool(t, strings.Contains(seen[0].systemPrompt, "close to its budget")).False()
+	gt.Bool(t, strings.Contains(seen[0].systemPrompt, "reserve")).False()
 	// The last call is past the notice threshold and must carry both the
 	// limiter's own message and the instruction derived from it — in the system
 	// prompt, because that call sends no user turn at all: it continues from the
 	// tool result the conversation already carries.
-	gt.String(t, seen[2].systemPrompt).Contains("close to its budget")
-	gt.String(t, seen[2].systemPrompt).Contains("do not call any more tools")
 	gt.String(t, seen[2].systemPrompt).Contains("nearly exhausted")
+	gt.String(t, seen[2].systemPrompt).Contains("THIS turn is your final tool call")
 	gt.String(t, seen[2].systemPrompt).Contains("be helpful")
+	// The reserve's own tool round has not been spent yet, so this call must NOT
+	// be told to stop calling tools — being told that here is what made the run
+	// skip the call its task still needed.
+	gt.Bool(t, strings.Contains(seen[2].systemPrompt, "Do not call any tool again")).False()
 	// The turn itself carried the result and nothing else.
 	gt.Value(t, seen[2].answered).Equal([]string{"c"})
 	gt.String(t, seen[2].text).Equal("")
+}
+
+// TestTheReserveAllowsOneFinalToolCall pins the two moves the reserve is for: the
+// call the task still needs, and then the result. The instruction has to flip
+// between them — told "make your final tool call" a second time, a model that has
+// already made it simply makes another, and the reserve is gone before anything
+// is written.
+func TestTheReserveAllowsOneFinalToolCall(t *testing.T) {
+	tool := &recordingTool{name: "case__update_case"}
+	call := func(id string) *gollem.Response {
+		return callResponse(&gollem.FunctionCall{ID: id, Name: "case__update_case", Arguments: map[string]any{}})
+	}
+	llm, inputs := inputRecordingLLM(t, call("c1"), call("c2"), textResponse("done"))
+
+	// Notice at 20% of 10 steps = 2 committed transitions, so the opening Generate
+	// (step 0) is clean and the second one (step 2) is already in the reserve.
+	rt := newRuntime(t, llm, budget.Config{
+		MaxSteps: 10, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.2,
+	}, tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "investigate"})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := inputs()
+	gt.Array(t, seen).Length(3).Required()
+	// The reserve's first move asks for the call and forbids writing the result.
+	gt.String(t, seen[1].systemPrompt).Contains("THIS turn is your final tool call")
+	gt.String(t, seen[1].systemPrompt).Contains("Do not write your result on this turn")
+	// The second move carries that call's result and the opposite instruction.
+	gt.String(t, seen[2].systemPrompt).Contains("The budget reserve is spent")
+	gt.String(t, seen[2].systemPrompt).Contains("Do not call any tool again")
+	gt.Bool(t, strings.Contains(seen[2].systemPrompt, "THIS turn is your final tool call")).False()
+	// It carries the result and nothing else: a call answering a tool round may
+	// not send a user turn as well.
+	gt.Value(t, seen[2].answered).Equal([]string{"c2"})
+	gt.String(t, seen[2].text).Equal("")
+	// Both rounds actually ran; the reserve's instruction is not a dry run.
+	gt.Array(t, tool.Calls()).Length(2)
+}
+
+// TestTheReserveFirstMoveIsANudgeNotAGate pins that a model which writes its
+// result instead of calling a tool ends the run there. Nothing may re-prompt it:
+// there is no way to make a model call a tool, and a run with nothing left to
+// call would spend the whole reserve being asked again.
+func TestTheReserveFirstMoveIsANudgeNotAGate(t *testing.T) {
+	tool := &recordingTool{name: "probe__ping"}
+	llm, inputs := inputRecordingLLM(t,
+		callResponse(&gollem.FunctionCall{ID: "c1", Name: "probe__ping", Arguments: map[string]any{}}),
+		textResponse("nothing left to do; here is the result"))
+
+	rt := newRuntime(t, llm, budget.Config{
+		MaxSteps: 10, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.2,
+	}, tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "investigate"})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := inputs()
+	// Exactly two Generates: the reserve's first move was answered with text and
+	// the run ended, rather than being asked for a tool call again.
+	gt.Array(t, seen).Length(2).Required()
+	gt.String(t, seen[1].systemPrompt).Contains("THIS turn is your final tool call")
+	// Only the pre-reserve round ran a tool.
+	gt.Array(t, tool.Calls()).Length(1)
+}
+
+// TestTheReserveBoundIsANudgeNotAGate pins that a tool call made past the
+// reserve's one round is still run and answered. Dropping it would leave the
+// model's function-call turn unanswered, which a provider rejects outright — the
+// whole run then fails instead of producing the shorter result the reserve is for.
+func TestTheReserveBoundIsANudgeNotAGate(t *testing.T) {
+	tool := &recordingTool{name: "probe__ping"}
+	call := func(id string) *gollem.Response {
+		return callResponse(&gollem.FunctionCall{ID: id, Name: "probe__ping", Arguments: map[string]any{}})
+	}
+	llm, inputs := inputRecordingLLM(t, call("c1"), call("c2"), call("c3"), textResponse("done"))
+
+	rt := newRuntime(t, llm, budget.Config{
+		MaxSteps: 10, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.2,
+	}, tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "investigate"})
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := inputs()
+	gt.Array(t, seen).Length(4).Required()
+	// The over-budget round was told to stop and asked anyway; both the call it
+	// made and the one before it were answered.
+	gt.String(t, seen[2].systemPrompt).Contains("Do not call any tool again")
+	gt.Value(t, seen[2].answered).Equal([]string{"c2"})
+	gt.String(t, seen[3].systemPrompt).Contains("Do not call any tool again")
+	gt.Value(t, seen[3].answered).Equal([]string{"c3"})
+	gt.Array(t, tool.Calls()).Length(3)
 }
 
 func TestRegisterRequiresALimiter(t *testing.T) {

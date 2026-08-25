@@ -893,17 +893,49 @@ Three properties of the money path a change here must preserve:
   premium, and clamps the uncached remainder at zero so a provider reporting input
   exclusive of its cache components cannot credit the budget.
 
-`NoticeRatio` is the fraction of the budget or the step ceiling at which the
-Strategy is *told* it is close, so it can wrap up instead of being cut off.
+`NoticeRatio` is the fraction of the budget or the step ceiling a run may spend
+before it is told to conclude. What is left is the **reserve** — a tenth by
+default — and the rest of the run is TWO moves, because a turn's side effects
+happen through tools and nowhere else: a run cut off before its `case__*` call or
+its post has done nothing, whatever it managed to say.
 
-Three consequences to keep in mind:
+Five consequences to keep in mind:
 
 - **A ceiling produces `LimitKindStop`, the notice threshold produces
-  `LimitKindNotice`, and Stop wins when both apply.** A Strategy that observes a
-  notice is expected to skip further fan-out and head for its terminal output;
-  planexec does exactly that. The notice reaches the model through the SYSTEM
-  prompt, never as an input — see § "a parallel tool-call turn is answered in ONE
-  call" for why the call answering a tool round sends no user turn to carry it.
+  `LimitKindNotice`, and Stop wins when both apply.** Stop is read at the
+  transition boundary and fails the Process WITHOUT calling `Step`
+  (`worker.go`, `driveClaim`), so nothing can run after it — the reserve is the
+  only place a run gets to finish what it started, and it exists before the Stop
+  rather than after it.
+- **A Strategy that observes a notice makes two moves, and the instruction flips
+  between them.** The first says "THIS turn is your final tool call, do not write
+  your result yet"; the call carrying that tool's result says "call nothing more,
+  write your result now, briefly". Both `react` and `planexec` implement it, each
+  with its own wording (`reserveInstruction` / `reserveSpentInstruction`), because
+  one asks for an answer and the other for a terminal output. planexec also skips
+  further fan-out: `stepPlan` and `stepReplan` divert to `phaseFinal` at their top
+  without generating.
+
+  Two properties a change here must preserve:
+
+  - **The first move offers no alternative.** The conditional it replaced ("if
+    something is outstanding call it, otherwise answer now") let a model skip
+    straight to the answer with the side effect the task was for unperformed,
+    which is what the reserve exists to prevent.
+  - **Neither instruction is a gate.** A model that writes its result instead of
+    calling a tool ends the run there and must NOT be re-prompted: nothing can
+    make a model call a tool (agentkit's `WithTools` only appends, so the tools
+    cannot be withheld), and a run with nothing left to call would spend the whole
+    reserve being asked again. A call made past the one reserve round is still run
+    and answered, for the reason § "a parallel tool-call turn is answered in ONE
+    call" gives. Pinned by `TestTheReserveFirstMoveIsANudgeNotAGate` and
+    `TestTheReserveBoundIsANudgeNotAGate` (react).
+- **The notice reaches the model through the SYSTEM prompt, never as an input** —
+  see § "a parallel tool-call turn is answered in ONE call" for why the call
+  answering a tool round sends no user turn to carry it. In planexec that route is
+  `plannerPrompt`, and the reserve instruction REPLACES the tool-allowance notice
+  there rather than joining it: the two would arrive together saying opposite
+  things.
 - **A sub-agent's spend is charged to its parent as well as to itself.** A child
   gets its own Process and its own ceiling (the Task tier of
   `agentkernel.Budgets`), AND agentkit folds the finished child's whole `Metrics`

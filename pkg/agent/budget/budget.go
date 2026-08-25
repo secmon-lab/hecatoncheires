@@ -49,9 +49,11 @@ type Config struct {
 	// MaxOutputTokens is the greatest number of output tokens this Process may
 	// produce. Must be positive.
 	MaxOutputTokens int64
-	// NoticeRatio is the fraction of any ceiling at which the strategy is told
-	// to wrap up while it still has room to produce an answer. Must be greater
-	// than 0 and less than 1.
+	// NoticeRatio is the fraction of any ceiling a Process may spend before the
+	// strategy is told to conclude. What is left is the reserve, which has to
+	// cover the final tool call the strategy asks for AND the call that writes
+	// the result from it — not one wrap-up call. Must be greater than 0 and less
+	// than 1.
 	NoticeRatio float64
 }
 
@@ -139,9 +141,11 @@ type Root struct {
 	// run. Must be positive. It is not a spend ceiling: it exists so a run that
 	// never terminates is stopped even while it costs almost nothing.
 	MaxSteps int64
-	// NoticeRatio is the fraction of any ceiling at which the strategy is told
-	// to wrap up while it still has room to produce an answer. Must be greater
-	// than 0 and less than 1.
+	// NoticeRatio is the fraction of any ceiling a Process may spend before the
+	// strategy is told to conclude. What is left is the reserve, which has to
+	// cover the final tool call the strategy asks for AND the call that writes
+	// the result from it — not one wrap-up call. Must be greater than 0 and less
+	// than 1.
 	NoticeRatio float64
 }
 

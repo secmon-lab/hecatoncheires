@@ -92,7 +92,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--agent-task-max-steps` | `HECATONCHEIRES_AGENT_TASK_MAX_STEPS` | `48` | No | Maximum committed transitions one sub-agent may execute |
 | `--agent-task-max-input-tokens` | `HECATONCHEIRES_AGENT_TASK_MAX_INPUT_TOKENS` | `100000` | No | Maximum input tokens one sub-agent may consume |
 | `--agent-task-max-output-tokens` | `HECATONCHEIRES_AGENT_TASK_MAX_OUTPUT_TOKENS` | `20000` | No | Maximum output tokens one sub-agent may produce |
-| `--agent-budget-notice-ratio` | `HECATONCHEIRES_AGENT_BUDGET_NOTICE_RATIO` | `0.8` | No | Fraction of any ceiling at which the agent is told to finish with what it has. Must be greater than 0 and less than 1 |
+| `--agent-budget-notice-ratio` | `HECATONCHEIRES_AGENT_BUDGET_NOTICE_RATIO` | `0.9` | No | Fraction of any ceiling an agent may spend before it is told to conclude. What is left is the reserve it makes its final tool call and writes its output from. Must be greater than 0 and less than 1 |
 | `--agent-worker-concurrency` | `HECATONCHEIRES_AGENT_WORKER_CONCURRENCY` | `8` | No | Maximum agent transitions this instance drives at once |
 | `--agent-worker-poll-concurrency` | `HECATONCHEIRES_AGENT_WORKER_POLL_CONCURRENCY` | `2` | No | Number of parallel poll loops looking for runnable agent processes |
 | `--agent-worker-lease` | `HECATONCHEIRES_AGENT_WORKER_LEASE` | `120s` | No | How long a worker holds a claimed agent process before another instance may reclaim it |
@@ -148,11 +148,33 @@ several modest ones.
 Because a sub-agent's usage arrives in one addition when it finishes, a run can
 cross a ceiling by a whole sub-agent's worth at once; the reported figure is then
 past the ceiling rather than at it.
-Crossing `--agent-budget-notice-ratio` of the budget or the step ceiling adds a
-line to the agent's next turn telling it to answer from what it already has and
-to stop calling tools; crossing the ceiling itself stops the run, and the user
-gets the same "couldn't reach a conclusion" reply as any other unfinished turn.
-The notice exists so the common case is a shorter answer rather than no answer.
+Crossing `--agent-budget-notice-ratio` of the budget or the step ceiling puts the
+run into its **reserve** — by default the last tenth — and the rest of the run is
+two moves. The agent is first told that this turn is its final tool call and that
+it must not write its result yet, because a turn's side effects (updating a case,
+posting a message, recording an action) happen through tools and nowhere else. The
+call that carries that tool's result back tells it the opposite: call nothing more,
+and write its result now, briefly. So the reserve has to cover two generates and
+one tool call.
+
+Neither instruction is enforced. An agent that writes its result instead of
+calling a tool simply ends the run there, and a tool call made past the reserve's
+one round is still run and answered — dropping it would leave the model's call
+unanswered, which a provider rejects outright.
+
+Crossing the ceiling itself stops the run, and the user gets the same "couldn't
+reach a conclusion" reply as any other unfinished turn. The reserve exists so the
+common case is a completed action and a shorter answer rather than neither.
+
+**Check the ratio against your tightest ceiling, not against the money one.** The
+ratio applies to every ceiling, and the sub-agent input-token ceiling is where a
+tenth is thinnest: at the default `--agent-task-max-input-tokens` of 100000 the
+reserve is 10000 input tokens, and each generate re-sends the whole conversation
+rather than the last turn of it. A sub-agent whose conversation has grown past
+about ten thousand tokens therefore crosses its ceiling on the reserve's first
+generate and is stopped before the tool call — the run ends the way it did before
+the reserve existed. Raise `--agent-task-max-input-tokens`, or lower this ratio,
+if your sub-agents run long enough for that.
 
 A run whose budget or model price cannot be resolved is stopped rather than run
 unbounded. Startup validation makes that unreachable for a configured

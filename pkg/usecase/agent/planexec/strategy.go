@@ -257,9 +257,18 @@ type state struct {
 	// FinalRetries counts terminal outputs rejected by decode / Validate /
 	// finalizers.
 	FinalRetries int `json:"final_retries,omitempty"`
-	// Wrap records that the budget notice was seen, so the run stops planning and
-	// goes to produce an answer with what it has.
-	Wrap bool `json:"wrap,omitempty"`
+	// Reserve records that the run crossed into its budget reserve, so it stops
+	// planning and goes to produce its terminal output with what it has.
+	//
+	// It is re-derived from Syscalls.LimitStatus() at the top of every Step, so a
+	// checkpoint written before this field existed (or by a build that names it
+	// differently) costs the run nothing: the same transition sets it again.
+	Reserve bool `json:"reserve,omitempty"`
+	// ReserveToolRounds counts how many times a call diverted to tools AFTER the
+	// run crossed into the reserve. It is counted separately from
+	// PlannerToolRounds, which is reset at every planning phase and so cannot say
+	// how much of the reserve is left.
+	ReserveToolRounds int `json:"reserve_tool_rounds,omitempty"`
 	// PendingCalls are the tool calls the planner asked for before deciding, and
 	// this run has not made yet. They are consumed one per transition.
 	PendingCalls []*gollem.FunctionCall `json:"pending_calls,omitempty"`
@@ -350,12 +359,12 @@ func (s *strategy[T]) Init(in Input) (state, error) {
 
 func (s *strategy[T]) Step(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
 	// A budget notice has to be TOLD to the run, not merely enforced against it:
-	// enforcement alone cuts it off mid-investigation with no answer. It is
-	// recorded on the state rather than acted on here, because the phase that can
-	// act may be several transitions away — a round waiting for its children
-	// cannot abandon them.
+	// enforcement alone cuts it off mid-investigation having neither performed the
+	// call its task needed nor said anything. It is recorded on the state rather
+	// than acted on here, because the phase that can act may be several
+	// transitions away — a round waiting for its children cannot abandon them.
 	if sys.LimitStatus().Kind() == agentkit.LimitKindNotice {
-		st.Wrap = true
+		st.Reserve = true
 	}
 
 	switch st.Phase {
@@ -379,7 +388,7 @@ func (s *strategy[T]) Step(ctx context.Context, sys agentkit.Syscalls, st state)
 
 // stepPlan makes the opening planner call and launches the first round.
 func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
-	if st.Wrap {
+	if st.Reserve {
 		// Nothing has been investigated, but the budget is already nearly gone.
 		// Answering from an empty trail beats spending the remainder on a plan
 		// that could never be executed.
@@ -483,6 +492,55 @@ const plannerToolRoundsMax = 4
 const plannerToolBudgetNotice = "You have used your tool allowance for this step. " +
 	"Do not call any more tools; continue now with what you already have."
 
+// reserveToolRoundsMax is how many tool rounds the budget reserve pays for: one.
+// The reserve is a tenth of the budget by default and has to cover this call, the
+// tool it makes and the terminal output that follows, so a second round would
+// leave nothing to write with.
+//
+// Like plannerToolRoundsMax it is a NUDGE, not a gate: divertToTools answers a
+// call made past it, because an unanswered function call breaks the conversation
+// for every later request.
+const reserveToolRoundsMax = 1
+
+// reserveInstruction is what the terminal call is told on the first transition
+// after the run crossed into its budget reserve.
+//
+// It names ONE action and offers no alternative. The conditional it replaced
+// ("if something is outstanding call it, otherwise write the output") handed the
+// planner a way to write a terminal output describing work it never performed,
+// which is the exact outcome the reserve exists to prevent.
+//
+// Only the terminal call ever sees it: stepPlan and stepReplan divert to
+// phaseFinal at their top when st.Reserve is set, without generating.
+const reserveInstruction = "This run has spent its working budget; only a small reserve is left. " +
+	"Do not start another investigation round. THIS turn is your final tool call: make the one call " +
+	"this turn still needs in order to take effect. Do not write the terminal output on this turn — " +
+	"the call's outcome comes back on the next turn, and that is where you write it."
+
+// reserveSpentInstruction is what the terminal call is told once the reserve's
+// one tool round has been spent. It asks for the output to be SHORT rather than
+// complete: what is left has to cover this call and nothing more.
+const reserveSpentInstruction = "The budget reserve is spent: you have already made your final " +
+	"tool call. Do not call any tool again. Write the terminal output now from the observations " +
+	"you already have, as briefly as it can be understood."
+
+// reserveMovesSpent reports whether the reserve's FIRST move is over, so the
+// terminal call must be asked for the output rather than for a tool call.
+//
+// Three things end it, and all three have to be here because the run only ever
+// gets one more terminal call:
+//
+//   - the tool round was taken (ReserveToolRounds);
+//   - the terminal output was already asked for and rejected (FinalRetries) —
+//     the retry's user turn says "re-emit the output correctly" while
+//     reserveInstruction says "do not write the terminal output on this turn",
+//     and a model cannot satisfy both;
+//   - the model answered the first move with nothing at all, which stepFinal
+//     records by spending the round (see the empty-body branch there).
+func reserveMovesSpent(st state) bool {
+	return st.ReserveToolRounds >= reserveToolRoundsMax || st.FinalRetries > 0
+}
+
 // divertToTools sends the run to the tool phase when the planner asked for tools
 // instead of deciding, and reports whether it did.
 //
@@ -500,6 +558,9 @@ func (s *strategy[T]) divertToTools(st state, res *agentkit.GenerateResult, from
 	st.PendingCalls = res.FunctionCalls
 	st.AfterTool = from
 	st.PlannerToolRounds++
+	if st.Reserve {
+		st.ReserveToolRounds++
+	}
 	st.Phase = phasePlannerTool
 	// The next planning call continues from the conversation, which by then carries
 	// the tool results; re-sending the original input would ask the same question
@@ -622,7 +683,7 @@ func (s *strategy[T]) stepCollect(ctx context.Context, sys agentkit.Syscalls, st
 
 // stepReplan asks the planner what to do with the observations so far.
 func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
-	if st.Wrap {
+	if st.Reserve {
 		st.Phase = phaseFinal
 		return st, agentkit.Continue[Output[T]](), nil
 	}
@@ -851,6 +912,17 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 
 	body := strings.Join(res.Texts, "\n")
 	if strings.TrimSpace(body) == "" {
+		// On the reserve's FIRST move an empty reply is the model OBEYING: it was
+		// told this turn is its final tool call and that it must not write the
+		// output yet, and it made no call. Ending here would spend the reserve on
+		// nothing and hand the host a fallback — the outcome this whole path exists
+		// to avoid. Spend the round and come back: the next terminal call carries
+		// reserveSpentInstruction, which asks for the output. Bounded, because that
+		// call is then past reserveMovesSpent and a second empty reply falls back.
+		if st.Reserve && !reserveMovesSpent(st) {
+			st.ReserveToolRounds = reserveToolRoundsMax
+			return st, agentkit.Continue[Output[T]](), nil
+		}
 		return st, agentkit.Done(Output[T]{
 			Kind:           OutputFallback,
 			FallbackReason: "the final response was empty",
@@ -1177,7 +1249,17 @@ func (s *strategy[T]) plannerPrompt(st state) (string, error) {
 	// The tool allowance is spent: say so here rather than as a user turn. The call
 	// that has to hear it is the one following the tool phase, and that call sends
 	// no user turn at all — it continues from the answered calls, see plannerInput.
-	if st.PlannerToolRounds >= plannerToolRoundsMax {
+	//
+	// Inside the reserve the reserve's own instruction REPLACES the allowance
+	// notice rather than joining it: the two would otherwise arrive together
+	// saying opposite things, one asking for the final call and the other
+	// forbidding any.
+	switch {
+	case st.Reserve && reserveMovesSpent(st):
+		prompt += "\n\n" + reserveSpentInstruction
+	case st.Reserve:
+		prompt += "\n\n" + reserveInstruction
+	case st.PlannerToolRounds >= plannerToolRoundsMax:
 		prompt += "\n\n" + plannerToolBudgetNotice
 	}
 	return prompt, nil

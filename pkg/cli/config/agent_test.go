@@ -39,8 +39,10 @@ func TestAgentDefaults(t *testing.T) {
 	gt.Bool(t, budgets.Root.MaxSteps > budgets.Task.MaxSteps*2).True()
 	gt.Value(t, budgets.Task.MaxInputTokens).Equal(int64(100_000))
 	gt.Value(t, budgets.Task.MaxOutputTokens).Equal(int64(20_000))
-	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.8)
-	gt.Value(t, budgets.Task.NoticeRatio).Equal(0.8)
+	// A tenth of the budget is held back as the reserve a run concludes out of:
+	// one tool call and the generate that writes the output from its result.
+	gt.Value(t, budgets.Root.NoticeRatio).Equal(0.9)
+	gt.Value(t, budgets.Task.NoticeRatio).Equal(0.9)
 
 	gt.NoError(t, cfg.ValidateWorker())
 	gt.Value(t, cfg.WorkerConcurrency()).Equal(8)
