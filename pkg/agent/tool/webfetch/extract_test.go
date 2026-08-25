@@ -70,7 +70,7 @@ func TestExtract(t *testing.T) {
 
 	// The URL was chosen by the model, so a body it cannot read is not an
 	// operator's defect. Without the tag the strategies file one Sentry issue
-	// per unreadable link (ARGUS-9F).
+	// per unreadable link.
 	t.Run("binary content type is rejected as a benign failure", func(t *testing.T) {
 		_, _, err := webfetch.ExtractForTest("application/octet-stream", []byte{0x00, 0x01})
 		gt.Error(t, err).Required()
