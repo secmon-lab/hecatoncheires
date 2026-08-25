@@ -181,10 +181,15 @@ func (s *strategy) stepGenerate(ctx context.Context, sys agentkit.Syscalls, st s
 	// It rides in the system prompt for this call, not as an input: the crossing
 	// happens mid-run, exactly when a turn is likely to be reporting tool results,
 	// and such a turn may carry nothing else.
-	inReserve := sys.LimitStatus().Kind() == agentkit.LimitKindNotice
+	// Read once and reuse: LimitStatus moves in lockstep with Metrics and is
+	// re-evaluated around every effect, so two reads either side of one are two
+	// different verdicts. Nothing between here and the increment below performs an
+	// effect today, and capturing keeps it that way if something later does.
+	notice := sys.LimitStatus()
+	inReserve := notice.Kind() == agentkit.LimitKindNotice
 	systemPrompt := st.SystemPrompt
 	if inReserve {
-		systemPrompt += "\n\n" + noticeInstruction(sys.LimitStatus().Message(), st.ReserveToolRounds)
+		systemPrompt += "\n\n" + noticeInstruction(notice.Message(), st.ReserveToolRounds)
 	}
 
 	opts := []agentkit.GenerateOption{agentkit.WithSystemPrompt(systemPrompt)}
