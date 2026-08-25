@@ -84,7 +84,7 @@ func TestNew(t *testing.T) {
 
 	// A search hit typed "database" is not readable by notion__get_page, and the
 	// model only learns that from these descriptions. Feeding one to the other is
-	// what produced a 400 per database found (ARGUS-91).
+	// what produced a 400 per database found.
 	t.Run("search and get_page send a database hit to get_database", func(t *testing.T) {
 		tools := notiontool.New(notiontool.Deps{Client: &fakeNotionClient{}})
 
@@ -100,7 +100,7 @@ func TestNew(t *testing.T) {
 
 func TestSearchTool(t *testing.T) {
 	// The type of a hit was already reported when the agent sent a database id to
-	// notion__get_page anyway (ARGUS-91), so each hit also names the tool that
+	// notion__get_page anyway, so each hit also names the tool that
 	// reads it.
 	t.Run("names the reading tool on every hit", func(t *testing.T) {
 		fake := &fakeNotionClient{searchResult: &notiontool.SearchResult{

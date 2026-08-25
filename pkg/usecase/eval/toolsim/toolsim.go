@@ -189,7 +189,7 @@ type notionSim struct {
 // notionSearchHits is the structured shape the simulator asks for so a scenario
 // whose background describes a database gets a hit typed "database". A search
 // that can only ever answer "page" cannot exercise the notion__get_database
-// path at all, which is the path ARGUS-91 was about.
+// path at all, which is the path the production failure was about.
 type notionSearchHits struct {
 	Items []struct {
 		Type  string `json:"type"`

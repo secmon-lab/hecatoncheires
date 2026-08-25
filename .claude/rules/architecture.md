@@ -564,7 +564,7 @@ error held in an unexported slice outside the `Unwrap` chain, so neither
 application. A model told only "expected array type" for a tool whose `creates` /
 `updates` / `archives` are all arrays cannot tell which one to repair, and
 re-emits the same call — which is what `memo__apply_memo_changes` did in
-production (ARGUS-8S).
+production.
 
 `toolArgsFeedbackMiddleware` (`pkg/agent/kernel/middleware.go`) supplies the
 missing half by stating the SHAPE of the arguments that were actually received;
@@ -621,7 +621,7 @@ chain as `message: message: message` while keeping everything attached with
 `goerr.V` outside that string. So the diagnostic half of a failure never reached
 the model: a Jira search rejected for a malformed JQL came back as "Jira API
 returned non-2xx", while Jira's own "Error in the JQL Query: Expecting either
-'OR' or 'AND' but got ..." sat in a `body` value only Sentry saw (ARGUS-96).
+'OR' or 'AND' but got ..." sat in a `body` value only Sentry saw.
 A model that cannot see why its query was refused re-emits the same query.
 
 `toolErrorValuesMiddleware` (`pkg/agent/kernel/middleware.go`) renders

@@ -283,7 +283,7 @@ type notionErrorBody struct {
 // where a database id belongs (the two are not interchangeable since Notion's
 // 2025-09-03 split), or one it invented. None of those is an operator's defect,
 // and the strategies report every tool failure to Sentry, so an agent probing a
-// wrong id files an issue per probe (ARGUS-9E). The model is unaffected: the
+// wrong id files an issue per probe. The model is unaffected: the
 // tag rides on the error, which is still returned and still fed back verbatim.
 // Every other status stays reportable — 401/403 name a token or sharing defect
 // an operator must fix, and 5xx names Notion being down.

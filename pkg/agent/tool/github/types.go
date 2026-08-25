@@ -31,7 +31,7 @@ var ErrNotFound = goerr.New("github resource not found")
 // out of reach it can correct the owner instead. One production turn spent
 // three parallel lookups on consecutive issue numbers under an owner that
 // named a team rather than a GitHub organization, and every one of them came
-// back as a bare "issue not found" (ARGUS-98).
+// back as a bare "issue not found".
 var errRepoNotAccessible = goerr.New("repository not accessible")
 
 // PullRequest represents a GitHub pull request with all comments and reviews.
