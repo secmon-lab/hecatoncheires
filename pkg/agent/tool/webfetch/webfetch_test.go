@@ -376,6 +376,10 @@ func TestClientAnalyzePDF(t *testing.T) {
 		for _, body := range [][]byte{[]byte("<html>403 Forbidden</html>"), {}, {0x25, 0x50}} {
 			_, _, _, err := c.AnalyzePDFForTest(context.Background(), body)
 			gt.Error(t, err).Required()
+			// A host that derives Content-Type from the URL extension answers a
+			// missing page this way, and the link was the model's choice — so this
+			// is not an operator's defect either.
+			gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
 		}
 		gt.Array(t, llm.NewSessionCalls()).Length(0)
 	})

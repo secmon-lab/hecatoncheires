@@ -185,11 +185,19 @@ func (c *Client) analyzeText(ctx context.Context, text string) (*analyzeResult, 
 // labels an error page application/pdf fails here rather than sending a
 // non-document to the provider. maxPDFBytes is passed through so the operator's
 // cap governs instead of gollem's 32MB default.
+//
+// That failure is tagged benign for the same reason the unsupported-type error
+// is: a server deriving Content-Type from the URL extension answers a missing
+// page with an HTML body labelled application/pdf, so a model-chosen link to
+// such a host would file one Sentry issue per attempt. What is lost is the
+// signal that a host is misconfigured; the failure still reaches the model and
+// the INFO log.
 func (c *Client) analyzePDF(ctx context.Context, data []byte) (*analyzeResult, error) {
 	pdf, err := gollem.NewPDF(data, gollem.WithMaxPDFSize(c.maxPDFBytes))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to build PDF input for webfetch analyze",
-			goerr.V("bytes", len(data)), goerr.V("max_pdf_bytes", c.maxPDFBytes))
+			goerr.V("bytes", len(data)), goerr.V("max_pdf_bytes", c.maxPDFBytes),
+			goerr.T(errutil.TagBenign))
 	}
 
 	return c.analyzeInputs(ctx, []gollem.Input{pdf})

@@ -243,10 +243,11 @@ Markdown. Two consequences for an operator:
   it needs one an order of magnitude above the text cap. A PDF over the cap is
   **refused** rather than truncated — a truncated PDF keeps its `%PDF-`
   signature, so the model would read a broken file as a complete one.
-- Two failures on this path are logged at `INFO` and **not** reported to Sentry:
-  a media type the tool cannot read, and a PDF over the cap. The URL was chosen
-  by the model, so neither is an operator's defect. See
-  [operations.md](operations.md) § What is not reported.
+- Three failures on this path are logged at `INFO` and **not** reported to
+  Sentry: a media type the tool cannot read, a PDF over the cap, and a body that
+  claims `application/pdf` but is not a PDF. The URL was chosen by the model, so
+  none of them is an operator's defect. See [operations.md](operations.md) §
+  What is not reported.
 
 Any other media type is still rejected, including a PDF a server labels
 `application/octet-stream` — the tool does not sniff a body's contents.

@@ -221,10 +221,12 @@ func TestFetchToolRunPDF(t *testing.T) {
 			Status:      http.StatusOK,
 			ContentType: "application/pdf",
 			Body:        []byte("<html>403</html>"),
-			AnalyzeErr:  goerr.New("invalid PDF format"),
+			AnalyzeErr:  goerr.New("invalid PDF format", goerr.T(errutil.TagBenign)),
 		}
 		_, err := runTool(t, f, map[string]any{"url": "https://example.com/fake.pdf"})
 		gt.Error(t, err).Required()
 		gt.Bool(t, f.AnalyzePDFCalled).True()
+		// The tag must survive the wrap Run adds around the analyze error.
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
 	})
 }
