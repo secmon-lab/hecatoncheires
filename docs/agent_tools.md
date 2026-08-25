@@ -235,6 +235,22 @@ interactive/investigation only.
 |------|-----|---------|-------|
 | `webfetch` | R | Fetch an HTTP(S) URL and return it as Markdown. | Blocks non-public IPs and screens the result for indirect prompt injection before returning it. Wired when a web-fetch client is configured. The HTTP status is returned rather than raised as an error. If extraction yields no text, the tool returns an empty `result` with the HTTP status without calling the analyzer. |
 
+An `application/pdf` response is sent to the screening model as a document
+rather than extracted to text, so the same call screens it and renders it to
+Markdown. Two consequences for an operator:
+
+- A PDF has its own size cap (`--webfetch-max-pdf-size`, default 2 MiB) because
+  it needs one an order of magnitude above the text cap. A PDF over the cap is
+  **refused** rather than truncated — a truncated PDF keeps its `%PDF-`
+  signature, so the model would read a broken file as a complete one.
+- Two failures on this path are logged at `INFO` and **not** reported to Sentry:
+  a media type the tool cannot read, and a PDF over the cap. The URL was chosen
+  by the model, so neither is an operator's defect. See
+  [operations.md](operations.md) § What is not reported.
+
+Any other media type is still rejected, including a PDF a server labels
+`application/octet-stream` — the tool does not sniff a body's contents.
+
 ### Planner metadata tools (`wsmeta`)
 
 Used **only** by the proposal (case-draft) flow — not by Jobs, the mention

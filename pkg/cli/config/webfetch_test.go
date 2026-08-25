@@ -32,6 +32,7 @@ func TestWebFetchDefaults(t *testing.T) {
 	s := w.Settings()
 	gt.Value(t, s.Timeout).Equal(10 * time.Second)
 	gt.Number(t, s.MaxBytes).Equal(int64(262144))
+	gt.Number(t, s.MaxPDFBytes).Equal(2097152)
 	gt.String(t, s.UserAgent).NotEqual("")
 	// The LLM client is injected by the usecase layer, not by config.
 	gt.Value(t, s.LLM).Nil()
@@ -43,10 +44,22 @@ func TestWebFetchExplicitFlags(t *testing.T) {
 		"--webfetch-enabled=false",
 		"--webfetch-timeout=5",
 		"--webfetch-max-size=2048",
+		"--webfetch-max-pdf-size=4096",
 	})
 	gt.Bool(t, w.IsEnabled()).False()
 
 	s := w.Settings()
 	gt.Value(t, s.Timeout).Equal(5 * time.Second)
 	gt.Number(t, s.MaxBytes).Equal(int64(2048))
+	gt.Number(t, s.MaxPDFBytes).Equal(4096)
+}
+
+func TestWebFetchEnvVars(t *testing.T) {
+	t.Setenv("HECATONCHEIRES_WEBFETCH_MAX_PDF_SIZE", "8192")
+	w := runWebFetchFlags(t, nil)
+
+	s := w.Settings()
+	gt.Number(t, s.MaxPDFBytes).Equal(8192)
+	// The other settings keep their defaults.
+	gt.Number(t, s.MaxBytes).Equal(int64(262144))
 }

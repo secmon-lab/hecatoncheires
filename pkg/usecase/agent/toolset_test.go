@@ -136,10 +136,11 @@ func TestToolSetResolver_ResolveWebFetch(t *testing.T) {
 		},
 	}
 	wfClient := webfetch.NewClient(webfetch.ClientConfig{
-		Timeout:   10 * time.Second,
-		MaxBytes:  1024,
-		UserAgent: "test",
-		LLM:       llm,
+		Timeout:     10 * time.Second,
+		MaxBytes:    1024,
+		MaxPDFBytes: 1024,
+		UserAgent:   "test",
+		LLM:         llm,
 	})
 
 	t.Run("webfetch ID resolves to the single tool", func(t *testing.T) {
