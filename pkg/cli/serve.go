@@ -166,6 +166,7 @@ func cmdServe() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var slackCfg config.Slack
+	var slackToolCfg config.SlackTool
 	var llmCfg config.LLM
 	var embCfg config.Embedding
 	var homeMsgCfg config.HomeMessageLLM
@@ -233,6 +234,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
+	flags = append(flags, slackToolCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, homeMsgCfg.Flags()...)
@@ -339,6 +341,17 @@ func cmdServe() *cli.Command {
 			} else {
 				logging.Default().Info("Notion API token not configured, Source features and Notion agent tools disabled")
 			}
+
+			// The Slack read tools' size bounds are installed unconditionally.
+			// They cost nothing when no Slack tool is wired, and putting them
+			// inside the bot-token branch below would make the flag silently
+			// inert in a deployment that reaches Slack only through the User
+			// OAuth Token.
+			if err := slackToolCfg.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid Slack agent tool configuration")
+			}
+			ucOpts = append(ucOpts, usecase.WithSlackToolLimits(slackToolCfg.Limits()))
+			logging.Default().Info("Slack agent tool limits configured", logAttrsToArgs(slackToolCfg.LogAttrs())...)
 
 			// Initialize Slack service for Source integration if bot token is provided
 			var slackSvc slack.Service
@@ -670,6 +683,7 @@ func cmdServe() *cli.Command {
 				WebFetch:       uc.WebFetchClient(),
 				SlackSearch:    uc.SlackSearchService(),
 				SlackRetriever: uc.SlackMessageRetriever(),
+				SlackLimits:    uc.SlackToolLimits(),
 				NotionTool:     uc.NotionToolClient(),
 				JiraTools:      jiraTools,
 				HistoryRepo:    agentHistoryRepo,

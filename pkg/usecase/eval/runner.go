@@ -102,6 +102,9 @@ type Config struct {
 	// pkg/agent/tool/jira). Live-only, like GitHub: nil/empty means jira_search
 	// scenarios cannot run live.
 	JiraTools []gollem.Tool
+	// SlackToolLimits bounds what a Slack read tool's result may inject into the
+	// model context, so a scenario runs against the same bounds serve applies.
+	SlackToolLimits slacktool.Limits
 }
 
 // Run executes the harness over the given paths and writes the summary to
@@ -219,6 +222,7 @@ func runOne(ctx context.Context, sc *scenario.Scenario, registry *driver.Registr
 		GitHub:          cfg.GitHub,
 		WebFetch:        cfg.WebFetch,
 		JiraTools:       cfg.JiraTools,
+		SlackToolLimits: cfg.SlackToolLimits,
 	})
 	if err != nil {
 		return errorResult(res, err)

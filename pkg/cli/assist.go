@@ -26,6 +26,7 @@ func cmdAssist() *cli.Command {
 	var llmCfg config.LLM
 	var embCfg config.Embedding
 	var agentCfg config.Agent
+	var slackToolCfg config.SlackTool
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -62,6 +63,7 @@ func cmdAssist() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, agentCfg.Flags()...)
+	flags = append(flags, slackToolCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "assist",
@@ -69,6 +71,10 @@ func cmdAssist() *cli.Command {
 		Usage:   "Run AI assist agent for all open cases across workspaces",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
+			if err := slackToolCfg.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid Slack agent tool configuration")
+			}
+
 			// Load workspace configurations and build registry
 			_, registry, err := appCfg.Configure(c)
 			if err != nil {
@@ -153,9 +159,13 @@ func cmdAssist() *cli.Command {
 				// had Notion / GitHub / Jira / WebFetch or the User-token Slack
 				// clients here, so the palette it resolves is unchanged.
 				Tools: agentkernel.ToolDeps{
-					Repo:         repo,
-					Registry:     registry,
-					SlackBot:     slackSvc,
+					Repo:     repo,
+					Registry: registry,
+					SlackBot: slackSvc,
+					// The Bot client alone binds slack__get_messages, so the
+					// assist agent reads Slack message text and needs the same
+					// bounds on it as every other host.
+					SlackLimits:  slackToolCfg.Limits(),
 					ActionUC:     usecase.NewActionToolAdapter(uc.Action),
 					ActionStepUC: usecase.NewActionStepToolAdapter(uc.ActionStep),
 					CaseRefUC:    uc.Case,

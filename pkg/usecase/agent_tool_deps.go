@@ -31,6 +31,7 @@ func (uc *UseCases) AgentToolDeps() agentkernel.ToolDeps {
 		SlackPoster:       NewSlackPoster(uc.slackService),
 		SlackSearch:       uc.slackSearch,
 		SlackRetriever:    uc.slackRetriever,
+		SlackLimits:       uc.slackToolLimits,
 		NotionClient:      uc.notionTool,
 		GitHubClient:      uc.githubClient,
 		WebFetchClient:    uc.webfetchClient,

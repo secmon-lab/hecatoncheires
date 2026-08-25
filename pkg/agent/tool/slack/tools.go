@@ -40,6 +40,11 @@ type Deps struct {
 	// ChannelID is the Slack channel the case is bound to and is used by the
 	// post-message tool. Empty disables it.
 	ChannelID string
+
+	// Limits bounds how much of a read tool's result reaches the model context.
+	// The zero value leaves both bounds disabled; the caller (pkg/cli/config)
+	// owns the defaults.
+	Limits Limits
 }
 
 // NewReadOnly returns the read-only Slack tools (search, bulk get) — both safe
@@ -48,10 +53,10 @@ type Deps struct {
 func NewReadOnly(deps Deps) []gollem.Tool {
 	var tools []gollem.Tool
 	if deps.Search != nil {
-		tools = append(tools, &searchMessagesTool{search: deps.Search})
+		tools = append(tools, &searchMessagesTool{search: deps.Search, limits: deps.Limits})
 	}
 	if deps.Bot != nil {
-		tools = append(tools, &getMessagesTool{slack: deps.Bot, retriever: deps.Retriever})
+		tools = append(tools, &getMessagesTool{slack: deps.Bot, retriever: deps.Retriever, limits: deps.Limits})
 	}
 	return tools
 }

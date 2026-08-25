@@ -188,6 +188,7 @@ func buildTickRuntime(
 		SlackService:   integrations.slack,
 		SlackSearch:    uc.SlackSearchService(),
 		SlackRetriever: uc.SlackMessageRetriever(),
+		SlackLimits:    uc.SlackToolLimits(),
 		NotionTool:     uc.NotionToolClient(),
 		JiraTools:      integrations.jiraTools,
 		Durable:        durable.Runtime,
@@ -223,9 +224,13 @@ func buildTickRuntime(
 // agent.KnownToolSetIDsJob withholds the github toolset from an unattended run
 // on purpose. Configuring a GitHub client here would build one no Job can reach.
 type tickIntegrationConfigs struct {
-	Slack    *config.Slack
-	Jira     *config.Jira
-	WebFetch *config.WebFetch
+	Slack *config.Slack
+	// SlackTool bounds what a Slack read tool's result may inject into the model
+	// context. It is required for the same reason the others are: a sweep that
+	// left it out would run the Slack reads unbounded while serve bounded them.
+	SlackTool *config.SlackTool
+	Jira      *config.Jira
+	WebFetch  *config.WebFetch
 	// NotionToken backs both the Source service and the notion__* agent tools,
 	// exactly as it does in serve. Empty disables both.
 	NotionToken string
@@ -240,6 +245,12 @@ type tickIntegrationConfigs struct {
 func (c tickIntegrationConfigs) Validate() error {
 	if c.Slack == nil {
 		return goerr.New("slack configuration is required")
+	}
+	if c.SlackTool == nil {
+		return goerr.New("slack agent tool configuration is required")
+	}
+	if err := c.SlackTool.Validate(); err != nil {
+		return err
 	}
 	if c.Jira == nil {
 		return goerr.New("jira configuration is required")
@@ -275,7 +286,12 @@ func configureTickIntegrations(ctx context.Context, cfg tickIntegrationConfigs) 
 	if err := cfg.Validate(); err != nil {
 		return tickIntegrations{}, goerr.Wrap(err, "invalid sweep integration configuration")
 	}
-	out := tickIntegrations{ucOpts: []usecase.Option{usecase.WithBaseURL(cfg.BaseURL)}}
+	out := tickIntegrations{ucOpts: []usecase.Option{
+		usecase.WithBaseURL(cfg.BaseURL),
+		// Installed unconditionally, like serve: the bounds must hold wherever
+		// the Slack read tools exist, and which token wired them is irrelevant.
+		usecase.WithSlackToolLimits(cfg.SlackTool.Limits()),
+	}}
 	if cfg.BaseURL == "" {
 		logging.Default().Warn("Base URL not configured; Slack messages a scheduled run posts will carry no link back to the web UI")
 	}
@@ -501,6 +517,10 @@ type jobRuntimeDeps struct {
 	SlackSearch    slacktool.SearchService    // slack__search_messages
 	SlackRetriever slacktool.MessageRetriever // slack__get_messages via User token
 	NotionTool     notiontool.Client          // notion__search / notion__get_page / notion__get_database
+
+	// SlackLimits bounds how much of a Slack read tool's result reaches the
+	// model context (see config.SlackTool). The zero value disables both bounds.
+	SlackLimits slacktool.Limits
 
 	// JiraTools carries the already-expanded Jira read tools (see
 	// pkg/agent/tool/jira). Unlike NotionTool this is not a client type:
@@ -784,6 +804,7 @@ func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case,
 		Bot:       deps.SlackService,
 		Search:    deps.SlackSearch,
 		Retriever: deps.SlackRetriever,
+		Limits:    deps.SlackLimits,
 	})...)
 	// Notion read-only tools (notion__search / notion__get_page /
 	// notion__get_database). New returns no tool when the client is nil, so this

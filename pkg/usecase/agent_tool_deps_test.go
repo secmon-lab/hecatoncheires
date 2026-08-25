@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/gt"
 
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -28,7 +29,7 @@ type stubSlackService struct{ slacksvc.Service }
 // an unset struct field, so this test is the check.
 var knownToolDepFields = []string{
 	"Repo", "Registry",
-	"SlackBot", "SlackSearch", "SlackRetriever", "SlackPoster",
+	"SlackBot", "SlackSearch", "SlackRetriever", "SlackPoster", "SlackLimits",
 	"NotionClient", "GitHubClient", "WebFetchClient", "JiraTools",
 	"ActionUC", "ActionStepUC", "CaseUC", "CaseRefUC",
 	"CaseMultiUC", "CaseMultiActionUC", "MemoUC",
@@ -80,6 +81,25 @@ func TestAgentToolDeps_SlackPosterFollowsTheSlackService(t *testing.T) {
 
 	withoutSlack := usecase.New(memory.New(), model.NewWorkspaceRegistry())
 	gt.Value(t, withoutSlack.AgentToolDeps().SlackPoster).Nil()
+}
+
+// The Slack read tools' size bounds must reach the tool factory unchanged. They
+// are a value, not a client, so the "is it nil" checks above cannot catch a
+// wiring that drops them — a lost bound leaves the tools unbounded with no other
+// symptom than a large bill.
+func TestAgentToolDeps_CarriesTheSlackToolLimits(t *testing.T) {
+	uc := usecase.New(memory.New(), model.NewWorkspaceRegistry(),
+		usecase.WithSlackToolLimits(slacktool.Limits{MaxTextBytes: 512, MaxResultBytes: 2048}),
+	)
+	deps := uc.AgentToolDeps()
+	gt.Number(t, deps.SlackLimits.MaxTextBytes).Equal(512)
+	gt.Number(t, deps.SlackLimits.MaxResultBytes).Equal(2048)
+
+	// Without the option the bounds are the zero value, which the tools read as
+	// "disabled" — the CLI flags own the defaults, not this package.
+	bare := usecase.New(memory.New(), model.NewWorkspaceRegistry())
+	gt.Number(t, bare.AgentToolDeps().SlackLimits.MaxTextBytes).Equal(0)
+	gt.Number(t, bare.AgentToolDeps().SlackLimits.MaxResultBytes).Equal(0)
 }
 
 // A nil service must produce a nil INTERFACE, not a wrapper holding nil: the

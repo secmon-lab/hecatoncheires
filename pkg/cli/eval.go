@@ -24,22 +24,23 @@ const evalDefaultBudgetUSD = 20.0
 
 func cmdEval() *cli.Command {
 	var (
-		appCfg      config.AppConfig
-		llmCfg      config.LLM
-		slackCfg    config.Slack
-		githubCfg   config.GitHub
-		jiraCfg     config.Jira
-		webfetchCfg config.WebFetch
-		notionTok   string
-		reportPath  string
-		dumpDir     string
-		dumpAll     bool
-		dryRun      bool
-		listTools   bool
-		quiet       bool
-		verbose     bool
-		langStr     string
-		concurrency int
+		appCfg       config.AppConfig
+		llmCfg       config.LLM
+		slackCfg     config.Slack
+		slackToolCfg config.SlackTool
+		githubCfg    config.GitHub
+		jiraCfg      config.Jira
+		webfetchCfg  config.WebFetch
+		notionTok    string
+		reportPath   string
+		dumpDir      string
+		dumpAll      bool
+		dryRun       bool
+		listTools    bool
+		quiet        bool
+		verbose      bool
+		langStr      string
+		concurrency  int
 	)
 
 	flags := []cli.Flag{
@@ -68,6 +69,7 @@ func cmdEval() *cli.Command {
 	flags = append(flags, appCfg.GlobalConfigFlags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
+	flags = append(flags, slackToolCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 	flags = append(flags, jiraCfg.Flags()...)
 	flags = append(flags, webfetchCfg.Flags()...)
@@ -96,6 +98,10 @@ func cmdEval() *cli.Command {
 				return goerr.New("at least one scenario file or directory is required")
 			}
 
+			if err := slackToolCfg.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid Slack agent tool configuration")
+			}
+
 			cfg := eval.Config{
 				Concurrency: concurrency,
 				DryRun:      dryRun,
@@ -105,6 +111,9 @@ func cmdEval() *cli.Command {
 				ReportPath:  reportPath,
 				Quiet:       quiet,
 				Verbose:     verbose,
+				// Applies to simulated and live Slack tools alike: a scenario
+				// must see the same bounds a deployed run would.
+				SlackToolLimits: slackToolCfg.Limits(),
 			}
 
 			if !dryRun {
