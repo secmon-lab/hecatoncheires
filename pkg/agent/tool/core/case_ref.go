@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -200,8 +201,9 @@ func extractRequiredString(args map[string]any, key string) (string, error) {
 }
 
 // extractInt64Slice reads a required array of integers. gollem decodes arrays
-// as []any whose elements are float64 / int, but concrete []int64 / []int are
-// also accepted so non-LLM callers and tests need not box every element.
+// as []any whose elements are float64 / json.Number / int, but concrete
+// []int64 / []int are also accepted so non-LLM callers and tests need not box
+// every element.
 func extractInt64Slice(args map[string]any, key string) ([]int64, error) {
 	v, ok := args[key]
 	if !ok || v == nil {
@@ -226,6 +228,14 @@ func extractInt64Slice(args map[string]any, key string) ([]int64, error) {
 				out = append(out, n)
 			case float64:
 				out = append(out, int64(n))
+			case json.Number:
+				// Kept as json.Number by gollem when a float64 cannot hold the
+				// literal exactly, which for an id means it is out of range.
+				id, err := n.Int64()
+				if err != nil {
+					return nil, fmt.Errorf("%s[%d] must be an integer, got %q: %w", key, i, n.String(), err)
+				}
+				out = append(out, id)
 			default:
 				return nil, fmt.Errorf("%s[%d] must be an integer, got %T", key, i, item)
 			}

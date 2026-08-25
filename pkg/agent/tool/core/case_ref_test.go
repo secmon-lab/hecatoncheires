@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -162,6 +163,40 @@ func TestGetReferenceableCasesTool(t *testing.T) {
 		notFound := result["not_found"].([]int64)
 		gt.Array(t, notFound).Length(1).Required()
 		gt.Value(t, notFound[0]).Equal(int64(99))
+	})
+
+	// gollem decodes a JSON number into a float64 only when that is lossless and
+	// keeps it as a json.Number otherwise, so an id array can mix both types.
+	t.Run("accepts json.Number ids alongside float64 ones", func(t *testing.T) {
+		var gotIDs []int64
+		reader := &mockCaseRefReader{
+			refWSFn: func(_, _ string) (string, error) { return "incident-response", nil },
+			getFn: func(_ context.Context, _ string, ids []int64) ([]*model.Case, error) {
+				gotIDs = ids
+				return nil, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, CaseRefUC: reader})
+
+		_, err := findTool(tools, "core__get_referenceable_cases").Run(ctx, map[string]any{
+			"field_id": "related_incident",
+			"ids":      []any{float64(42), json.Number("9007199254740993")},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, gotIDs).Equal([]int64{42, 9007199254740993})
+	})
+
+	t.Run("rejects a json.Number id outside int64 range", func(t *testing.T) {
+		reader := &mockCaseRefReader{
+			refWSFn: func(_, _ string) (string, error) { return "incident-response", nil },
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, CaseRefUC: reader})
+
+		_, err := findTool(tools, "core__get_referenceable_cases").Run(ctx, map[string]any{
+			"field_id": "related_incident",
+			"ids":      []any{json.Number("99999999999999999999")},
+		})
+		gt.Error(t, err)
 	})
 
 	t.Run("errors when ids is missing", func(t *testing.T) {

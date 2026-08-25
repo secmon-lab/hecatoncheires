@@ -3,6 +3,7 @@ package memo_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -1058,14 +1059,22 @@ func TestListMemosTool_OffsetBeyondTotal(t *testing.T) {
 
 // TestListMemosTool_OffsetOutOfRange pins the narrowing rule: an offset far past
 // the end must yield an empty page, never wrap around to the first one. The
-// float64 cases are the ones a model can actually produce — gollem decodes JSON
-// numbers as float64 (see tool.ExtractInt64), and converting an out-of-range
-// float64 to int64 is implementation-defined, so an unchecked conversion can
-// land on a negative value and silently return page 1.
+// float64 and json.Number cases are the ones a model can actually produce —
+// gollem decodes a JSON number as a float64 when that is lossless and keeps it
+// as a json.Number otherwise (see tool.ExtractInt64) — and converting an
+// out-of-range float64 to int64 is implementation-defined, so an unchecked
+// conversion can land on a negative value and silently return page 1.
 func TestListMemosTool_OffsetOutOfRange(t *testing.T) {
 	list := listToolWithSeries(t, 5)
 
-	for _, offset := range []any{int64(math.MaxInt64), float64(math.MaxInt64), 1e300} {
+	for _, offset := range []any{
+		int64(math.MaxInt64),
+		float64(math.MaxInt64),
+		1e300,
+		json.Number("9223372036854775807"),
+		json.Number("99999999999999999999999999"),
+		json.Number("1e300"),
+	} {
 		res, items := runList(t, list, map[string]any{"offset": offset})
 		gt.Array(t, items).Length(0)
 		gt.Value(t, res["offset"]).Equal(5)
@@ -1079,11 +1088,33 @@ func TestListMemosTool_OffsetOutOfRange(t *testing.T) {
 func TestListMemosTool_LimitOutOfRange(t *testing.T) {
 	list := listToolWithSeries(t, 55)
 
-	for _, limit := range []any{int64(math.MaxInt64), float64(math.MaxInt64), 1e300} {
+	for _, limit := range []any{
+		int64(math.MaxInt64),
+		float64(math.MaxInt64),
+		1e300,
+		json.Number("9223372036854775807"),
+		json.Number("99999999999999999999999999"),
+		json.Number("1e300"),
+	} {
 		_, items := runList(t, list, map[string]any{"limit": limit})
 		gt.Array(t, items).Length(50).Required()
 		gt.Value(t, memoTitles(items)).Equal(descTitles(54, 50))
 	}
+}
+
+// TestListMemosTool_JSONNumberIsHonoured covers the in-range half of the type
+// gollem hands over for a number a float64 cannot hold exactly: a json.Number
+// that does fit an int64 must be used, not saturated and not rejected.
+func TestListMemosTool_JSONNumberIsHonoured(t *testing.T) {
+	list := listToolWithSeries(t, 25)
+
+	res, items := runList(t, list, map[string]any{
+		"limit":  json.Number("3"),
+		"offset": json.Number("2"),
+	})
+	gt.Array(t, items).Length(3).Required()
+	gt.Value(t, memoTitles(items)).Equal(descTitles(22, 3))
+	gt.Value(t, res["offset"]).Equal(2)
 }
 
 func TestListMemosTool_RejectsInvalidLimit(t *testing.T) {

@@ -510,8 +510,11 @@ func describeArgs(args map[string]any) string {
 }
 
 // describeValue names the JSON shape of v and never its value. The numeric cases
-// list the concrete types a decoded tool call can hold: encoding/json produces
-// float64, and a hand-built call in a test may hold any of the others.
+// list the concrete types a decoded tool call can hold: gollem produces float64,
+// or json.Number for a literal a float64 cannot hold exactly, and a hand-built
+// call in a test may hold any of the others. json.Number must stay on the number
+// case — this string is the shape reported back to the model, and a Go type name
+// is not a JSON shape it can act on.
 func describeValue(v any, depth int) string {
 	switch t := v.(type) {
 	case nil:
@@ -520,7 +523,7 @@ func describeValue(v any, depth int) string {
 		return "string"
 	case bool:
 		return "boolean"
-	case float64, float32, int, int64:
+	case float64, float32, int, int64, json.Number:
 		return "number"
 	case []any:
 		return describeArray(t, depth)

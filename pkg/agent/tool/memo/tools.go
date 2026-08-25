@@ -7,6 +7,7 @@ package memo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -220,13 +221,18 @@ func (t *listMemosTool) Run(ctx context.Context, args map[string]any) (map[strin
 // parameter, the same tolerance optionalTime already applies. Deciding what an
 // unset or out-of-range count means is the caller's job, not this helper's.
 //
-// An out-of-range float64 is saturated here instead of being handed to
-// tool.ExtractInt64. gollem decodes JSON numbers as float64, and converting an
-// out-of-range float64 to int64 is implementation-defined: on amd64 a huge
-// positive value lands on a negative int64, which would turn a far-past-the-end
-// offset back into the first page and an enormous limit back into the default.
-// Saturating preserves the sign, so an out-of-range request keeps meaning "past
-// the end" / "more than the maximum" on every target.
+// An out-of-range number is saturated here instead of being handed to
+// tool.ExtractInt64. Converting an out-of-range float64 to int64 is
+// implementation-defined: on amd64 a huge positive value lands on a negative
+// int64, which would turn a far-past-the-end offset back into the first page
+// and an enormous limit back into the default. Saturating preserves the sign,
+// so an out-of-range request keeps meaning "past the end" / "more than the
+// maximum" on every target.
+//
+// Both decoded number types are handled, because gollem keeps a literal that a
+// float64 cannot hold exactly as a json.Number (internal/jsonutil) — which is
+// precisely the out-of-range case this saturation exists for. Reading only
+// float64 would let such a value fall through to tool.ExtractInt64 and fail.
 func optionalCount(args map[string]any, key string) (int64, bool, error) {
 	v, ok := args[key]
 	if !ok || v == nil {
@@ -234,6 +240,20 @@ func optionalCount(args map[string]any, key string) (int64, bool, error) {
 	}
 	if s, isString := v.(string); isString && s == "" {
 		return 0, false, nil
+	}
+	if num, isNumber := v.(json.Number); isNumber {
+		if i, err := num.Int64(); err == nil {
+			return i, true, nil
+		}
+		// JSON guarantees the literal is a syntactically valid number, so
+		// Float64 fails only on overflow — and returns ±Inf with the error,
+		// which the saturation below turns back into "past the end" /
+		// "more than the maximum".
+		f, err := num.Float64()
+		if err != nil && !math.IsInf(f, 0) {
+			return 0, false, goerr.Wrap(err, key+" must be an integer", goerr.V(key, num.String()))
+		}
+		v = f
 	}
 	if f, isFloat := v.(float64); isFloat {
 		switch {
@@ -244,6 +264,7 @@ func optionalCount(args map[string]any, key string) (int64, bool, error) {
 		case f < math.MinInt64:
 			return math.MinInt64, true, nil
 		}
+		return int64(f), true, nil
 	}
 	n, err := tool.ExtractInt64(args, key)
 	if err != nil {

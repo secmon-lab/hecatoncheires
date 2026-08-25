@@ -2,6 +2,7 @@ package knowledge_test
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -202,6 +203,28 @@ func TestSearchToolRun(t *testing.T) {
 	gt.Bool(t, ok).True()
 	gt.Array(t, tagIDs).Length(1).Required()
 	gt.String(t, tagIDs[0]).Equal(string(tagID1))
+}
+
+// TestSearchToolLimitTypes pins that every numeric type gollem can hand over is
+// honoured. A json.Number appears for a literal a float64 cannot hold exactly;
+// read through a float64 assertion alone it was silently dropped back to the
+// default, giving the model no feedback that its limit was ignored.
+func TestSearchToolLimitTypes(t *testing.T) {
+	for name, limit := range map[string]any{
+		"float64":     float64(5),
+		"int":         5,
+		"json.Number": json.Number("5"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			acc := &fakeAccessor{}
+			tools := knowledgetool.NewReadOnly(knowledgetool.Deps{WorkspaceID: "ws", Accessor: acc})
+			tl := findTool(t, tools, "knowledge__search_knowledge")
+
+			_, err := tl.Run(context.Background(), map[string]any{"query": "github", "limit": limit})
+			gt.NoError(t, err).Required()
+			gt.Number(t, acc.lastLimit).Equal(5)
+		})
+	}
 }
 
 func TestSearchToolRequiresQuery(t *testing.T) {
