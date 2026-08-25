@@ -839,6 +839,13 @@ func TestRejectedArgumentsAreDescribedByShapeNotByValue(t *testing.T) {
 			args: map[string]any{"count": 3.0, "flag": true, "title": "a secret memo title"},
 			want: "count=number, flag=boolean, title=string",
 		},
+		// gollem keeps a literal a float64 cannot hold exactly as a json.Number,
+		// and this line is the shape the model is asked to repair — a Go type
+		// name is not a JSON shape it can act on.
+		"a json.Number is a number, not its Go type": {
+			args: map[string]any{"case_id": json.Number("9007199254740993")},
+			want: "case_id=number",
+		},
 		"an array reports its length and its element shape": {
 			args: map[string]any{"archives": []any{"id-1", "id-2"}},
 			want: "archives=array[2] of string",

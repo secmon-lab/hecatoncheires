@@ -146,10 +146,11 @@ func (t *searchKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 		return nil, err
 	}
 	limit := defaultSearchLimit
-	if v, ok := args["limit"]; ok && v != nil {
-		if f, ok := v.(float64); ok && int(f) > 0 {
-			limit = int(f)
-		}
+	// Read through tool.ExtractInt64 rather than a float64 assertion: gollem
+	// keeps a number a float64 cannot hold exactly as a json.Number, which an
+	// inline assertion drops back to the default with no feedback to the model.
+	if n, err := tool.ExtractInt64(args, "limit"); err == nil && n > 0 {
+		limit = int(n)
 	}
 	items, err := t.deps.Accessor.SearchKnowledge(ctx, t.deps.WorkspaceID, query, tagIDs, limit)
 	if err != nil {
