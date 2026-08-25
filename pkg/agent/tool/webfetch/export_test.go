@@ -15,6 +15,7 @@ var (
 	ExtractForTest            = extract
 	CollapseWhitespaceForTest = collapseWhitespace
 	IsBlockedIPForTest        = isBlockedIP
+	IsPDFContentTypeForTest   = isPDFContentType
 )
 
 // FetchForTest exposes the unexported fetch method.
@@ -22,12 +23,20 @@ func (c *Client) FetchForTest(ctx context.Context, rawURL string) (int, string, 
 	return c.fetch(ctx, rawURL)
 }
 
-// AnalyzeForTest exposes the unexported analyze method, flattening the
+// AnalyzeTextForTest exposes the unexported analyzeText method, flattening the
 // unexported analyzeResult into plain values for assertions.
-func (c *Client) AnalyzeForTest(ctx context.Context, text string) (malicious bool, reason, markdown string, err error) {
-	r, aErr := c.analyze(ctx, text)
-	if aErr != nil {
-		return false, "", "", aErr
+func (c *Client) AnalyzeTextForTest(ctx context.Context, text string) (malicious bool, reason, markdown string, err error) {
+	return flattenAnalyze(c.analyzeText(ctx, text))
+}
+
+// AnalyzePDFForTest exposes the unexported analyzePDF method.
+func (c *Client) AnalyzePDFForTest(ctx context.Context, data []byte) (malicious bool, reason, markdown string, err error) {
+	return flattenAnalyze(c.analyzePDF(ctx, data))
+}
+
+func flattenAnalyze(r *analyzeResult, err error) (bool, string, string, error) {
+	if err != nil {
+		return false, "", "", err
 	}
 	return r.Malicious, r.Reason, r.Markdown, nil
 }
@@ -47,10 +56,14 @@ type FakeFetchClient struct {
 	Markdown   string
 	AnalyzeErr error
 
-	// LastAnalyzeText records the text passed to analyze for assertions.
+	// LastAnalyzeText records the text passed to analyzeText for assertions.
 	LastAnalyzeText string
-	// AnalyzeCalled records whether analyze was invoked.
+	// LastAnalyzePDF records the bytes passed to analyzePDF for assertions.
+	LastAnalyzePDF []byte
+	// AnalyzeCalled records whether either analyze method was invoked.
 	AnalyzeCalled bool
+	// AnalyzePDFCalled records whether the PDF path was taken.
+	AnalyzePDFCalled bool
 }
 
 func (f *FakeFetchClient) fetch(_ context.Context, _ string) (int, string, []byte, bool, error) {
@@ -60,9 +73,20 @@ func (f *FakeFetchClient) fetch(_ context.Context, _ string) (int, string, []byt
 	return f.Status, f.ContentType, f.Body, f.Truncated, nil
 }
 
-func (f *FakeFetchClient) analyze(_ context.Context, text string) (*analyzeResult, error) {
+func (f *FakeFetchClient) analyzeText(_ context.Context, text string) (*analyzeResult, error) {
 	f.AnalyzeCalled = true
 	f.LastAnalyzeText = text
+	return f.analyzeResponse()
+}
+
+func (f *FakeFetchClient) analyzePDF(_ context.Context, data []byte) (*analyzeResult, error) {
+	f.AnalyzeCalled = true
+	f.AnalyzePDFCalled = true
+	f.LastAnalyzePDF = data
+	return f.analyzeResponse()
+}
+
+func (f *FakeFetchClient) analyzeResponse() (*analyzeResult, error) {
 	if f.AnalyzeErr != nil {
 		return nil, f.AnalyzeErr
 	}

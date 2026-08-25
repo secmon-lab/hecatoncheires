@@ -9,6 +9,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // New returns the webfetch-backed agent tools. It returns nil (the tool is not
@@ -27,7 +28,8 @@ func New(client *Client) []gollem.Tool {
 // newTools directly.
 type fetchClient interface {
 	fetch(ctx context.Context, rawURL string) (status int, contentType string, body []byte, truncated bool, err error)
-	analyze(ctx context.Context, text string) (*analyzeResult, error)
+	analyzeText(ctx context.Context, text string) (*analyzeResult, error)
+	analyzePDF(ctx context.Context, data []byte) (*analyzeResult, error)
 }
 
 func newTools(c fetchClient) []gollem.Tool {
@@ -41,7 +43,7 @@ type fetchTool struct {
 func (t *fetchTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "webfetch",
-		Description: "Fetch a web page over HTTP(S) and return its body reformatted as Markdown. The body is screened for indirect prompt injection before it is returned; if injection is detected the call fails instead of returning the content. Connections to non-public IP addresses are blocked.",
+		Description: "Fetch a web page or PDF over HTTP(S) and return its body reformatted as Markdown. The body is screened for indirect prompt injection before it is returned; if injection is detected the call fails instead of returning the content. Connections to non-public IP addresses are blocked.",
 		Parameters: map[string]*gollem.Parameter{
 			"url": {
 				Type:        gollem.TypeString,
@@ -79,31 +81,50 @@ func (t *fetchTool) Run(ctx context.Context, args map[string]any) (map[string]an
 		return nil, err
 	}
 
-	text, _, err := extract(contentType, body)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to extract body", goerr.V("url", rawURL))
-	}
+	var result *analyzeResult
+	if isPDFContentType(contentType) {
+		// A truncated PDF is a broken file, not a shorter one — and it keeps the
+		// %PDF- signature, so nothing downstream would catch it. Handing that to
+		// the model produces the least visible failure available ("read it, but
+		// the content was incomplete"), so refuse instead. Benign for the same
+		// reason as the unsupported-type error in extract: the model chose the
+		// URL.
+		if truncated {
+			return nil, goerr.New("pdf exceeds the webfetch size limit",
+				goerr.V("url", rawURL), goerr.V("content_type", contentType),
+				goerr.V("bytes", len(body)), goerr.T(errutil.TagBenign))
+		}
+		if len(body) == 0 {
+			return emptyResult(rawURL, status, contentType, truncated), nil
+		}
 
-	// A body that renders to nothing — a WAF 403 page whose markup is all
-	// script, a zero-length response — has no content to screen, and handing it
-	// to analyze is a hard failure rather than an empty verdict: the provider
-	// drops an empty text block, so the request carries no message at all and is
-	// rejected (400 invalid_request_error). Report the empty result with the
-	// status instead, matching how fetch already leaves non-2xx for the agent to
-	// reason about.
-	if strings.TrimSpace(text) == "" {
-		return map[string]any{
-			"result":       "",
-			"url":          rawURL,
-			"status":       status,
-			"content_type": contentType,
-			"truncated":    truncated,
-		}, nil
-	}
+		r, err := t.client.analyzePDF(ctx, body)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to analyze pdf", goerr.V("url", rawURL))
+		}
+		result = r
+	} else {
+		text, _, err := extract(contentType, body)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to extract body", goerr.V("url", rawURL))
+		}
 
-	result, err := t.client.analyze(ctx, text)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to analyze body", goerr.V("url", rawURL))
+		// A body that renders to nothing — a WAF 403 page whose markup is all
+		// script, a zero-length response — has no content to screen, and handing
+		// it to analyze is a hard failure rather than an empty verdict: the
+		// provider drops an empty text block, so the request carries no message at
+		// all and is rejected (400 invalid_request_error). Report the empty result
+		// with the status instead, matching how fetch already leaves non-2xx for
+		// the agent to reason about.
+		if strings.TrimSpace(text) == "" {
+			return emptyResult(rawURL, status, contentType, truncated), nil
+		}
+
+		r, err := t.client.analyzeText(ctx, text)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to analyze body", goerr.V("url", rawURL))
+		}
+		result = r
 	}
 	if result.Malicious {
 		// reason reaches the calling agent, because a failed tool call's goerr
@@ -125,4 +146,17 @@ func (t *fetchTool) Run(ctx context.Context, args map[string]any) (map[string]an
 		"content_type": contentType,
 		"truncated":    truncated,
 	}, nil
+}
+
+// emptyResult is the reply for a fetch that returned nothing to screen. It
+// carries the HTTP status so the agent can tell "the page is empty" from "the
+// server refused".
+func emptyResult(rawURL string, status int, contentType string, truncated bool) map[string]any {
+	return map[string]any{
+		"result":       "",
+		"url":          rawURL,
+		"status":       status,
+		"content_type": contentType,
+		"truncated":    truncated,
+	}
 }

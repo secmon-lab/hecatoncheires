@@ -17,9 +17,10 @@ const webFetchUserAgent = "hecatoncheires-webfetch/1.0 (+https://github.com/secm
 // client (used for injection screening + Markdown formatting) is NOT held here:
 // it lives in the usecase layer and is injected when the client is built.
 type WebFetch struct {
-	enabled    bool
-	timeoutSec int
-	maxBytes   int
+	enabled     bool
+	timeoutSec  int
+	maxBytes    int
+	maxPDFBytes int
 }
 
 // Flags returns CLI flags for the webfetch tool.
@@ -49,6 +50,16 @@ func (w *WebFetch) Flags() []cli.Flag {
 			Sources:     cli.EnvVars("HECATONCHEIRES_WEBFETCH_MAX_SIZE"),
 			Destination: &w.maxBytes,
 		},
+		&cli.IntFlag{
+			Name:  "webfetch-max-pdf-size",
+			Usage: "webfetch maximum PDF response size in bytes (a larger PDF is refused, not truncated)",
+			// 2 MiB: covers the guideline / advisory PDFs an agent cites, while
+			// bounding cost — a PDF page runs roughly 1.5k-3k tokens, so a much
+			// larger file would not fit a single model context anyway.
+			Value:       2097152,
+			Sources:     cli.EnvVars("HECATONCHEIRES_WEBFETCH_MAX_PDF_SIZE"),
+			Destination: &w.maxPDFBytes,
+		},
 	}
 }
 
@@ -58,6 +69,7 @@ func (w *WebFetch) LogAttrs() []slog.Attr {
 		slog.Bool("enabled", w.enabled),
 		slog.Int("timeout_sec", w.timeoutSec),
 		slog.Int("max_bytes", w.maxBytes),
+		slog.Int("max_pdf_bytes", w.maxPDFBytes),
 	}
 }
 
@@ -70,8 +82,9 @@ func (w *WebFetch) IsEnabled() bool {
 // the usecase layer injects the shared LLM client before building the client.
 func (w *WebFetch) Settings() webfetch.ClientConfig {
 	return webfetch.ClientConfig{
-		Timeout:   time.Duration(w.timeoutSec) * time.Second,
-		MaxBytes:  int64(w.maxBytes),
-		UserAgent: webFetchUserAgent,
+		Timeout:     time.Duration(w.timeoutSec) * time.Second,
+		MaxBytes:    int64(w.maxBytes),
+		MaxPDFBytes: w.maxPDFBytes,
+		UserAgent:   webFetchUserAgent,
 	}
 }

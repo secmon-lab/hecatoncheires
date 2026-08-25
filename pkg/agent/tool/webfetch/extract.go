@@ -11,7 +11,29 @@ import (
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 	"golang.org/x/net/html/charset"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
+
+// pdfMediaType is the only media type handed to the model as a document
+// instead of being extracted to text.
+const pdfMediaType = "application/pdf"
+
+// mediaTypeOf normalises a Content-Type header value to its lowercase media
+// type, falling back to the trimmed raw value when the header does not parse.
+func mediaTypeOf(contentType string) string {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = contentType
+	}
+	return strings.ToLower(strings.TrimSpace(mediaType))
+}
+
+// isPDFContentType reports whether the body must be handed to the model as a
+// PDF document instead of being extracted to text.
+func isPDFContentType(contentType string) bool {
+	return mediaTypeOf(contentType) == pdfMediaType
+}
 
 // extract converts an HTTP response body into plain text suitable for
 // downstream LLM processing.
@@ -24,7 +46,9 @@ import (
 // body is returned verbatim.
 //
 // Binary media types are rejected with an error so untyped or binary payloads
-// never reach the LLM analyze step.
+// never reach the LLM analyze step. PDF is the one exception, and it does not
+// come through here: fetchTool.Run routes a PDF body straight to the model as a
+// document, since the charset decoding below would corrupt those bytes.
 func extract(contentType string, body []byte) (text string, isHTML bool, err error) {
 	// Decode non-UTF-8 content (Shift_JIS, EUC-JP, ISO-8859-1, ...) to UTF-8
 	// using the charset from Content-Type or sniffed from the body, so the LLM
@@ -37,13 +61,7 @@ func extract(contentType string, body []byte) (text string, isHTML bool, err err
 		}
 	}
 
-	mediaType, _, mtErr := mime.ParseMediaType(contentType)
-	if mtErr != nil {
-		mediaType = strings.TrimSpace(strings.ToLower(contentType))
-	}
-	mediaType = strings.ToLower(mediaType)
-
-	switch mediaType {
+	switch mediaTypeOf(contentType) {
 	case "text/html", "application/xhtml+xml":
 		s, hErr := renderHTML(body)
 		if hErr != nil {
@@ -63,8 +81,13 @@ func extract(contentType string, body []byte) (text string, isHTML bool, err err
 		"application/x-yaml":
 		return string(body), false, nil
 	default:
+		// Tagged benign: the URL reaching this tool was chosen by the model, so a
+		// body it cannot read is the model's to work around, not an operator's
+		// defect. The strategies report every tool failure to Sentry, which
+		// without the tag files one issue per unreadable link. The model is
+		// unaffected — the error is still returned and fed back to it.
 		return "", false, goerr.New("unsupported content type for webfetch",
-			goerr.V("content_type", contentType))
+			goerr.V("content_type", contentType), goerr.T(errutil.TagBenign))
 	}
 }
 

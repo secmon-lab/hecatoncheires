@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
@@ -66,9 +68,13 @@ func TestExtract(t *testing.T) {
 		gt.String(t, text).Equal(body)
 	})
 
-	t.Run("binary content type is rejected", func(t *testing.T) {
+	// The URL was chosen by the model, so a body it cannot read is not an
+	// operator's defect. Without the tag the strategies file one Sentry issue
+	// per unreadable link.
+	t.Run("binary content type is rejected as a benign failure", func(t *testing.T) {
 		_, _, err := webfetch.ExtractForTest("application/octet-stream", []byte{0x00, 0x01})
 		gt.Error(t, err).Required()
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
 	})
 
 	t.Run("shift_jis html is decoded to utf-8", func(t *testing.T) {
@@ -84,6 +90,33 @@ func TestExtract(t *testing.T) {
 		text, _, err := webfetch.ExtractForTest("text/html; charset=Shift_JIS", body)
 		gt.NoError(t, err).Required()
 		gt.String(t, text).Contains(jp)
+	})
+}
+
+func TestIsPDFContentType(t *testing.T) {
+	t.Run("pdf is recognised through parameters, case, and padding", func(t *testing.T) {
+		for _, ct := range []string{
+			"application/pdf",
+			"application/pdf; charset=binary",
+			"APPLICATION/PDF",
+			"  application/pdf  ",
+			"Application/PDF;name=doc.pdf",
+		} {
+			gt.Bool(t, webfetch.IsPDFContentTypeForTest(ct)).True()
+		}
+	})
+
+	t.Run("everything else is not a pdf", func(t *testing.T) {
+		for _, ct := range []string{
+			"text/html",
+			"text/html; charset=utf-8",
+			"application/json",
+			"application/octet-stream",
+			"application/x-pdf",
+			"",
+		} {
+			gt.Bool(t, webfetch.IsPDFContentTypeForTest(ct)).False()
+		}
 	})
 }
 

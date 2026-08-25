@@ -57,6 +57,32 @@ and `5xx` names Notion being down.
 So an agent that cannot read a Notion page or database leaves no Sentry issue.
 Search the structured log at `INFO` for `endpoint` and `status=404` to find it.
 
+Three `webfetch` failures are tagged for the same reason — the agent chose the
+URL, so a page it cannot read is its own to work around:
+
+- **`unsupported content type for webfetch`** — the response is neither HTML, a
+  text media type, nor `application/pdf`. Search the log for that message and
+  the `content_type` value.
+- **`pdf exceeds the webfetch size limit`** — the PDF is larger than
+  `--webfetch-max-pdf-size` (default 2 MiB). It is refused rather than
+  truncated. The `bytes` value on the log line is the cap itself (reading stops
+  there), **not** the file's real size — that is never observed, so raising the
+  flag is a judgement call, not a calculation. If agents in your deployment cite
+  large PDFs, raise it in steps.
+- **`failed to build PDF input for webfetch analyze`** — the response claimed
+  `application/pdf` but the body is not a PDF. A host that derives Content-Type
+  from the URL extension answers a missing page this way, so this is usually a
+  dead link rather than a broken host. The trade-off is deliberate: a
+  misconfigured host no longer raises an issue either. Search the log for the
+  message and the `bytes` value.
+
+`webfetch is not configured to read PDF responses` is also unreported: the PDF
+cap is `0`, which disables PDF reading. Expected if you set it deliberately;
+otherwise a caller built the web-fetch client without the setting.
+
+Every other `webfetch` failure stays reportable, including any failure of the
+screening LLM call itself — a broken screening path is an operator's problem.
+
 ### Operational troubleshoot
 
 - **Slack `missing_scope` even after adding the scope**: re-install the
