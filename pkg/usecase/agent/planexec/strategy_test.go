@@ -698,6 +698,73 @@ func TestTheReserveAllowsATerminalToolCall(t *testing.T) {
 	gt.Value(t, planner.answeredWith()[3]).Equal([]string{"w1"})
 }
 
+// TestAnEmptyFirstReserveMoveStillGetsTheOutputAsked pins the failure mode the
+// reserve's first instruction creates: it tells the terminal call not to write
+// the output yet, and stepFinal otherwise reads an empty reply as "the final
+// response was empty" and ends the turn on a fallback with no retry. A model that
+// simply obeyed would then lose the turn, and the reserve would be spent on
+// nothing — the exact outcome this path exists to avoid.
+func TestAnEmptyFirstReserveMoveStillGetsTheOutputAsked(t *testing.T) {
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		// The reserve's first move: obeyed "do not write the terminal output", made
+		// no tool call, and said nothing.
+		``,
+		`the final answer`,
+	}}
+	cfg := budget.Config{MaxSteps: 20, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.15}
+	rt := newTextRuntime(t, planner.client(), cfg, nil, nil)
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	// The turn produced an answer rather than falling back on the empty reply.
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.String(t, out.Text).Contains("final answer")
+
+	prompts := planner.systemSeen()
+	gt.Array(t, prompts).Length(4).Required()
+	gt.String(t, prompts[2]).Contains("THIS turn is your final tool call")
+	// The round is spent by the empty reply, so the call that follows asks for the
+	// output instead of repeating the request for a tool call.
+	gt.String(t, prompts[3]).Contains("The budget reserve is spent")
+	gt.Bool(t, strings.Contains(prompts[3], "THIS turn is your final tool call")).False()
+}
+
+// TestATerminalOutputRetryInTheReserveIsAskedForTheOutput pins that a rejected
+// terminal output stops the run being told not to write one. The retry's user
+// turn says "re-emit the output correctly"; leaving reserveInstruction in the
+// system prompt would say "do not write the terminal output on this turn"
+// alongside it, and a model cannot satisfy both.
+func TestATerminalOutputRetryInTheReserveIsAskedForTheOutput(t *testing.T) {
+	planner := &toolCallingPlanner{replies: []any{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`read it`,
+		// The reserve's first move answers with a terminal output that Validate
+		// rejects, which sends stepFinal into its retry path.
+		`{"title":"","description":"no title"}`,
+		`{"title":"Drafted","description":"under the reserve"}`,
+	}}
+	cfg := budget.Config{MaxSteps: 20, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.15}
+	rt := newRuntime[caseDraft](t, planner.client(), cfg, nil, nil, planexec.Config[caseDraft]{})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	out, err := planexec.DecodeOutput[caseDraft](proc.Output)
+	gt.NoError(t, err).Required()
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.Value(t, out.Data).NotNil().Required()
+	gt.String(t, out.Data.Title).Equal("Drafted")
+
+	prompts := planner.systemSeen()
+	gt.Array(t, prompts).Length(4).Required()
+	gt.String(t, prompts[2]).Contains("THIS turn is your final tool call")
+	gt.String(t, prompts[3]).Contains("The budget reserve is spent")
+	gt.Bool(t, strings.Contains(prompts[3], "Do not write the terminal output")).False()
+}
+
 // TestTheReserveDoesNotStarveTheTerminalPrompt pins that the reserve instruction
 // is ADDED to the terminal prompt rather than replacing it. The call that follows
 // the tool round sends no user turn, so its whole brief — the observation trail

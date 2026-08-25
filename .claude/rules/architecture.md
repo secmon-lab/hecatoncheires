@@ -899,7 +899,7 @@ default — and the rest of the run is TWO moves, because a turn's side effects
 happen through tools and nowhere else: a run cut off before its `case__*` call or
 its post has done nothing, whatever it managed to say.
 
-Three consequences to keep in mind:
+Five consequences to keep in mind:
 
 - **A ceiling produces `LimitKindStop`, the notice threshold produces
   `LimitKindNotice`, and Stop wins when both apply.** Stop is read at the
