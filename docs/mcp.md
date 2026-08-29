@@ -57,6 +57,17 @@ behaviour (where a member can view a private Case). Specifically:
   private `case_id` returns an empty list.
 - `hecaton_get_actions` silently omits Actions whose parent Case is private.
 
+### Archived cases are not listed
+
+`hecaton_list_cases` returns only the active archive slice. A Case that has been
+archived (see [Archiving a Case](./user_guide.md#archiving-a-case)) is left out
+regardless of the `status` argument, and the tool exposes no argument to ask for
+it — the read surface stays what the team currently works on.
+
+`hecaton_get_cases` is unaffected: fetching a known id still returns the Case,
+with `archived_at` absent from the summary fields. Use the GraphQL
+`cases(filter: ARCHIVED)` query when an archived Case has to be enumerated.
+
 ## Authorization (Rego)
 
 Every tool call is evaluated against the Rego entrypoint **`data.auth.mcp`**.

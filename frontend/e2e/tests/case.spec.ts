@@ -784,4 +784,152 @@ test.describe('Case Management', () => {
     await page.getByTestId('field-runbook').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Steps' })).toBeVisible();
   });
+
+  // Archiving takes a CLOSED case out of the Closed tab and the board without
+  // deleting it. The round trip is what matters: the case has to come back.
+  test('should archive a closed case in bulk and restore it from the Archived tab', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+    const title = `Case To Archive ${Date.now()}`;
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title,
+      description: 'Will be archived',
+      customFields: { category: 'task' },
+    });
+    await caseListPage.waitForTableLoad();
+
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+    await caseDetailPage.clickCloseButton();
+    await caseDetailPage.clickBack();
+    await caseListPage.waitForTableLoad();
+
+    // Closed tab: the row is there and selectable, and the bar offers Archive
+    // (not the Drafts tab's Submit / Delete).
+    await caseListPage.clickStatusTab('Closed');
+    await caseListPage.fillSearchFilter(title);
+    expect(await caseListPage.caseExists(title)).toBeTruthy();
+
+    await caseListPage.selectRowByTitle(title);
+    expect(await caseListPage.getBulkSelectedCount()).toBe(1);
+    expect(await caseListPage.hasBulkAction('archive')).toBeTruthy();
+    expect(await caseListPage.hasBulkAction('delete')).toBeFalsy();
+
+    await caseListPage.clickBulkArchive();
+
+    // The row leaves the Closed tab as soon as the call is accepted.
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(0);
+
+    // Bulk archiving is asynchronous server-side: the mutation returns the
+    // accepted ids and the writes happen after the response. Reload so the
+    // assertion below reads persisted state rather than racing that tail.
+    await page.reload();
+    await caseListPage.waitForTableLoad();
+
+    // Archived tab: the case is there, and only Restore is offered.
+    await caseListPage.clickStatusTab('Archived');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(1);
+
+    await caseListPage.selectRowByTitle(title);
+    expect(await caseListPage.hasBulkAction('unarchive')).toBeTruthy();
+    expect(await caseListPage.hasBulkAction('archive')).toBeFalsy();
+
+    await caseListPage.clickBulkUnarchive();
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(0);
+
+    // Back on the Closed tab after a reload, i.e. the restore reached the
+    // backend rather than only the local view.
+    await page.reload();
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickStatusTab('Closed');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(1);
+
+    // …and gone from the Archived tab.
+    await caseListPage.clickStatusTab('Archived');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(0);
+  });
+
+  test('should archive and restore a single case from the detail page', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+    const title = `Case Detail Archive ${Date.now()}`;
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title,
+      description: 'Archived from the detail page',
+      customFields: { category: 'task' },
+    });
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+
+    // An OPEN case offers no archive item: only a CLOSED one can be archived.
+    expect(await caseDetailPage.kebabOffers('archive')).toBeFalsy();
+    await page.keyboard.press('Escape');
+    await page.mouse.click(5, 5);
+
+    await caseDetailPage.clickCloseButton();
+    await caseDetailPage.clickArchive();
+    await expect(caseDetailPage.archivedBadge()).toBeVisible();
+
+    // The detail page stays reachable by URL while the case is archived, and
+    // the badge survives a reload — i.e. the change was persisted.
+    const archivedUrl = page.url();
+    await page.reload();
+    await caseDetailPage.waitForPageLoad();
+    expect(page.url()).toBe(archivedUrl);
+    await expect(caseDetailPage.archivedBadge()).toBeVisible();
+
+    await caseDetailPage.clickUnarchive();
+    await expect(caseDetailPage.archivedBadge()).toHaveCount(0);
+  });
+
+  test('should keep an archived case off the case board', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+    const title = `Case Board Archive ${Date.now()}`;
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title,
+      description: 'Should leave the board once archived',
+      customFields: { category: 'task' },
+    });
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+    await caseDetailPage.clickCloseButton();
+    await caseDetailPage.clickArchive();
+    await expect(caseDetailPage.archivedBadge()).toBeVisible();
+
+    // The Cases list's own default (Open) never showed it once closed; the
+    // point here is that no listing driven by the default archive scope does,
+    // and the All tab is the widest of those.
+    await caseListPage.navigate(TEST_WORKSPACE_ID);
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickStatusTab('All');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(0);
+
+    await caseListPage.clickStatusTab('Closed');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(0);
+
+    // Only the Archived tab, which asks for the archived slice, shows it.
+    await caseListPage.clickStatusTab('Archived');
+    await caseListPage.fillSearchFilter(title);
+    await expect(caseListPage.getCaseRowByTitle(title)).toHaveCount(1);
+  });
 });

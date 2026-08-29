@@ -609,6 +609,73 @@ func (r *mutationResolver) ReopenCase(ctx context.Context, workspaceID string, i
 	return toGraphQLCase(reopened, workspaceID), nil
 }
 
+// ArchiveCase is the resolver for the archiveCase field.
+//
+// An auth token is mandatory: without it the usecase would treat the call as a
+// system context and skip the private-case check. Mirrors the Action archive
+// resolvers — system-level archiving has no GraphQL entry point.
+func (r *mutationResolver) ArchiveCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return nil, err
+	}
+	archived, err := r.UseCases.Case.ArchiveCase(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(archived, workspaceID), nil
+}
+
+// UnarchiveCase is the resolver for the unarchiveCase field.
+//
+// Mirrors ArchiveCase's auth requirement.
+func (r *mutationResolver) UnarchiveCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return nil, err
+	}
+	restored, err := r.UseCases.Case.UnarchiveCase(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(restored, workspaceID), nil
+}
+
+// BulkArchiveCases is the resolver for the bulkArchiveCases field.
+//
+// The archiving is dispatched asynchronously (see BulkArchiveCasesAsync) so it
+// survives the request being cancelled mid-flight; the resolver returns the
+// accepted ids immediately. Only the auth check is synchronous, and it runs
+// BEFORE the dispatch so an unauthenticated call starts no background work.
+// Per-case failures during processing are reported through async.Dispatch, not
+// returned here.
+func (r *mutationResolver) BulkArchiveCases(ctx context.Context, workspaceID string, ids []int) ([]int, error) {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return nil, err
+	}
+
+	r.UseCases.Case.BulkArchiveCasesAsync(ctx, workspaceID, toInt64IDs(ids))
+
+	// [Int!]! is a non-null list, so never return nil. Echo the accepted ids.
+	accepted := make([]int, 0, len(ids))
+	accepted = append(accepted, ids...)
+	return accepted, nil
+}
+
+// BulkUnarchiveCases is the resolver for the bulkUnarchiveCases field.
+//
+// Mirrors BulkArchiveCases: auth first, then an async dispatch, then the
+// accepted ids.
+func (r *mutationResolver) BulkUnarchiveCases(ctx context.Context, workspaceID string, ids []int) ([]int, error) {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return nil, err
+	}
+
+	r.UseCases.Case.BulkUnarchiveCasesAsync(ctx, workspaceID, toInt64IDs(ids))
+
+	accepted := make([]int, 0, len(ids))
+	accepted = append(accepted, ids...)
+	return accepted, nil
+}
+
 // UpdateCaseStatus is the resolver for the updateCaseStatus field.
 func (r *mutationResolver) UpdateCaseStatus(ctx context.Context, workspaceID string, input graphql1.UpdateCaseStatusInput) (*graphql1.Case, error) {
 	updated, err := r.UseCases.Case.UpdateCaseStatus(ctx, workspaceID, int64(input.ID), input.Status)
@@ -1337,8 +1404,8 @@ func (r *queryResolver) WorkspaceGroups(ctx context.Context) ([]*graphql1.Worksp
 }
 
 // Cases is the resolver for the cases field.
-func (r *queryResolver) Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error) {
-	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID, status)
+func (r *queryResolver) Cases(ctx context.Context, workspaceID string, status *types.CaseStatus, filter *graphql1.CaseArchiveFilter) ([]*graphql1.Case, error) {
+	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID, status, caseArchiveFilterToScope(filter))
 	if err != nil {
 		return nil, err
 	}

@@ -83,8 +83,21 @@ type Case struct {
 	// not invalidate the stored selection).
 	AgentSourceIDs []SourceID
 
+	// ArchivedAt is nil for an active case and non-nil once archived.
+	// Archiving is orthogonal to Status and never rewrites it: only a CLOSED
+	// case may be archived, and the archived case keeps its Status and
+	// BoardStatus. An archived case is hidden from the default Cases list and
+	// the Case board; CaseRepository.List drops it unless the caller names a
+	// wider archive scope.
+	ArchivedAt *time.Time
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// IsArchived reports whether the case is currently archived.
+func (c *Case) IsArchived() bool {
+	return c != nil && c.ArchivedAt != nil
 }
 
 // IsDraft reports whether this Case is currently in the unsubmitted draft state.
@@ -239,14 +252,20 @@ func IsCaseAccessible(c *Case, userID string) bool {
 }
 
 // RestrictCase returns a copy of the case with sensitive fields removed.
-// Only ID, Status, IsPrivate, CreatedAt, UpdatedAt are preserved.
+// Only ID, Status, IsPrivate, ArchivedAt, CreatedAt, UpdatedAt are preserved.
 // AccessDenied is set to true.
+//
+// ArchivedAt is preserved because it is not sensitive and the Cases list needs
+// it: a restricted row still has to render consistently with the archive slice
+// it was returned in, and dropping it would show an archived private case as
+// active on the Archived tab.
 func RestrictCase(c *Case) *Case {
 	return &Case{
 		ID:           c.ID,
 		Status:       c.Status,
 		IsPrivate:    c.IsPrivate,
 		AccessDenied: true,
+		ArchivedAt:   c.ArchivedAt,
 		CreatedAt:    c.CreatedAt,
 		UpdatedAt:    c.UpdatedAt,
 	}

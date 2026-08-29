@@ -75,6 +75,40 @@ func TestCaseUseCase_ListFrequentAssignees(t *testing.T) {
 		gt.Value(t, stored.UserIDs[0]).Equal("U-cached")
 	})
 
+	// The ranking is the frequency signal that orders the assignee picker, so a
+	// case the team has put away should stop influencing it. The exclusion is
+	// not spelled out at the call site: passing no list options selects the
+	// active-only archive scope.
+	t.Run("archived cases do not contribute to the ranking", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, rankingRegistry(), nil, nil, "")
+		ctx := context.Background()
+
+		seedRankingCase(t, repo, testWorkspaceID, false, "U-active")
+
+		archivedAt := time.Now().UTC()
+		now := time.Now()
+		_, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:       "archived case",
+			Status:      types.CaseStatusClosed,
+			ReporterID:  "U-reporter",
+			AssigneeIDs: []string{"U-archived-only"},
+			ArchivedAt:  &archivedAt,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ListFrequentAssignees(ctx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		async.Wait()
+
+		stored, err := repo.AssigneeRanking().Get(ctx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, stored.UserIDs).Length(1).Required()
+		gt.Value(t, stored.UserIDs[0]).Equal("U-active")
+	})
+
 	t.Run("cold cache returns empty and computes in the background", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, rankingRegistry(), nil, nil, "")

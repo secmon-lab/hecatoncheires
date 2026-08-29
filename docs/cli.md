@@ -376,6 +376,7 @@ Case, Action and Memo of every registered workspace and reports the mismatches.
 | `board_status_invalid` | thread-mode Cases | A `BoardStatus` that is empty or is not one of the `[[case.status]]` ids. Such a Case appears in no Kanban column |
 | `lifecycle_status_mismatch` | thread-mode Cases | A Case whose lifecycle status (`OPEN` / `CLOSED`) disagrees with whether its `BoardStatus` is listed under `[case] closed`. This is what surfaces after a status is added to or removed from `closed` |
 | `action_status_invalid` | Actions | A `Status` that is not one of the `[[action.status]]` ids. Archived Actions are included, because they stay visible in the Case history |
+| `archived_case_not_closed` | all Cases | An archived Case whose lifecycle status is not `CLOSED`. Every write path enforces the invariant (archiving refuses a non-closed Case; reopen and board-status changes refuse an archived one), so a finding means the document came from somewhere else — a data import, a manual edit, or a lost race between archive and reopen. It matters because such a Case is filtered out of the Cases list, the board, the dashboard and the Job scan at once, and cannot be found without this check. Unlike the two rows above it is not gated on `CaseMode`: the invariant holds in channel mode too |
 
 Each row of output is one **group**, not one entity: a configuration change
 affects a whole workspace uniformly, so occurrences sharing the same check and

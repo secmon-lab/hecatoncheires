@@ -80,6 +80,7 @@ func TestIsCaseAccessible(t *testing.T) {
 
 func TestRestrictCase(t *testing.T) {
 	now := time.Now()
+	archivedAt := now.Add(-time.Hour)
 	original := &model.Case{
 		ID:             42,
 		Title:          "Sensitive Title",
@@ -90,11 +91,19 @@ func TestRestrictCase(t *testing.T) {
 		IsPrivate:      true,
 		ChannelUserIDs: []string{"U001", "U002"},
 		FieldValues:    map[string]model.FieldValue{"f1": {FieldID: "f1"}},
+		ArchivedAt:     &archivedAt,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 
 	restricted := model.RestrictCase(original)
+
+	// ArchivedAt survives the restriction: a restricted row still has to render
+	// consistently with the archive slice it was returned in, so an archived
+	// private case must not read as active on the Archived tab.
+	gt.Value(t, restricted.ArchivedAt).NotNil().Required()
+	gt.Bool(t, restricted.ArchivedAt.Equal(archivedAt)).True()
+	gt.Bool(t, restricted.IsArchived()).True()
 
 	// Preserved fields
 	if restricted.ID != 42 {
@@ -153,6 +162,18 @@ func TestCase_IsDraft(t *testing.T) {
 	// IsDraft as a guard.
 	var nilCase *model.Case
 	gt.Bool(t, nilCase.IsDraft()).False()
+}
+
+func TestCase_IsArchived(t *testing.T) {
+	archivedAt := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
+	gt.Bool(t, (&model.Case{ArchivedAt: &archivedAt}).IsArchived()).True()
+	gt.Bool(t, (&model.Case{ArchivedAt: nil}).IsArchived()).False()
+	gt.Bool(t, (&model.Case{}).IsArchived()).False()
+
+	// Nil receiver is safe and reports false, mirroring IsDraft: higher layers
+	// route Case lookups through this as a guard.
+	var nilCase *model.Case
+	gt.Bool(t, nilCase.IsArchived()).False()
 }
 
 func TestCase_IsThreadBound(t *testing.T) {

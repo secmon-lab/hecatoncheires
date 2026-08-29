@@ -81,7 +81,7 @@ dataset names must be unique.
 
 | Table | Source | Notes |
 |-------|--------|-------|
-| `cases` | non-draft Cases | drafts excluded; `field_<id>` per workspace field; private cases excluded unless `include_private` |
+| `cases` | non-draft Cases (archived included) | drafts excluded; `field_<id>` per workspace field; private cases excluded unless `include_private`; `archived_at` is null for an active Case |
 | `actions` | Actions (archived included) | only actions whose parent Case is exported |
 | `memos` | Memos (archived included) | `field_<id>` per workspace memo field; only memos of exported cases |
 | `job_runs` | Latest run state per (case, job) | only runs of exported cases |

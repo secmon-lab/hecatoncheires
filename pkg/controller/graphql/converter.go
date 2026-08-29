@@ -189,6 +189,7 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		SlackThreadTS:         slackThreadTS,
 		IsThreadBound:         c.IsThreadBound(),
 		BoardStatus:           boardStatus,
+		ArchivedAt:            c.ArchivedAt,
 		Fields:                toGraphQLFieldValues(c.FieldValues),
 		AgentAdditionalPrompt: agentPrompt,
 		AgentSourceIDs:        agentSourceIDs,
@@ -317,6 +318,34 @@ func actionArchiveFilterToScope(f *graphql1.ActionArchiveFilter) interfaces.Acti
 		return interfaces.ActionArchiveScopeAll
 	default:
 		return interfaces.ActionArchiveScopeActiveOnly
+	}
+}
+
+// toInt64IDs widens a GraphQL Int id list to the int64 the usecase layer
+// takes. It lives here rather than in schema.resolvers.go because gqlgen
+// rewrites that file and drops any non-resolver function from it.
+func toInt64IDs(ids []int) []int64 {
+	out := make([]int64, len(ids))
+	for i, id := range ids {
+		out[i] = int64(id)
+	}
+	return out
+}
+
+// caseArchiveFilterToScope maps the optional GraphQL CaseArchiveFilter to the
+// domain CaseArchiveScope. nil maps to ActiveOnly to match the schema-side
+// default, so a client that names no filter never sees archived cases.
+func caseArchiveFilterToScope(f *graphql1.CaseArchiveFilter) interfaces.CaseArchiveScope {
+	if f == nil {
+		return interfaces.CaseArchiveScopeActiveOnly
+	}
+	switch *f {
+	case graphql1.CaseArchiveFilterArchived:
+		return interfaces.CaseArchiveScopeArchivedOnly
+	case graphql1.CaseArchiveFilterAll:
+		return interfaces.CaseArchiveScopeAll
+	default:
+		return interfaces.CaseArchiveScopeActiveOnly
 	}
 }
 

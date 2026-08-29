@@ -152,6 +152,7 @@ type ComplexityRoot struct {
 		Actions               func(childComplexity int, filter *graphql1.ActionArchiveFilter) int
 		AgentAdditionalPrompt func(childComplexity int) int
 		AgentSources          func(childComplexity int) int
+		ArchivedAt            func(childComplexity int) int
 		AssigneeIDs           func(childComplexity int) int
 		Assignees             func(childComplexity int) int
 		BoardStatus           func(childComplexity int) int
@@ -411,9 +412,12 @@ type ComplexityRoot struct {
 	Mutation struct {
 		AddActionStep           func(childComplexity int, workspaceID string, input graphql1.AddActionStepInput) int
 		ArchiveAction           func(childComplexity int, workspaceID string, id int) int
+		ArchiveCase             func(childComplexity int, workspaceID string, id int) int
 		ArchiveMemo             func(childComplexity int, workspaceID string, caseID int, id string) int
 		AssignCase              func(childComplexity int, workspaceID string, id int, userIDs []string) int
 		BulkArchiveActions      func(childComplexity int, workspaceID string, ids []int) int
+		BulkArchiveCases        func(childComplexity int, workspaceID string, ids []int) int
+		BulkUnarchiveCases      func(childComplexity int, workspaceID string, ids []int) int
 		CloseCase               func(childComplexity int, workspaceID string, id int) int
 		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateActionComment     func(childComplexity int, workspaceID string, input graphql1.CreateActionCommentInput) int
@@ -445,6 +449,7 @@ type ComplexityRoot struct {
 		SyncCaseChannelUsers    func(childComplexity int, workspaceID string, id int) int
 		TriggerCaseJob          func(childComplexity int, workspaceID string, caseID int, jobID string) int
 		UnarchiveAction         func(childComplexity int, workspaceID string, id int) int
+		UnarchiveCase           func(childComplexity int, workspaceID string, id int) int
 		UnarchiveMemo           func(childComplexity int, workspaceID string, caseID int, id string) int
 		UnassignCase            func(childComplexity int, workspaceID string, id int, userIDs []string) int
 		UpdateAction            func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
@@ -518,7 +523,7 @@ type ComplexityRoot struct {
 		CaseJobs             func(childComplexity int, workspaceID string, caseID int) int
 		CaseRefsByIds        func(childComplexity int, workspaceID string, ids []int) int
 		CaseStatusConfig     func(childComplexity int, workspaceID string) int
-		Cases                func(childComplexity int, workspaceID string, status *types.CaseStatus) int
+		Cases                func(childComplexity int, workspaceID string, status *types.CaseStatus, filter *graphql1.CaseArchiveFilter) int
 		Drafts               func(childComplexity int, workspaceID string) int
 		FavoriteWorkspaceIds func(childComplexity int) int
 		FieldConfiguration   func(childComplexity int, workspaceID string) int
@@ -681,6 +686,10 @@ type MutationResolver interface {
 	DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error)
 	CloseCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	ReopenCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	ArchiveCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	UnarchiveCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	BulkArchiveCases(ctx context.Context, workspaceID string, ids []int) ([]int, error)
+	BulkUnarchiveCases(ctx context.Context, workspaceID string, ids []int) ([]int, error)
 	UpdateCaseStatus(ctx context.Context, workspaceID string, input graphql1.UpdateCaseStatusInput) (*graphql1.Case, error)
 	SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	CreateDraft(ctx context.Context, workspaceID string, input graphql1.CreateDraftInput) (*graphql1.Case, error)
@@ -732,7 +741,7 @@ type QueryResolver interface {
 	Workspace(ctx context.Context, workspaceID string) (*graphql1.Workspace, error)
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
 	WorkspaceGroups(ctx context.Context) ([]*graphql1.WorkspaceGroup, error)
-	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
+	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus, filter *graphql1.CaseArchiveFilter) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	Drafts(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
 	ReferenceableCases(ctx context.Context, workspaceID string, query *string, limit *int) ([]*graphql1.CaseRef, error)
@@ -1268,6 +1277,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Case.AgentSources(childComplexity), true
+	case "Case.archivedAt":
+		if e.ComplexityRoot.Case.ArchivedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Case.ArchivedAt(childComplexity), true
 	case "Case.assigneeIDs":
 		if e.ComplexityRoot.Case.AssigneeIDs == nil {
 			break
@@ -2332,6 +2347,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.ArchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.archiveCase":
+		if e.ComplexityRoot.Mutation.ArchiveCase == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_archiveCase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.ArchiveCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.archiveMemo":
 		if e.ComplexityRoot.Mutation.ArchiveMemo == nil {
 			break
@@ -2365,6 +2391,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.BulkArchiveActions(childComplexity, args["workspaceId"].(string), args["ids"].([]int)), true
+	case "Mutation.bulkArchiveCases":
+		if e.ComplexityRoot.Mutation.BulkArchiveCases == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_bulkArchiveCases_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.BulkArchiveCases(childComplexity, args["workspaceId"].(string), args["ids"].([]int)), true
+	case "Mutation.bulkUnarchiveCases":
+		if e.ComplexityRoot.Mutation.BulkUnarchiveCases == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_bulkUnarchiveCases_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.BulkUnarchiveCases(childComplexity, args["workspaceId"].(string), args["ids"].([]int)), true
 	case "Mutation.closeCase":
 		if e.ComplexityRoot.Mutation.CloseCase == nil {
 			break
@@ -2701,6 +2749,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.UnarchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.unarchiveCase":
+		if e.ComplexityRoot.Mutation.UnarchiveCase == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_unarchiveCase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.UnarchiveCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.unarchiveMemo":
 		if e.ComplexityRoot.Mutation.UnarchiveMemo == nil {
 			break
@@ -3165,7 +3224,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Query.Cases(childComplexity, args["workspaceId"].(string), args["status"].(*types.CaseStatus)), true
+		return e.ComplexityRoot.Query.Cases(childComplexity, args["workspaceId"].(string), args["status"].(*types.CaseStatus), args["filter"].(*graphql1.CaseArchiveFilter)), true
 	case "Query.drafts":
 		if e.ComplexityRoot.Query.Drafts == nil {
 			break
@@ -4075,6 +4134,11 @@ type Case {
   # thread-mode cases; null for channel-mode cases. Validity is workspace-
   # scoped: resolve display from caseStatusConfig.
   boardStatus: String
+  # archivedAt is null for an active case and non-null once archived. There is
+  # no derived ` + "`" + `archived` + "`" + ` boolean; callers derive it from archivedAt != null.
+  # An archived case is hidden from the default ` + "`" + `cases` + "`" + ` listing and the Case
+  # board, and is reached through the ARCHIVED archive filter.
+  archivedAt: Time
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   # actions exposes the case's actions. The ` + "`" + `filter` + "`" + ` argument selects which
   # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
@@ -4176,6 +4240,18 @@ enum ActionArchiveFilter {
   ARCHIVED
   # ALL returns both active and archived actions. Intended for cleanup /
   # batch operations; UI views should use ACTIVE or ARCHIVED.
+  ALL
+}
+
+# CaseArchiveFilter selects which archive slice the ` + "`" + `cases` + "`" + ` query returns.
+enum CaseArchiveFilter {
+  # ACTIVE returns only non-archived cases. Default for every caller, so a
+  # client that names no filter never sees archived cases.
+  ACTIVE
+  # ARCHIVED returns only archived cases (the Cases page's Archived tab).
+  ARCHIVED
+  # ALL returns both. Intended for inventory / batch use, not for the
+  # user-facing tabs.
   ALL
 }
 
@@ -4622,8 +4698,10 @@ type Query {
   # Deployment-wide workspace groups. Empty list when none are configured.
   workspaceGroups: [WorkspaceGroup!]!
 
-  # Cases
-  cases(workspaceId: String!, status: CaseStatus): [Case!]!
+  # Cases. ` + "`" + `filter` + "`" + ` selects the archive slice and defaults to ACTIVE, so an
+  # existing client that names no filter keeps seeing exactly the cases it saw
+  # before archiving existed.
+  cases(workspaceId: String!, status: CaseStatus, filter: CaseArchiveFilter = ACTIVE): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
   # Drafts authored by the current user in this workspace. Draft cases are
@@ -4739,6 +4817,22 @@ type Mutation {
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
+  # Archive a CLOSED case so it disappears from the default Cases list and the
+  # Case board. The case document is preserved and can be restored via
+  # unarchiveCase; deleteCase remains the only permanent removal. Fails for an
+  # OPEN or DRAFT case, and for a case that is already archived.
+  archiveCase(workspaceId: String!, id: Int!): Case!
+  # Restore a previously archived case back to the active listing.
+  unarchiveCase(workspaceId: String!, id: Int!): Case!
+  # Archive multiple cases in one call (e.g. clearing the Closed tab). The
+  # archiving runs asynchronously so it survives the request being cancelled,
+  # and the returned ids are the ones ACCEPTED for archiving. Ids that are
+  # already archived, or that are no longer CLOSED because someone reopened
+  # them, are skipped during processing.
+  bulkArchiveCases(workspaceId: String!, ids: [Int!]!): [Int!]!
+  # Restore multiple archived cases. Same async contract as bulkArchiveCases;
+  # ids that are not archived are skipped.
+  bulkUnarchiveCases(workspaceId: String!, ids: [Int!]!): [Int!]!
   # updateCaseStatus sets a thread-mode case's board status (Kanban column).
   # The lifecycle status is synced server-side (a closed board status closes
   # the case). Used by the Kanban drag-and-drop.
@@ -5387,6 +5481,8 @@ func (ec *executionContext) childFields_Case(ctx context.Context, field graphql.
 		return ec.fieldContext_Case_isThreadBound(ctx, field)
 	case "boardStatus":
 		return ec.fieldContext_Case_boardStatus(ctx, field)
+	case "archivedAt":
+		return ec.fieldContext_Case_archivedAt(ctx, field)
 	case "fields":
 		return ec.fieldContext_Case_fields(ctx, field)
 	case "actions":
@@ -6359,6 +6455,28 @@ func (ec *executionContext) field_Mutation_archiveAction_args(ctx context.Contex
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_archiveCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_archiveMemo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6420,6 +6538,50 @@ func (ec *executionContext) field_Mutation_assignCase_args(ctx context.Context, 
 }
 
 func (ec *executionContext) field_Mutation_bulkArchiveActions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "ids",
+		func(ctx context.Context, v any) ([]int, error) {
+			return ec.unmarshalNInt2ᚕintᚄ(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["ids"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_bulkArchiveCases_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "ids",
+		func(ctx context.Context, v any) ([]int, error) {
+			return ec.unmarshalNInt2ᚕintᚄ(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["ids"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_bulkUnarchiveCases_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
@@ -7088,6 +7250,28 @@ func (ec *executionContext) field_Mutation_triggerCaseJob_args(ctx context.Conte
 }
 
 func (ec *executionContext) field_Mutation_unarchiveAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_unarchiveCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId",
@@ -7792,6 +7976,14 @@ func (ec *executionContext) field_Query_cases_args(ctx context.Context, rawArgs 
 		return nil, err
 	}
 	args["status"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "filter",
+		func(ctx context.Context, v any) (*graphql1.CaseArchiveFilter, error) {
+			return ec.unmarshalOCaseArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseArchiveFilter(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["filter"] = arg2
 	return args, nil
 }
 
@@ -10588,6 +10780,29 @@ func (ec *executionContext) _Case_boardStatus(ctx context.Context, field graphql
 }
 func (ec *executionContext) fieldContext_Case_boardStatus(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Case", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Case_archivedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Case_archivedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ArchivedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *time.Time) graphql.Marshaler {
+			return ec.marshalOTime2ᚖtimeᚐTime(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Case_archivedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Case", field, false, false, errors.New("field of type Time does not have child fields"))
 }
 
 func (ec *executionContext) _Case_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
@@ -14706,6 +14921,182 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_archiveCase(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_archiveCase(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().ArchiveCase(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.Case) graphql.Marshaler {
+			return ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_archiveCase(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Case(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_archiveCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_unarchiveCase(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_unarchiveCase(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().UnarchiveCase(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *graphql1.Case) graphql.Marshaler {
+			return ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_unarchiveCase(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Case(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_unarchiveCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_bulkArchiveCases(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_bulkArchiveCases(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().BulkArchiveCases(ctx, fc.Args["workspaceId"].(string), fc.Args["ids"].([]int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []int) graphql.Marshaler {
+			return ec.marshalNInt2ᚕintᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_bulkArchiveCases(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_bulkArchiveCases_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_bulkUnarchiveCases(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_bulkUnarchiveCases(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().BulkUnarchiveCases(ctx, fc.Args["workspaceId"].(string), fc.Args["ids"].([]int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []int) graphql.Marshaler {
+			return ec.marshalNInt2ᚕintᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_bulkUnarchiveCases(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_bulkUnarchiveCases_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_updateCaseStatus(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -17420,7 +17811,7 @@ func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.Coll
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Query().Cases(ctx, fc.Args["workspaceId"].(string), fc.Args["status"].(*types.CaseStatus))
+			return ec.Resolvers.Query().Cases(ctx, fc.Args["workspaceId"].(string), fc.Args["status"].(*types.CaseStatus), fc.Args["filter"].(*graphql1.CaseArchiveFilter))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*graphql1.Case) graphql.Marshaler {
@@ -24028,6 +24419,11 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.RequiredNull {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "archivedAt":
+			out.Values[i] = ec._Case_archivedAt(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
 		case "fields":
 			field := field
 
@@ -26031,6 +26427,34 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "reopenCase":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_reopenCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "archiveCase":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_archiveCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "unarchiveCase":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_unarchiveCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "bulkArchiveCases":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_bulkArchiveCases(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "bulkUnarchiveCases":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_bulkUnarchiveCases(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -30442,6 +30866,22 @@ func (ec *executionContext) marshalOCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 		return graphql.Null
 	}
 	return ec._Case(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOCaseArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseArchiveFilter(ctx context.Context, v any) (*graphql1.CaseArchiveFilter, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(graphql1.CaseArchiveFilter)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOCaseArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseArchiveFilter(ctx context.Context, sel ast.SelectionSet, v *graphql1.CaseArchiveFilter) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) unmarshalOCaseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, v any) (*types.CaseStatus, error) {

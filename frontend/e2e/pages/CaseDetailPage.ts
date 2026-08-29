@@ -119,6 +119,55 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Archive the case (kebab menu → Archive). Only offered on a CLOSED,
+   * non-archived case.
+   */
+  async clickArchive(): Promise<void> {
+    await this.page.getByTestId('case-menu-button').click();
+    const item = this.page.getByTestId('case-archive-menu-item');
+    await item.waitFor({ state: 'visible', timeout: 3000 });
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
+    await item.click();
+    await responsePromise;
+  }
+
+  /**
+   * Restore the case (kebab menu → Unarchive). Only offered on an archived case.
+   */
+  async clickUnarchive(): Promise<void> {
+    await this.page.getByTestId('case-menu-button').click();
+    const item = this.page.getByTestId('case-unarchive-menu-item');
+    await item.waitFor({ state: 'visible', timeout: 3000 });
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
+    await item.click();
+    await responsePromise;
+  }
+
+  /**
+   * The header's Archived badge. Returned as a Locator so callers assert with
+   * Playwright's auto-retrying matchers: the badge appears once the mutation
+   * response lands in the cache and React re-renders, which is after the
+   * network response the click awaited.
+   */
+  archivedBadge(): Locator {
+    return this.page.getByTestId('case-archived-badge');
+  }
+
+  /**
+   * Whether the kebab menu offers the given archive action. Leaves the menu
+   * open, so callers that go on to click it can reuse it.
+   */
+  async kebabOffers(action: 'archive' | 'unarchive'): Promise<boolean> {
+    await this.page.getByTestId('case-menu-button').click();
+    await this.page.getByTestId('case-menu-popover').waitFor({ state: 'visible', timeout: 3000 });
+    return await this.page.getByTestId(`case-${action}-menu-item`).isVisible();
+  }
+
+  /**
    * Click the back button
    */
   async clickBack(): Promise<void> {

@@ -311,13 +311,15 @@ export class CaseListPage extends BasePage {
    * Click a status tab. "Draft" surfaces the workspace-wide drafts list
    * that lives under the same Case list page (no separate /drafts route).
    */
-  async clickStatusTab(status: 'Open' | 'Closed' | 'Draft' | 'All'): Promise<void> {
+  async clickStatusTab(status: 'Open' | 'Closed' | 'Draft' | 'Archived' | 'All'): Promise<void> {
     if (status === 'Open') {
       await this.page.getByTestId('status-tab-open').click();
     } else if (status === 'Closed') {
       await this.page.getByTestId('status-tab-closed').click();
     } else if (status === 'All') {
       await this.page.getByTestId('status-tab-all').click();
+    } else if (status === 'Archived') {
+      await this.page.getByTestId('status-tab-archived').click();
     } else {
       await this.page.getByTestId('status-tab-draft').click();
     }
@@ -333,5 +335,48 @@ export class CaseListPage extends BasePage {
     const text = (await tab.textContent()) || '';
     const m = text.match(/(\d+)/);
     return m ? Number(m[1]) : 0;
+  }
+
+  /**
+   * Tick the selection checkbox of one row. Available on the Drafts, Closed
+   * and Archived tabs; the row must be accessible (an access-denied row's box
+   * is disabled).
+   */
+  async selectRowByTitle(title: string): Promise<void> {
+    await this.getCaseRowByTitle(title)
+      .locator('input[data-testid^="bulk-row-checkbox-"]')
+      .check();
+  }
+
+  /**
+   * The "N selected" text of the bulk action bar.
+   */
+  async getBulkSelectedCount(): Promise<number> {
+    const label = this.page.getByTestId('bulk-selected-count');
+    await label.waitFor({ state: 'visible', timeout: 5000 });
+    const m = ((await label.textContent()) || '').match(/(\d+)/);
+    return m ? Number(m[1]) : 0;
+  }
+
+  /**
+   * Archive the currently selected rows (Closed tab). The server archives them
+   * in the background, so the rows disappear as soon as the call is accepted.
+   */
+  async clickBulkArchive(): Promise<void> {
+    await this.page.getByTestId('bulk-archive-button').click();
+  }
+
+  /**
+   * Restore the currently selected rows (Archived tab).
+   */
+  async clickBulkUnarchive(): Promise<void> {
+    await this.page.getByTestId('bulk-unarchive-button').click();
+  }
+
+  /**
+   * Whether the bulk action bar currently offers the given action.
+   */
+  async hasBulkAction(action: 'archive' | 'unarchive' | 'submit' | 'delete'): Promise<boolean> {
+    return await this.page.getByTestId(`bulk-${action}-button`).isVisible();
   }
 }

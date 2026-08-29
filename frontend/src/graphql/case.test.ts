@@ -9,6 +9,10 @@ import {
   UPDATE_CASE,
   CLOSE_CASE,
   REOPEN_CASE,
+  ARCHIVE_CASE,
+  UNARCHIVE_CASE,
+  BULK_ARCHIVE_CASES,
+  BULK_UNARCHIVE_CASES,
 } from './case'
 
 // The fragment refactor must not change any operation's effective field
@@ -77,6 +81,10 @@ const MUTATION_PATHS = [
   'title',
   'description',
   'status',
+  // archivedAt rides in the mutation set, not only the list set, so
+  // archiveCase / unarchiveCase refresh the detail page's badge and menu from
+  // their own response. There is deliberately no derived `archived` boolean.
+  'archivedAt',
   'isPrivate',
   'isTest',
   'accessDenied',
@@ -137,5 +145,42 @@ describe('case.ts selection sets', () => {
 
   it('GET_CASE returns the list set plus detail-only fields and actions', () => {
     expect(collectLeafPaths(GET_CASE)).toEqual(DETAIL_PATHS)
+  })
+
+  it('the single-case archive mutations return the same field set as the other case mutations', () => {
+    expect(collectLeafPaths(ARCHIVE_CASE)).toEqual(MUTATION_PATHS)
+    expect(collectLeafPaths(UNARCHIVE_CASE)).toEqual(MUTATION_PATHS)
+  })
+
+  it('every case operation carries archivedAt so the UI can tell archived from active', () => {
+    for (const doc of [
+      CREATE_CASE,
+      UPDATE_CASE,
+      CLOSE_CASE,
+      REOPEN_CASE,
+      ARCHIVE_CASE,
+      UNARCHIVE_CASE,
+      GET_CASES,
+      GET_CASES_WITH_SLACK_LINK,
+      GET_CASE,
+    ]) {
+      expect(collectLeafPaths(doc)).toContain('archivedAt')
+    }
+  })
+
+  // The bulk mutations return [Int!]! — the ids ACCEPTED for the change, not
+  // Case objects. Pinning the absence of a selection set keeps a future edit
+  // from quietly turning them into object-returning mutations, which would
+  // imply the change had already been applied when it is still asynchronous.
+  it('the bulk archive mutations select a scalar id list, not Case objects', () => {
+    for (const doc of [BULK_ARCHIVE_CASES, BULK_UNARCHIVE_CASES]) {
+      const operation = doc.definitions.find((def) => def.kind === Kind.OPERATION_DEFINITION)
+      expect(operation).toBeDefined()
+      if (!operation || operation.kind !== Kind.OPERATION_DEFINITION) return
+      const rootField = operation.selectionSet.selections[0]
+      expect(rootField.kind).toBe(Kind.FIELD)
+      if (rootField.kind !== Kind.FIELD) return
+      expect(rootField.selectionSet).toBeUndefined()
+    }
   })
 })

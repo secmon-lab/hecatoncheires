@@ -26,8 +26,12 @@ type Case struct {
 	SlackThreadTS  *string          `json:"slackThreadTS,omitempty"`
 	IsThreadBound  bool             `json:"isThreadBound"`
 	BoardStatus    *string          `json:"boardStatus,omitempty"`
-	Fields         []*FieldValue    `json:"fields"`
-	Actions        []*Action        `json:"actions"`
+	// ArchivedAt is null for an active case and non-null once archived. No
+	// derived `archived` boolean rides along: a value the client can compute
+	// from archivedAt != null would only give the two fields a way to disagree.
+	ArchivedAt *time.Time    `json:"archivedAt,omitempty"`
+	Fields     []*FieldValue `json:"fields"`
+	Actions    []*Action     `json:"actions"`
 	// AgentAdditionalPrompt is the Markdown text appended to the agent
 	// system prompt for this Case. Always present (empty string when
 	// unset) so the schema's String! contract is honoured.

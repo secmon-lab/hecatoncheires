@@ -11,6 +11,8 @@ import {
   ASSIGN_CASE,
   UNASSIGN_CASE,
   SYNC_CASE_CHANNEL_USERS,
+  ARCHIVE_CASE,
+  UNARCHIVE_CASE,
   GET_CASES,
 } from '../graphql/case'
 import { diffAssignees } from '../utils/assignees'
@@ -222,6 +224,9 @@ export default function CaseDetail() {
   // We key the UI off the workspace mode, not the per-case isThreadBound, so a
   // case still renders thread-style even if its thread binding is missing.
   const threadMode = caseStatuses.isThreadMode
+  // There is no derived `archived` boolean on the wire; a case is archived
+  // when archivedAt is non-null.
+  const isArchived = !!c?.archivedAt
   const isThreadBound = !!c?.isThreadBound
   const slackThreadTS: string = c?.slackThreadTS || ''
   const slackLink = buildSlackCaseLink(slackChannelURL, slackChannelID, slackThreadTS)
@@ -272,6 +277,10 @@ export default function CaseDetail() {
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
   const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
+  // Single-case archive / restore runs synchronously, so unlike the Cases
+  // page's bulk path a refetch here does reflect the change.
+  const [archiveCase, { loading: archivingCase }] = useMutation(ARCHIVE_CASE, { refetchQueries: refetchOptions })
+  const [unarchiveCase, { loading: unarchivingCase }] = useMutation(UNARCHIVE_CASE, { refetchQueries: refetchOptions })
   const [assignCase] = useMutation(ASSIGN_CASE, { refetchQueries: refetchOptions })
   const [unassignCase] = useMutation(UNASSIGN_CASE, { refetchQueries: refetchOptions })
   const [updateCaseStatus] = useMutation(UPDATE_CASE_STATUS, { refetchQueries: refetchOptions })
@@ -317,6 +326,12 @@ export default function CaseDetail() {
   }
   const handleReopen = async () => {
     await reopenCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleArchive = async () => {
+    await archiveCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleUnarchive = async () => {
+    await unarchiveCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
   }
   // Thread-mode cases carry the configurable board status; changing it here
   // moves the case between Kanban columns (and closes it when the target is a
@@ -415,6 +430,11 @@ export default function CaseDetail() {
         >
           {t('btnBack')}
         </Button>
+        {isArchived && (
+          <span data-testid="case-archived-badge" className="badge" style={{ marginLeft: 'var(--spacing-sm)' }}>
+            {t('badgeArchived')}
+          </span>
+        )}
         <span className="spacer" />
         {c.status === 'DRAFT' ? (
           <>
@@ -453,6 +473,12 @@ export default function CaseDetail() {
           >
             {t('btnClose')}
           </Button>
+        ) : isArchived ? (
+          // An archived case cannot go back to OPEN — the server refuses it,
+          // because an archived OPEN case would appear in no listing at all.
+          // Offer nothing rather than a control whose click does nothing;
+          // Unarchive is in the kebab menu.
+          null
         ) : (
           <Button
             size="sm"
@@ -483,6 +509,30 @@ export default function CaseDetail() {
                 data-testid="case-menu-popover"
                 className={styles.kebabMenu}
               >
+                {/* Archiving only applies to a CLOSED case, and restoring only
+                    to an archived one, so at most one of these is offered —
+                    an item the server would refuse is never shown. */}
+                {isArchived ? (
+                  <button
+                    type="button"
+                    onClick={() => { setMenuOpen(false); void handleUnarchive() }}
+                    disabled={unarchivingCase}
+                    data-testid="case-unarchive-menu-item"
+                    className={styles.kebabItem}
+                  >
+                    {t('btnUnarchive')}
+                  </button>
+                ) : c.status === 'CLOSED' ? (
+                  <button
+                    type="button"
+                    onClick={() => { setMenuOpen(false); void handleArchive() }}
+                    disabled={archivingCase}
+                    data-testid="case-archive-menu-item"
+                    className={styles.kebabItem}
+                  >
+                    {t('btnArchive')}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}
@@ -843,6 +893,10 @@ export default function CaseDetail() {
                   <select
                     data-testid="aside-board-status"
                     value={boardStatus}
+                    // An archived case takes no board writes: the server
+                    // rejects them, so the control is disabled rather than
+                    // left to fail silently. Unarchive it first.
+                    disabled={isArchived}
                     onChange={(e) => { void handleBoardStatusChange(e.target.value) }}
                     style={{
                       border: '1px solid var(--border-default)',

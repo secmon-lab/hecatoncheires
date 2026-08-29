@@ -44,14 +44,24 @@ test.describe('Bulk draft actions (Drafts tab)', () => {
     await caseListPage.waitForTableLoad();
   });
 
-  test('checkbox column is only present on the Drafts tab', async ({ page }) => {
+  // Selection is offered on the tabs that have a bulk action for their rows:
+  // Drafts (submit / delete), Closed (archive) and Archived (restore). Open
+  // and All have none — a bulk archive there would mix rows the operation
+  // cannot apply to (archiving is CLOSED-only) with ones it can.
+  test('checkbox column is present on the Drafts, Closed and Archived tabs only', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
-    // Open tab has no bulk checkbox header.
+
     await caseListPage.clickStatusTab('Open');
     await expect(page.getByTestId('bulk-header-checkbox')).toHaveCount(0);
 
-    await caseListPage.clickStatusTab('Closed');
+    await caseListPage.clickStatusTab('All');
     await expect(page.getByTestId('bulk-header-checkbox')).toHaveCount(0);
+
+    await caseListPage.clickStatusTab('Closed');
+    await expect(page.getByTestId('bulk-header-checkbox')).toBeVisible();
+
+    await caseListPage.clickStatusTab('Archived');
+    await expect(page.getByTestId('bulk-header-checkbox')).toBeVisible();
 
     await caseListPage.clickStatusTab('Draft');
     await expect(page.getByTestId('bulk-header-checkbox')).toBeVisible();

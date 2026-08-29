@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/authz"
@@ -45,6 +47,7 @@ func (f *fakePolicy) Query(_ context.Context, _ string, input, out any) error {
 type mcpTestEnv struct {
 	server      *httptest.Server
 	policy      *fakePolicy
+	repo        interfaces.Repository
 	publicCase  *model.Case
 	privateCase *model.Case
 	publicActID int64
@@ -94,6 +97,7 @@ func newMCPTestEnv(t *testing.T, policy *fakePolicy) *mcpTestEnv {
 	return &mcpTestEnv{
 		server:      srv,
 		policy:      policy,
+		repo:        repo,
 		publicCase:  pubCase,
 		privateCase: privCreated,
 		publicActID: pubAct.ID,
@@ -161,6 +165,41 @@ func TestMCP_ListCases_ExcludesPrivate(t *testing.T) {
 	gt.Array(t, out.Cases).Length(1)
 	gt.Value(t, out.Cases[0].ID).Equal(env.publicCase.ID)
 	gt.Value(t, out.Cases[0].Title).Equal("Public Case")
+}
+
+// The MCP case list exposes no archive argument, so its read surface stays the
+// active slice: a case the team has put away is never handed to an MCP client.
+func TestMCP_ListCases_ExcludesArchived(t *testing.T) {
+	env := newMCPTestEnv(t, allowAsMember())
+	ctx := context.Background()
+
+	archivedAt := time.Now().UTC()
+	archived, err := env.repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		ReporterID:  "UMEMBER",
+		Title:       "Archived Case",
+		Description: "Put away",
+		Status:      types.CaseStatusClosed,
+		ArchivedAt:  &archivedAt,
+		AssigneeIDs: []string{},
+	})
+	gt.NoError(t, err).Required()
+
+	res := env.callTool(t, "hecaton_list_cases", map[string]any{"workspace_id": testWorkspaceID})
+	gt.Bool(t, res.IsError).False()
+
+	var out struct {
+		Cases []struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		} `json:"cases"`
+	}
+	decodeStructured(t, res, &out)
+	gt.Array(t, out.Cases).Length(1).Required()
+	gt.Value(t, out.Cases[0].ID).Equal(env.publicCase.ID)
+
+	for _, c := range out.Cases {
+		gt.Value(t, c.ID).NotEqual(archived.ID)
+	}
 }
 
 func TestMCP_GetCases_OmitsPrivateAndMissing(t *testing.T) {

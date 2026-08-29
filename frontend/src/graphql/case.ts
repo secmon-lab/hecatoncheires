@@ -27,6 +27,11 @@ const CASE_MUTATION_FIELDS = gql`
     title
     description
     status
+    # archivedAt is null for an active case. There is no derived archived
+    # boolean on the wire; the UI checks archivedAt != null. It rides in the
+    # mutation fragment (not only the list one) so archiveCase / unarchiveCase
+    # refresh the detail page's badge and menu from their own response.
+    archivedAt
     isPrivate
     isTest
     accessDenied
@@ -60,8 +65,8 @@ const CASE_LIST_FIELDS = gql`
 
 export const GET_CASES = gql`
   ${CASE_LIST_FIELDS}
-  query GetCases($workspaceId: String!, $status: CaseStatus) {
-    cases(workspaceId: $workspaceId, status: $status) {
+  query GetCases($workspaceId: String!, $status: CaseStatus, $filter: CaseArchiveFilter) {
+    cases(workspaceId: $workspaceId, status: $status, filter: $filter) {
       ...CaseListFields
     }
   }
@@ -80,8 +85,8 @@ export const GET_CASES = gql`
 // it with errorPolicy 'all' so its own rows survive).
 export const GET_CASES_WITH_SLACK_LINK = gql`
   ${CASE_LIST_FIELDS}
-  query GetCasesWithSlackLink($workspaceId: String!, $status: CaseStatus) {
-    cases(workspaceId: $workspaceId, status: $status) {
+  query GetCasesWithSlackLink($workspaceId: String!, $status: CaseStatus, $filter: CaseArchiveFilter) {
+    cases(workspaceId: $workspaceId, status: $status, filter: $filter) {
       ...CaseListFields
       slackChannelURL
     }
@@ -171,6 +176,44 @@ export const REOPEN_CASE = gql`
     reopenCase(workspaceId: $workspaceId, id: $id) {
       ...CaseMutationFields
     }
+  }
+`
+
+// ARCHIVE_CASE / UNARCHIVE_CASE act on one case and run synchronously, so the
+// response is the authoritative post-change Case and the caller can render it
+// directly.
+export const ARCHIVE_CASE = gql`
+  ${CASE_MUTATION_FIELDS}
+  mutation ArchiveCase($workspaceId: String!, $id: Int!) {
+    archiveCase(workspaceId: $workspaceId, id: $id) {
+      ...CaseMutationFields
+    }
+  }
+`
+
+export const UNARCHIVE_CASE = gql`
+  ${CASE_MUTATION_FIELDS}
+  mutation UnarchiveCase($workspaceId: String!, $id: Int!) {
+    unarchiveCase(workspaceId: $workspaceId, id: $id) {
+      ...CaseMutationFields
+    }
+  }
+`
+
+// BULK_ARCHIVE_CASES / BULK_UNARCHIVE_CASES return the ids ACCEPTED for the
+// change, not the ids already changed: the server processes them
+// asynchronously so the call survives the request being cancelled. A refetch
+// straight after would therefore not reflect completion — the caller removes
+// the accepted rows locally instead.
+export const BULK_ARCHIVE_CASES = gql`
+  mutation BulkArchiveCases($workspaceId: String!, $ids: [Int!]!) {
+    bulkArchiveCases(workspaceId: $workspaceId, ids: $ids)
+  }
+`
+
+export const BULK_UNARCHIVE_CASES = gql`
+  mutation BulkUnarchiveCases($workspaceId: String!, $ids: [Int!]!) {
+    bulkUnarchiveCases(workspaceId: $workspaceId, ids: $ids)
   }
 `
 
