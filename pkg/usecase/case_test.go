@@ -4867,8 +4867,8 @@ func TestCaseUseCase_BulkArchiveCases(t *testing.T) {
 		gt.Bool(t, stored.IsArchived()).False()
 	})
 
-	// Only staleness is skipped. A real failure — access denied here — must
-	// reach the caller rather than being swallowed.
+	// Only staleness is skipped. Access denial is the one outcome an operator
+	// needs to see, so it must reach the caller rather than being swallowed.
 	t.Run("propagates an access denial", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
@@ -4886,15 +4886,27 @@ func TestCaseUseCase_BulkArchiveCases(t *testing.T) {
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 
-	t.Run("propagates a missing id", func(t *testing.T) {
+	// A row the user selected and someone else deleted in between is the list
+	// going stale, like the two cases above — not a fault that should leave
+	// the rest of a large batch unprocessed.
+	t.Run("skips an id whose case no longer exists", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := archiveTestCtx()
 
 		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed})
 
-		_, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, 9999})
-		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+		archived, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, 9999, c2.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(2).Required()
+
+		// The ids after the missing one are still processed.
+		for _, id := range []int64{c1.ID, c2.ID} {
+			stored, getErr := repo.Case().Get(ctx, testWorkspaceID, id)
+			gt.NoError(t, getErr).Required()
+			gt.Bool(t, stored.IsArchived()).True()
+		}
 	})
 
 	t.Run("an empty batch returns an empty non-nil slice", func(t *testing.T) {

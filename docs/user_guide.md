@@ -69,7 +69,7 @@ The notification is best-effort: a Slack failure is reported server-side and nev
 - `Case.archivedAt: Time` — null for an active Case, non-null once archived. There is no derived `archived` boolean; clients check `archivedAt != null`.
 - `cases(workspaceId, status, filter: CaseArchiveFilter = ACTIVE)` — `filter` selects `ACTIVE` / `ARCHIVED` / `ALL`. The default keeps an existing client seeing exactly what it saw before archiving existed.
 - `archiveCase(workspaceId, id)` / `unarchiveCase(workspaceId, id)` — archive or restore a single Case, synchronously.
-- `bulkArchiveCases(workspaceId, ids: [Int!]!): [Int!]!` / `bulkUnarchiveCases(...)` — the archiving is dispatched asynchronously and the call returns immediately with the **accepted ids**. Ids that are already archived, or that are no longer CLOSED because someone reopened them in the meantime, are skipped during processing rather than failing the batch.
+- `bulkArchiveCases(workspaceId, ids: [Int!]!): [Int!]!` / `bulkUnarchiveCases(...)` — the archiving is dispatched asynchronously and the call returns immediately with the **accepted ids**. Ids that went stale between the selection and the write are skipped rather than failing the batch: already archived, no longer CLOSED because someone reopened them, or deleted in the meantime. An access denial is **not** skipped — it aborts the batch and is reported server-side, because it is the one outcome an operator needs to see.
 - All four require an authenticated user, checked synchronously before any work starts; each id is then checked against the Case's private-access rules.
 
 ## Creating a Case in Slack (Slash → modal)

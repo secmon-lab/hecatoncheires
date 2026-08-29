@@ -388,6 +388,11 @@ export default function CaseList() {
   // finished. The mutation returns the accepted ids and processes them in the
   // background, so a refetch straight after cannot reflect completion — the
   // rows are removed here instead and the next natural load reconciles.
+  //
+  // Scoped to the tab the action was taken on, and cleared when the user
+  // leaves it. Without the scope the same ids would also be subtracted from
+  // the DESTINATION tab, so a case archived from Closed would be missing from
+  // Archived (where it has just arrived) until a full page reload.
   const [pendingIds, setPendingIds] = useState<Set<number>>(() => new Set())
 
   const cases: CaseRow[] = useMemo(() => {
@@ -450,6 +455,7 @@ export default function CaseList() {
   // longer see.
   useEffect(() => {
     setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
+    setPendingIds((prev) => (prev.size === 0 ? prev : new Set()))
   }, [statusFilter, wsKey])
 
   // Revalidate the tab the user just switched to. All five queries mount once
@@ -458,12 +464,20 @@ export default function CaseList() {
   // Closed tab, restored from the Archived tab, closed in another window) is
   // missing from the destination tab until a full page reload.
   //
+  // Skipped on the first render: cache-and-network is already fetching every
+  // query then, and refetching would issue a second identical request.
+  //
   // Bulk archive / restore is asynchronous server-side, so a refetch fired
   // immediately after a large batch can still land mid-flight; the next visit
   // to the tab reconciles. Single-row changes are effectively complete by the
   // time the user switches.
+  const tabRevalidateMounted = useRef(false)
   useEffect(() => {
     if (!currentWorkspace) return
+    if (!tabRevalidateMounted.current) {
+      tabRevalidateMounted.current = true
+      return
+    }
     switch (statusFilter) {
       case 'OPEN':
         void refetchOpen()

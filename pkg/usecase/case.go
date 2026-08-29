@@ -1827,19 +1827,20 @@ func (uc *CaseUseCase) changeActor(ctx context.Context) string {
 // control, status check, persistence, Slack notification). The archive body
 // lives only in ArchiveCase and is never duplicated here.
 //
-// Two error classes are skipped rather than failing the batch, because the
-// selection is made against a snapshot of the list and can go stale between
-// the click and the write: ids already archived by someone else, and ids no
-// longer CLOSED because someone reopened them. Every other error (not found,
-// access denied, persistence failure) is propagated — a bulk operation must
-// not silently swallow a real failure. The returned slice contains only the
-// cases that were newly archived.
+// Staleness is skipped rather than failing the batch, because the selection is
+// made against a snapshot of the list and the rows can move between the click
+// and the write: an id already archived by someone else, an id no longer
+// CLOSED because someone reopened it, and an id whose case was deleted. See
+// isStaleForBulkArchive. Every other error — access denied, a persistence
+// failure — is propagated, because a bulk operation must not silently swallow
+// a real failure. The returned slice contains only the cases that were newly
+// archived.
 func (uc *CaseUseCase) BulkArchiveCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
 	archived := make([]*model.Case, 0, len(ids))
 	for _, id := range ids {
 		updated, err := uc.ArchiveCase(ctx, workspaceID, id)
 		if err != nil {
-			if errors.Is(err, ErrCaseAlreadyArchived) || errors.Is(err, ErrCaseNotClosed) {
+			if isStaleForBulkArchive(err) {
 				continue
 			}
 			return nil, goerr.Wrap(err, "failed to bulk archive case", goerr.V(CaseIDKey, id))
@@ -1849,15 +1850,33 @@ func (uc *CaseUseCase) BulkArchiveCases(ctx context.Context, workspaceID string,
 	return archived, nil
 }
 
+// isStaleForBulkArchive reports whether err means the selected row no longer
+// describes the case as it is now, rather than that the operation failed.
+//
+// ErrCaseNotFound is in this set for the same reason as the other two: a row
+// the user selected and someone else deleted in between is the list going
+// stale, not a fault to abort the remaining ids for. Aborting there would
+// leave the rest of a large batch unprocessed while the resolver has already
+// reported every id as accepted.
+//
+// ErrAccessDenied is deliberately NOT in this set. It is the one outcome an
+// operator needs to see, and treating it as routine would let a permission
+// problem pass unnoticed through a bulk call.
+func isStaleForBulkArchive(err error) bool {
+	return errors.Is(err, ErrCaseAlreadyArchived) ||
+		errors.Is(err, ErrCaseNotClosed) ||
+		errors.Is(err, ErrCaseNotFound)
+}
+
 // BulkUnarchiveCases restores the given cases, mirroring BulkArchiveCases.
-// Ids that are not archived are skipped for the same staleness reason; every
-// other error is propagated.
+// Ids that are not archived, and ids whose case was deleted in the meantime,
+// are skipped for the same staleness reason; every other error is propagated.
 func (uc *CaseUseCase) BulkUnarchiveCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
 	restored := make([]*model.Case, 0, len(ids))
 	for _, id := range ids {
 		updated, err := uc.UnarchiveCase(ctx, workspaceID, id)
 		if err != nil {
-			if errors.Is(err, ErrCaseNotArchived) {
+			if errors.Is(err, ErrCaseNotArchived) || errors.Is(err, ErrCaseNotFound) {
 				continue
 			}
 			return nil, goerr.Wrap(err, "failed to bulk unarchive case", goerr.V(CaseIDKey, id))

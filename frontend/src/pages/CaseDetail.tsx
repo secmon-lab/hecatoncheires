@@ -473,6 +473,12 @@ export default function CaseDetail() {
           >
             {t('btnClose')}
           </Button>
+        ) : isArchived ? (
+          // An archived case cannot go back to OPEN — the server refuses it,
+          // because an archived OPEN case would appear in no listing at all.
+          // Offer nothing rather than a control whose click does nothing;
+          // Unarchive is in the kebab menu.
+          null
         ) : (
           <Button
             size="sm"
@@ -887,6 +893,10 @@ export default function CaseDetail() {
                   <select
                     data-testid="aside-board-status"
                     value={boardStatus}
+                    // An archived case takes no board writes: the server
+                    // rejects them, so the control is disabled rather than
+                    // left to fail silently. Unarchive it first.
+                    disabled={isArchived}
                     onChange={(e) => { void handleBoardStatusChange(e.target.value) }}
                     style={{
                       border: '1px solid var(--border-default)',

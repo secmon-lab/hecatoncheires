@@ -956,6 +956,63 @@ describe('CaseList archive tab and bulk actions', () => {
     expect(screen.queryByTestId('bulk-archive-button')).toBeNull()
   })
 
+  // The rows removed locally after a bulk archive are scoped to the tab the
+  // action was taken on. Without that scope the same ids would also be
+  // subtracted from the destination tab, so a case archived from Closed was
+  // missing from Archived — where it had just arrived — until a full reload.
+  it('shows an archived case on the Archived tab right after archiving it', async () => {
+    const archiveMock: MockedResponse = {
+      request: {
+        query: BULK_ARCHIVE_CASES,
+        variables: { workspaceId: WORKSPACE, ids: [2] },
+      },
+      result: { data: { bulkArchiveCases: [2] } },
+    }
+    // The server has applied the archive by the time the Archived tab asks
+    // again, so case 2 comes back in the archived slice.
+    const archivedAfter: MockedResponse = {
+      request: {
+        query: GET_CASES_WITH_SLACK_LINK,
+        variables: { workspaceId: WORKSPACE, filter: 'ARCHIVED' },
+      },
+      maxUsageCount: 5,
+      result: { data: { cases: [archivedCaseRow(2, 'Closed Beta')] } },
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/ws/risk/cases?status=closed']}>
+        <MockedProvider
+          mocks={[
+            fieldConfigMock(WORKSPACE),
+            caseStatusConfigMock(WORKSPACE, null),
+            casesMock(WORKSPACE, 'OPEN', [caseRow(1, 'Open Alpha', 'OPEN')]),
+            casesMock(WORKSPACE, 'CLOSED', [caseRow(2, 'Closed Beta', 'CLOSED')]),
+            archivedAfter,
+            draftsMock(WORKSPACE),
+            archiveMock,
+          ]}
+          addTypename={false}
+        >
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/cases" element={<CaseList />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-2'))
+    fireEvent.click(screen.getByTestId('bulk-archive-button'))
+    await waitFor(() => {
+      expect(screen.queryByText('Closed Beta')).toBeNull()
+    })
+
+    fireEvent.click(screen.getByTestId('status-tab-archived'))
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+  })
+
   it('drops the selection when the user leaves the tab', async () => {
     renderArchiveList('/ws/risk/cases?status=closed', {
       closedRows: [caseRow(2, 'Closed Beta', 'CLOSED')],
