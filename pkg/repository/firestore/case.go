@@ -185,6 +185,14 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 			return nil, goerr.Wrap(err, "failed to decode case", goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
+		// The archive scope is applied in memory, not as a Where clause: adding
+		// an ArchivedAt condition to the Status filter above would require a
+		// composite index, which this project forbids. The Action and Memo
+		// repositories filter their archive scope the same way.
+		if !cfg.ArchiveScope().Allows(c.IsArchived()) {
+			continue
+		}
+
 		cases = append(cases, &c)
 	}
 

@@ -84,7 +84,10 @@ func (uc *CaseUseCase) ListFrequentAssignees(ctx context.Context, workspaceID st
 // runs in the async tail, so its error is reported by async.Dispatch through
 // errutil.Handle and never reaches the user's request.
 func (uc *CaseUseCase) refreshAssigneeRanking(ctx context.Context, workspaceID string, now time.Time) error {
-	// Passing no options excludes DRAFT cases (CaseRepository.List's default).
+	// Passing no options excludes DRAFT cases and archived cases
+	// (CaseRepository.List's defaults). The ranking is a frequency signal that
+	// orders the assignee picker, so cases the team has put away should stop
+	// influencing it.
 	cases, err := uc.repo.Case().List(ctx, workspaceID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to list cases for assignee ranking",

@@ -197,6 +197,11 @@ type Case {
   # thread-mode cases; null for channel-mode cases. Validity is workspace-
   # scoped: resolve display from caseStatusConfig.
   boardStatus: String
+  # archivedAt is null for an active case and non-null once archived. There is
+  # no derived `archived` boolean; callers derive it from archivedAt != null.
+  # An archived case is hidden from the default `cases` listing and the Case
+  # board, and is reached through the ARCHIVED archive filter.
+  archivedAt: Time
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   # actions exposes the case's actions. The `filter` argument selects which
   # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
@@ -298,6 +303,18 @@ enum ActionArchiveFilter {
   ARCHIVED
   # ALL returns both active and archived actions. Intended for cleanup /
   # batch operations; UI views should use ACTIVE or ARCHIVED.
+  ALL
+}
+
+# CaseArchiveFilter selects which archive slice the `cases` query returns.
+enum CaseArchiveFilter {
+  # ACTIVE returns only non-archived cases. Default for every caller, so a
+  # client that names no filter never sees archived cases.
+  ACTIVE
+  # ARCHIVED returns only archived cases (the Cases page's Archived tab).
+  ARCHIVED
+  # ALL returns both. Intended for inventory / batch use, not for the
+  # user-facing tabs.
   ALL
 }
 
@@ -744,8 +761,10 @@ type Query {
   # Deployment-wide workspace groups. Empty list when none are configured.
   workspaceGroups: [WorkspaceGroup!]!
 
-  # Cases
-  cases(workspaceId: String!, status: CaseStatus): [Case!]!
+  # Cases. `filter` selects the archive slice and defaults to ACTIVE, so an
+  # existing client that names no filter keeps seeing exactly the cases it saw
+  # before archiving existed.
+  cases(workspaceId: String!, status: CaseStatus, filter: CaseArchiveFilter = ACTIVE): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
   # Drafts authored by the current user in this workspace. Draft cases are
@@ -861,6 +880,22 @@ type Mutation {
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
+  # Archive a CLOSED case so it disappears from the default Cases list and the
+  # Case board. The case document is preserved and can be restored via
+  # unarchiveCase; deleteCase remains the only permanent removal. Fails for an
+  # OPEN or DRAFT case, and for a case that is already archived.
+  archiveCase(workspaceId: String!, id: Int!): Case!
+  # Restore a previously archived case back to the active listing.
+  unarchiveCase(workspaceId: String!, id: Int!): Case!
+  # Archive multiple cases in one call (e.g. clearing the Closed tab). The
+  # archiving runs asynchronously so it survives the request being cancelled,
+  # and the returned ids are the ones ACCEPTED for archiving. Ids that are
+  # already archived, or that are no longer CLOSED because someone reopened
+  # them, are skipped during processing.
+  bulkArchiveCases(workspaceId: String!, ids: [Int!]!): [Int!]!
+  # Restore multiple archived cases. Same async contract as bulkArchiveCases;
+  # ids that are not archived are skipped.
+  bulkUnarchiveCases(workspaceId: String!, ids: [Int!]!): [Int!]!
   # updateCaseStatus sets a thread-mode case's board status (Kanban column).
   # The lifecycle status is synced server-side (a closed board status closes
   # the case). Used by the Kanban drag-and-drop.

@@ -225,6 +225,8 @@ var messagesEN = [msgKeyCount]string{
 	MsgCaseChangeStatus:             ":arrows_counterclockwise: %s changed the case status: %s -> %s",
 	MsgCaseChangeAssigneeAssigned:   ":bust_in_silhouette: %s assigned %s",
 	MsgCaseChangeAssigneeUnassigned: ":bust_in_silhouette: %s unassigned %s",
+	MsgCaseChangeArchived:           ":file_cabinet: %s archived this case",
+	MsgCaseChangeUnarchived:         ":outbox_tray: %s unarchived this case",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -435,4 +437,6 @@ var messagesJA = [msgKeyCount]string{
 	MsgCaseChangeStatus:             ":arrows_counterclockwise: %s がケースのステータスを変更しました: %s → %s",
 	MsgCaseChangeAssigneeAssigned:   ":bust_in_silhouette: %s が %s をアサインしました",
 	MsgCaseChangeAssigneeUnassigned: ":bust_in_silhouette: %s が %s のアサインを解除しました",
+	MsgCaseChangeArchived:           ":file_cabinet: %s がこのケースをアーカイブしました",
+	MsgCaseChangeUnarchived:         ":outbox_tray: %s がこのケースのアーカイブを解除しました",
 }

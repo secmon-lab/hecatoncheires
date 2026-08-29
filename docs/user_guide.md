@@ -15,7 +15,7 @@ Private Cases you are not a channel member of never appear here, even if you hap
 
 ## Case list (Web UI)
 
-Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the **Open / Closed / Drafts / All** tabs, a title search box, and a column picker.
+Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the **Open / Closed / Drafts / Archived / All** tabs, a title search box, and a column picker.
 
 - **Rows per page** — the footer control switches between **20 / 50 / 100 / 200** rows. The choice is remembered in your browser (per browser, not per workspace) and applies the next time you open any Case list.
 - **Status column** — in a **thread-mode** workspace the column shows the Case's board status from the workspace's `[case.status]` configuration (e.g. *Triage*, *In Review*, *Done*), with the colour configured for that status. In a **channel-mode** workspace it shows the lifecycle badge (Open / Closed / Draft), which is also the fallback for a thread-mode Case that has no board status set yet. The **Open / Closed** tabs always filter on the lifecycle status, which the board status keeps in sync (a Case in a closed board status counts as Closed).
@@ -24,6 +24,53 @@ Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the 
 - **Coming back keeps your place** — the selected tab and the current page live in the URL (`?status=closed&page=3`), so browser Back, the Case detail page's **Back** button, and a shared or bookmarked link all return to the same tab and page. Page 1 and the Open tab are the defaults and are left out of the URL.
 
 The column picker's selection is also stored in your browser, per workspace, because the available custom-field columns differ between workspaces.
+
+## Archiving a Case
+
+Closed Cases pile up in the **Closed** tab and in the closed columns of the Case board. Archiving puts one away without deleting it: the Case keeps every field, every Action, every Memo and its Slack channel or thread, and can be restored at any time. `deleteCase` remains the only permanent removal.
+
+### What archiving changes
+
+- **Only a CLOSED Case can be archived.** An Open or Draft Case is rejected. Archiving hides a Case from the list, the board, the home dashboard and the Job scan at once, and an Open Case disappearing from all of them would leave no way to see why.
+- **Archiving does not change the lifecycle status.** The Case stays CLOSED, and a thread-mode Case keeps its board status. Visibility is decided by the pair (status, archived or not).
+- **An archived Case cannot go back to Open.** `reopenCase` and a board-status change are both rejected while it is archived — that state would appear in no listing at all. Restore it first, then reopen.
+- **The detail page stays reachable.** An archived Case opens normally by URL or from the Archived tab, with an **Archived** badge in the header. Only the listings drop it.
+- **Child Actions and Memos are untouched.** They keep their own archive state; archiving the Case does not archive them.
+
+### Where an archived Case disappears from
+
+| Surface | Archived Cases |
+| --- | --- |
+| Cases list — Open / Closed / All tabs | Hidden |
+| Cases list — **Archived** tab | Shown (this is the only listing that shows them) |
+| Case board (Kanban) | Hidden |
+| Home dashboard | Hidden |
+| Scheduled Agent Job scan | Hidden |
+| `case_ref` picker (new references) | Hidden — existing references resolve by id and keep working |
+| Assignee suggestions | Not counted |
+| MCP `hecaton_list_cases`, agent `case__list_cases` | Hidden |
+| BigQuery export | **Included**, with an `archived_at` column |
+
+### Doing it from the Web UI
+
+- **One Case** — open it and use the kebab (⋯) menu in the header: **Archive** on a closed Case, **Unarchive** on an archived one. Only the applicable item is shown. The change is applied synchronously and the page refreshes itself.
+- **Many at once** — on the **Closed** tab, tick the rows and press **Archive selected**. On the **Archived** tab the same selection offers **Restore selected**. There is no confirmation dialog: archiving is reversible from the Archived tab, and the rows were picked explicitly.
+- Rows for private Cases you are not a member of cannot be selected, exactly as on the Drafts tab.
+- The bulk call runs **asynchronously** on the server, so it finishes even if the browser navigates away. The selected rows disappear from the list as soon as the call is accepted; the destination tab reflects the persisted result on its next load. Per-Case failures during processing are reported server-side (`errutil.Handle` → Sentry / log), not surfaced in the UI.
+
+### Slack notification
+
+Archiving or restoring a **thread-mode** Case posts a one-line context message into the Case's Slack thread, naming who did it. A **channel-mode** Case gets no post — it has no thread, and this matches every other Case change notification (title, status, assignee), which are all thread-mode only. The Slack channel itself is never archived.
+
+The notification is best-effort: a Slack failure is reported server-side and never rolls back the archive.
+
+### GraphQL
+
+- `Case.archivedAt: Time` — null for an active Case, non-null once archived. There is no derived `archived` boolean; clients check `archivedAt != null`.
+- `cases(workspaceId, status, filter: CaseArchiveFilter = ACTIVE)` — `filter` selects `ACTIVE` / `ARCHIVED` / `ALL`. The default keeps an existing client seeing exactly what it saw before archiving existed.
+- `archiveCase(workspaceId, id)` / `unarchiveCase(workspaceId, id)` — archive or restore a single Case, synchronously.
+- `bulkArchiveCases(workspaceId, ids: [Int!]!): [Int!]!` / `bulkUnarchiveCases(...)` — the archiving is dispatched asynchronously and the call returns immediately with the **accepted ids**. Ids that are already archived, or that are no longer CLOSED because someone reopened them in the meantime, are skipped during processing rather than failing the batch.
+- All four require an authenticated user, checked synchronously before any work starts; each id is then checked against the Case's private-access rules.
 
 ## Creating a Case in Slack (Slash → modal)
 

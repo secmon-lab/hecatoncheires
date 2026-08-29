@@ -146,7 +146,12 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 	var errs []error
 
 	// Cases (drafts excluded by List; private filtered here when configured).
-	cases, casesErr := e.repo.Case().List(ctx, wsID)
+	// Archived cases ARE exported — archiving is a visibility change in the
+	// product, not a reason to drop the row from analytics, and the
+	// archived_at column carries the state. Actions and Memos are exported the
+	// same way.
+	cases, casesErr := e.repo.Case().List(ctx, wsID,
+		interfaces.WithArchiveScope(interfaces.CaseArchiveScopeAll))
 	if casesErr != nil {
 		// Without the exported case set we cannot scope Actions / Memos; skip
 		// those, but still export the workspace-level Knowledge / Tag below.

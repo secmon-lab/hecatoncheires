@@ -788,12 +788,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created := time.Now().UTC().Truncate(time.Second)
+		archivedAt := created.Add(time.Hour)
 		threadTS := fmt.Sprintf("%d.000777", time.Now().UnixNano())
 		want := &model.Case{
 			ReporterID:            "U-REPORTER",
 			AssigneeIDs:           []string{"U-A1", "U-A2"},
 			CreatedAt:             created,
 			UpdatedAt:             created,
+			ArchivedAt:            &archivedAt,
 			Title:                 "Full case",
 			Description:           "Every field populated",
 			Status:                types.CaseStatusOpen,
@@ -837,6 +839,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, got.AgentSourceIDs).Equal([]model.SourceID{"src-1"})
 		gt.Bool(t, got.CreatedAt.Equal(created)).True()
 		gt.Bool(t, got.UpdatedAt.Equal(created)).True()
+		gt.Value(t, got.ArchivedAt).NotNil().Required()
+		gt.Bool(t, got.ArchivedAt.Equal(archivedAt)).True()
+		gt.Bool(t, got.IsArchived()).True()
 
 		fv, ok := got.FieldValues["severity"]
 		gt.Bool(t, ok).True().Required()
@@ -1171,6 +1176,241 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Number(t, len(got)).Equal(1)
 		gt.Value(t, got[0].ID).Equal(draft.ID)
 		gt.Value(t, got[0].Title).Equal("Draft A")
+	})
+
+	// seedArchiveScopeCases creates one OPEN case, one active CLOSED case and
+	// one archived CLOSED case in a fresh workspace. Only a CLOSED case can be
+	// archived (the usecase enforces it), so the archived fixture is CLOSED.
+	seedArchiveScopeCases := func(t *testing.T, repo interfaces.Repository, wsID string) (openID, activeClosedID, archivedID int64) {
+		t.Helper()
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Second)
+		archivedAt := now.Add(time.Minute)
+
+		openCase, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-ARCHIVE-SCOPE",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Title:      "Open Active",
+			Status:     types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		activeClosed, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-ARCHIVE-SCOPE",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Title:      "Closed Active",
+			Status:     types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+
+		archived, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-ARCHIVE-SCOPE",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Title:      "Closed Archived",
+			Status:     types.CaseStatusClosed,
+			ArchivedAt: &archivedAt,
+		})
+		gt.NoError(t, err).Required()
+
+		return openCase.ID, activeClosed.ID, archived.ID
+	}
+
+	caseIDSet := func(cases []*model.Case) map[int64]bool {
+		seen := make(map[int64]bool, len(cases))
+		for _, c := range cases {
+			seen[c.ID] = true
+		}
+		return seen
+	}
+
+	t.Run("List excludes archived cases by default", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		openID, activeClosedID, archivedID := seedArchiveScopeCases(t, repo, wsID)
+
+		got, err := repo.Case().List(ctx, wsID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(2)
+
+		seen := caseIDSet(got)
+		gt.Bool(t, seen[openID]).True()
+		gt.Bool(t, seen[activeClosedID]).True()
+		gt.Bool(t, seen[archivedID]).False()
+		for _, c := range got {
+			gt.Bool(t, c.IsArchived()).False()
+		}
+	})
+
+	t.Run("List with the archived-only scope returns only archived cases", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		openID, activeClosedID, archivedID := seedArchiveScopeCases(t, repo, wsID)
+
+		got, err := repo.Case().List(ctx, wsID,
+			interfaces.WithArchiveScope(interfaces.CaseArchiveScopeArchivedOnly))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(1).Required()
+		gt.Value(t, got[0].ID).Equal(archivedID)
+		gt.Value(t, got[0].Title).Equal("Closed Archived")
+		gt.Bool(t, got[0].IsArchived()).True()
+
+		seen := caseIDSet(got)
+		gt.Bool(t, seen[openID]).False()
+		gt.Bool(t, seen[activeClosedID]).False()
+	})
+
+	t.Run("List with the all scope returns active and archived cases", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		openID, activeClosedID, archivedID := seedArchiveScopeCases(t, repo, wsID)
+
+		got, err := repo.Case().List(ctx, wsID,
+			interfaces.WithArchiveScope(interfaces.CaseArchiveScopeAll))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(3)
+
+		seen := caseIDSet(got)
+		gt.Bool(t, seen[openID]).True()
+		gt.Bool(t, seen[activeClosedID]).True()
+		gt.Bool(t, seen[archivedID]).True()
+	})
+
+	t.Run("List combines the status filter with the archive scope", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		_, activeClosedID, archivedID := seedArchiveScopeCases(t, repo, wsID)
+
+		archivedClosed, err := repo.Case().List(ctx, wsID,
+			interfaces.WithStatus(types.CaseStatusClosed),
+			interfaces.WithArchiveScope(interfaces.CaseArchiveScopeArchivedOnly))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(archivedClosed)).Equal(1).Required()
+		gt.Value(t, archivedClosed[0].ID).Equal(archivedID)
+
+		// The same status filter without the scope must not leak the archived
+		// case into the Closed tab.
+		activeClosedList, err := repo.Case().List(ctx, wsID,
+			interfaces.WithStatus(types.CaseStatusClosed))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(activeClosedList)).Equal(1).Required()
+		gt.Value(t, activeClosedList[0].ID).Equal(activeClosedID)
+	})
+
+	t.Run("ListDrafts is unaffected by the archive scope", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		seedArchiveScopeCases(t, repo, wsID)
+
+		draft, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Draft Untouched",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-author",
+		})
+		gt.NoError(t, err).Required()
+
+		drafts, err := repo.Case().ListDrafts(ctx, wsID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(drafts)).Equal(1).Required()
+		gt.Value(t, drafts[0].ID).Equal(draft.ID)
+		gt.Bool(t, drafts[0].IsArchived()).False()
+	})
+
+	t.Run("ScanAll streams archived cases too", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		openID, activeClosedID, archivedID := seedArchiveScopeCases(t, repo, wsID)
+
+		var scanned []*model.Case
+		gt.NoError(t, repo.Case().ScanAll(ctx, wsID, func(c *model.Case) error {
+			scanned = append(scanned, c)
+			return nil
+		})).Required()
+		gt.Number(t, len(scanned)).Equal(3)
+
+		seen := caseIDSet(scanned)
+		gt.Bool(t, seen[openID]).True()
+		gt.Bool(t, seen[activeClosedID]).True()
+		gt.Bool(t, seen[archivedID]).True()
+
+		archivedCount := 0
+		for _, c := range scanned {
+			if c.IsArchived() {
+				archivedCount++
+			}
+		}
+		gt.Number(t, archivedCount).Equal(1)
+	})
+
+	t.Run("a case stored without ArchivedAt reads back as active", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		// Documents written before the field existed simply carry no
+		// ArchivedAt; both backends must decode that as "not archived" so no
+		// backfill is needed.
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-LEGACY",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Legacy Case",
+			Status:     types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ArchivedAt).Nil()
+		gt.Bool(t, got.IsArchived()).False()
+
+		listed, err := repo.Case().List(ctx, wsID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(listed)).Equal(1).Required()
+		gt.Value(t, listed[0].ID).Equal(created.ID)
+	})
+
+	t.Run("Update clears ArchivedAt", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		now := time.Now().UTC().Truncate(time.Second)
+		archivedAt := now
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-UNARCHIVE",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Title:      "To Restore",
+			Status:     types.CaseStatusClosed,
+			ArchivedAt: &archivedAt,
+		})
+		gt.NoError(t, err).Required()
+
+		created.ArchivedAt = nil
+		created.UpdatedAt = now.Add(time.Minute)
+		updated, err := repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.ArchivedAt).Nil()
+
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ArchivedAt).Nil()
+		gt.Bool(t, got.IsArchived()).False()
 	})
 
 	t.Run("ListDrafts returns every draft in the workspace regardless of reporter", func(t *testing.T) {

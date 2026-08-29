@@ -219,7 +219,9 @@ func (h *mcpHandler) runListCases(ctx context.Context, in listCasesInput) (listC
 		statusPtr = &status
 	}
 
-	cases, err := h.caseUC.ListCases(ctx, in.WorkspaceID, statusPtr)
+	// Archived cases are never exposed via MCP: the tool has no archive
+	// argument, so the read surface stays the active slice.
+	cases, err := h.caseUC.ListCases(ctx, in.WorkspaceID, statusPtr, interfaces.CaseArchiveScopeActiveOnly)
 	if err != nil {
 		return listCasesOutput{}, goerr.Wrap(err, "failed to list cases")
 	}

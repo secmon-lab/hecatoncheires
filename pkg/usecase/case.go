@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
 )
@@ -1423,8 +1424,13 @@ func (uc *CaseUseCase) GetCases(ctx context.Context, workspaceID string, ids []i
 	return out, nil
 }
 
-func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*model.Case, error) {
-	var opts []interfaces.ListCaseOption
+// ListCases returns the workspace's cases, optionally narrowed to one
+// lifecycle status and to one archive slice. scope is an explicit parameter
+// rather than an option with a default so every caller states which slice it
+// wants: user-facing listings pass CaseArchiveScopeActiveOnly, the Archived
+// tab passes CaseArchiveScopeArchivedOnly.
+func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status *types.CaseStatus, scope interfaces.CaseArchiveScope) ([]*model.Case, error) {
+	opts := []interfaces.ListCaseOption{interfaces.WithArchiveScope(scope)}
 	if status != nil {
 		opts = append(opts, interfaces.WithStatus(*status))
 	}
@@ -1468,7 +1474,10 @@ const referenceableCasesLimit = 50
 // recently updated. With a query, results match the Case title (substring,
 // case-insensitive) or the Case ID ("#42" / "42"), sorted by most recently
 // updated. At most limit (clamped to referenceableCasesLimit) rows are
-// returned. DRAFT cases are excluded because List excludes them by default.
+// returned. DRAFT cases are excluded because List excludes them by default,
+// and archived cases for the same reason: passing no options selects the
+// active-only archive scope, so a case that was put away stops being offered
+// as a new reference (existing references resolve by id and are unaffected).
 func (uc *CaseUseCase) ListReferenceableCases(ctx context.Context, workspaceID, query string, limit int) ([]model.CaseRef, error) {
 	if limit <= 0 || limit > referenceableCasesLimit {
 		limit = referenceableCasesLimit
@@ -1709,6 +1718,14 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 		return nil, goerr.Wrap(ErrCaseThreadModeUseStatus, "thread-mode case cannot be reopened directly", goerr.V(CaseIDKey, id))
 	}
 
+	// An archived case is CLOSED by construction, so this check must come
+	// before the DRAFT one to report the specific reason rather than falling
+	// through. Reopening it would produce an OPEN case that appears in no
+	// list, no board, no dashboard and no Job scan.
+	if existing.IsArchived() {
+		return nil, goerr.Wrap(ErrCaseArchived, "archived case cannot be reopened; unarchive it first", goerr.V(CaseIDKey, id))
+	}
+
 	status := existing.Status.Normalize()
 	if status == types.CaseStatusDraft {
 		return nil, goerr.Wrap(ErrCaseIsDraft, "draft case cannot be reopened", goerr.V(CaseIDKey, id))
@@ -1725,6 +1742,153 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	}
 
 	return updated, nil
+}
+
+// ArchiveCase marks a CLOSED case as archived so it disappears from the
+// default Cases list and the Case board. The case document is preserved and
+// can be restored via UnarchiveCase; deleteCase remains the only permanent
+// removal.
+//
+// Only a CLOSED case may be archived: archiving hides the case from the list,
+// the board, the dashboard and the Job scan at once, and an OPEN case
+// vanishing from all of them leaves an operator no way to see why.
+//
+// Idempotency: archiving an already-archived case returns
+// ErrCaseAlreadyArchived rather than silently succeeding, so a caller can
+// distinguish "already done" from "now done". BulkArchiveCases is what treats
+// that as a skip.
+func (uc *CaseUseCase) ArchiveCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if status := existing.Status.Normalize(); status != types.CaseStatusClosed {
+		return nil, goerr.Wrap(ErrCaseNotClosed, "only a closed case can be archived",
+			goerr.V(CaseIDKey, id), goerr.V("status", string(status)))
+	}
+	if existing.IsArchived() {
+		return nil, goerr.Wrap(ErrCaseAlreadyArchived, "case is already archived", goerr.V(CaseIDKey, id))
+	}
+
+	now := time.Now().UTC()
+	existing.ArchivedAt = &now
+	existing.UpdatedAt = now
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to archive case", goerr.V(CaseIDKey, id))
+	}
+
+	uc.postThreadContextLine(ctx, updated, i18n.T(ctx, i18n.MsgCaseChangeArchived, uc.changeActor(ctx)))
+	return updated, nil
+}
+
+// UnarchiveCase restores a previously archived case.
+//
+// Unlike ArchiveCase this checks no lifecycle status. An archived case is
+// CLOSED by construction, and if a document ever violated that invariant (see
+// the archived_case_not_closed consistency check), making it visible again is
+// the correct repair rather than a further obstacle.
+func (uc *CaseUseCase) UnarchiveCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !existing.IsArchived() {
+		return nil, goerr.Wrap(ErrCaseNotArchived, "case is not archived", goerr.V(CaseIDKey, id))
+	}
+
+	existing.ArchivedAt = nil
+	existing.UpdatedAt = time.Now().UTC()
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to unarchive case", goerr.V(CaseIDKey, id))
+	}
+
+	uc.postThreadContextLine(ctx, updated, i18n.T(ctx, i18n.MsgCaseChangeUnarchived, uc.changeActor(ctx)))
+	return updated, nil
+}
+
+// changeActor renders the acting user for a case-change thread notification:
+// a Slack mention when the context carries an auth token, the localized
+// "system" label otherwise. Matches what UpdateCase / UpdateCaseStatus do.
+func (uc *CaseUseCase) changeActor(ctx context.Context) string {
+	if tok, err := auth.TokenFromContext(ctx); err == nil && tok.Sub != "" {
+		return mentionUser(tok.Sub)
+	}
+	return i18n.T(ctx, i18n.MsgChangeActorSystem)
+}
+
+// BulkArchiveCases archives the given cases by delegating each id to
+// ArchiveCase, so bulk and single archive share the exact same path (access
+// control, status check, persistence, Slack notification). The archive body
+// lives only in ArchiveCase and is never duplicated here.
+//
+// Two error classes are skipped rather than failing the batch, because the
+// selection is made against a snapshot of the list and can go stale between
+// the click and the write: ids already archived by someone else, and ids no
+// longer CLOSED because someone reopened them. Every other error (not found,
+// access denied, persistence failure) is propagated — a bulk operation must
+// not silently swallow a real failure. The returned slice contains only the
+// cases that were newly archived.
+func (uc *CaseUseCase) BulkArchiveCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
+	archived := make([]*model.Case, 0, len(ids))
+	for _, id := range ids {
+		updated, err := uc.ArchiveCase(ctx, workspaceID, id)
+		if err != nil {
+			if errors.Is(err, ErrCaseAlreadyArchived) || errors.Is(err, ErrCaseNotClosed) {
+				continue
+			}
+			return nil, goerr.Wrap(err, "failed to bulk archive case", goerr.V(CaseIDKey, id))
+		}
+		archived = append(archived, updated)
+	}
+	return archived, nil
+}
+
+// BulkUnarchiveCases restores the given cases, mirroring BulkArchiveCases.
+// Ids that are not archived are skipped for the same staleness reason; every
+// other error is propagated.
+func (uc *CaseUseCase) BulkUnarchiveCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
+	restored := make([]*model.Case, 0, len(ids))
+	for _, id := range ids {
+		updated, err := uc.UnarchiveCase(ctx, workspaceID, id)
+		if err != nil {
+			if errors.Is(err, ErrCaseNotArchived) {
+				continue
+			}
+			return nil, goerr.Wrap(err, "failed to bulk unarchive case", goerr.V(CaseIDKey, id))
+		}
+		restored = append(restored, updated)
+	}
+	return restored, nil
+}
+
+// BulkArchiveCasesAsync runs BulkArchiveCases in the background via
+// async.Dispatch so the operation outlives the request that triggered it.
+// Clearing a Closed tab issues one archive (DB write + Slack post) per case;
+// on a workspace with hundreds of closed cases that can take longer than the
+// client is willing to wait, and a mid-flight disconnect would otherwise
+// cancel the request context and leave the list half-archived. async.Dispatch
+// hands the work a context with the auth token / logger intact but the
+// cancellation severed. Per-case failures surface through async.Dispatch's
+// error reporting rather than to the caller, which has already returned.
+func (uc *CaseUseCase) BulkArchiveCasesAsync(ctx context.Context, workspaceID string, ids []int64) {
+	async.Dispatch(ctx, func(bgCtx context.Context) error {
+		_, err := uc.BulkArchiveCases(bgCtx, workspaceID, ids)
+		return err
+	})
+}
+
+// BulkUnarchiveCasesAsync mirrors BulkArchiveCasesAsync for restore.
+func (uc *CaseUseCase) BulkUnarchiveCasesAsync(ctx context.Context, workspaceID string, ids []int64) {
+	async.Dispatch(ctx, func(bgCtx context.Context) error {
+		_, err := uc.BulkUnarchiveCases(bgCtx, workspaceID, ids)
+		return err
+	})
 }
 
 // caseStatusSetForWorkspace returns the configurable Case status set for the
@@ -1870,6 +2034,13 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
 		return nil, err
+	}
+
+	// The guard is on "is archived", not on "is the target column open": an
+	// archived case must not take board writes at all, so moving it between
+	// closed columns is rejected too. Unarchive it first.
+	if existing.IsArchived() {
+		return nil, goerr.Wrap(ErrCaseArchived, "archived case cannot change board status; unarchive it first", goerr.V(CaseIDKey, id))
 	}
 
 	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed

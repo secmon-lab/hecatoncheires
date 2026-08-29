@@ -53,48 +53,46 @@ func copyFieldValue(fv model.FieldValue) model.FieldValue {
 	return copied
 }
 
-// copyCase creates a deep copy of a case
+// copyCase creates a deep copy of a case.
+//
+// It starts from a whole-struct copy rather than a field-by-field literal: a
+// literal silently drops any field later added to model.Case, which is exactly
+// how ReporterID was lost on the Firestore Create path (see
+// .claude/rules/architecture.md § Repository write contract). Only the fields
+// that carry a reference — the slices, the map, and the ArchivedAt pointer —
+// need work after that, so a new scalar field is copied automatically.
 func copyCase(c *model.Case) *model.Case {
-	assigneeIDs := make([]string, len(c.AssigneeIDs))
-	copy(assigneeIDs, c.AssigneeIDs)
+	copied := *c
 
-	var fieldValues map[string]model.FieldValue
+	copied.AssigneeIDs = make([]string, len(c.AssigneeIDs))
+	copy(copied.AssigneeIDs, c.AssigneeIDs)
+
+	copied.ChannelUserIDs = make([]string, len(c.ChannelUserIDs))
+	copy(copied.ChannelUserIDs, c.ChannelUserIDs)
+
 	if c.FieldValues != nil {
-		fieldValues = make(map[string]model.FieldValue, len(c.FieldValues))
+		copied.FieldValues = make(map[string]model.FieldValue, len(c.FieldValues))
 		for k, v := range c.FieldValues {
-			fieldValues[k] = copyFieldValue(v)
+			copied.FieldValues[k] = copyFieldValue(v)
 		}
 	}
 
-	channelUserIDs := make([]string, len(c.ChannelUserIDs))
-	copy(channelUserIDs, c.ChannelUserIDs)
-
-	var agentSourceIDs []model.SourceID
 	if c.AgentSourceIDs != nil {
-		agentSourceIDs = make([]model.SourceID, len(c.AgentSourceIDs))
-		copy(agentSourceIDs, c.AgentSourceIDs)
+		copied.AgentSourceIDs = make([]model.SourceID, len(c.AgentSourceIDs))
+		copy(copied.AgentSourceIDs, c.AgentSourceIDs)
 	}
 
-	return &model.Case{
-		ID:                    c.ID,
-		Title:                 c.Title,
-		Description:           c.Description,
-		Status:                c.Status,
-		ReporterID:            c.ReporterID,
-		AssigneeIDs:           assigneeIDs,
-		SlackChannelID:        c.SlackChannelID,
-		SlackThreadTS:         c.SlackThreadTS,
-		BoardStatus:           c.BoardStatus,
-		IsPrivate:             c.IsPrivate,
-		IsTest:                c.IsTest,
-		ChannelUserIDs:        channelUserIDs,
-		FieldValues:           fieldValues,
-		RequestKey:            c.RequestKey,
-		AgentAdditionalPrompt: c.AgentAdditionalPrompt,
-		AgentSourceIDs:        agentSourceIDs,
-		CreatedAt:             c.CreatedAt,
-		UpdatedAt:             c.UpdatedAt,
+	if c.ArchivedAt != nil {
+		archivedAt := *c.ArchivedAt
+		copied.ArchivedAt = &archivedAt
 	}
+
+	// AccessDenied is runtime-only: the usecase sets it on a value it is about
+	// to return, and it is never part of stored state. Clearing it keeps the
+	// stored copy free of a caller's transient flag.
+	copied.AccessDenied = false
+
+	return &copied
 }
 
 func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
@@ -178,6 +176,11 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 				continue
 			}
 		} else if c.IsDraft() {
+			continue
+		}
+		// Archive scope defaults to active-only, so a caller that names no
+		// scope never sees archived cases.
+		if !cfg.ArchiveScope().Allows(c.IsArchived()) {
 			continue
 		}
 		cases = append(cases, copyCase(c))

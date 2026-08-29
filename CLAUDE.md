@@ -310,6 +310,13 @@ new configurable item silently starts out unchecked.
   config** leaves its stored values orphaned, and that is accepted, not
   reported; missing values for `required` fields are likewise not reported. Do
   not reintroduce either without asking.
+- Not every check is config-driven. `archived_case_not_closed` reports an
+  archived Case whose lifecycle status is not `CLOSED` — an invariant every
+  write path already enforces. It is checked anyway because a Case in that
+  state is filtered out of the Cases list, the board, the dashboard and the
+  Job scan at once, leaving an operator no way to find it. Apply the same
+  test to a new invariant: if breaking it makes an entity invisible
+  everywhere, `ValidateDB` is what surfaces it.
 - Note the asymmetry: a **status id** removed or renamed IS reported
   (`board_status_invalid` / `action_status_invalid`), because the Case or Action
   keeps pointing at a Kanban column or state that no longer exists. Only field

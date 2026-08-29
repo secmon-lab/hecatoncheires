@@ -801,6 +801,63 @@ func (e ActionEventKind) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+type CaseArchiveFilter string
+
+const (
+	CaseArchiveFilterActive   CaseArchiveFilter = "ACTIVE"
+	CaseArchiveFilterArchived CaseArchiveFilter = "ARCHIVED"
+	CaseArchiveFilterAll      CaseArchiveFilter = "ALL"
+)
+
+var AllCaseArchiveFilter = []CaseArchiveFilter{
+	CaseArchiveFilterActive,
+	CaseArchiveFilterArchived,
+	CaseArchiveFilterAll,
+}
+
+func (e CaseArchiveFilter) IsValid() bool {
+	switch e {
+	case CaseArchiveFilterActive, CaseArchiveFilterArchived, CaseArchiveFilterAll:
+		return true
+	}
+	return false
+}
+
+func (e CaseArchiveFilter) String() string {
+	return string(e)
+}
+
+func (e *CaseArchiveFilter) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = CaseArchiveFilter(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid CaseArchiveFilter", str)
+	}
+	return nil
+}
+
+func (e CaseArchiveFilter) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *CaseArchiveFilter) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e CaseArchiveFilter) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
 type CaseLifecycleEvent string
 
 const (

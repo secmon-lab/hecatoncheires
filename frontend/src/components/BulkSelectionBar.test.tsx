@@ -3,18 +3,21 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 import { I18nProvider } from '../i18n'
-import BulkSelectionBar from './BulkSelectionBar'
+import BulkSelectionBar, { type BulkAction } from './BulkSelectionBar'
 
 const renderBar = (props: Partial<React.ComponentProps<typeof BulkSelectionBar>> = {}) => {
   const onSubmit = vi.fn()
   const onDelete = vi.fn()
   const onClear = vi.fn()
+  const actions: BulkAction[] = [
+    { key: 'submit', label: 'Submit selected', variant: 'primary', testId: 'bulk-submit-button', onClick: onSubmit },
+    { key: 'delete', label: 'Delete selected', variant: 'danger', testId: 'bulk-delete-button', onClick: onDelete },
+  ]
   render(
     <I18nProvider>
       <BulkSelectionBar
         selectedCount={3}
-        onSubmit={onSubmit}
-        onDelete={onDelete}
+        actions={actions}
         onClear={onClear}
         {...props}
       />
@@ -71,5 +74,55 @@ describe('BulkSelectionBar', () => {
     fireEvent.click(del)
     expect(onSubmit).not.toHaveBeenCalled()
     expect(onDelete).not.toHaveBeenCalled()
+  })
+
+  // The bar is shared by the Drafts, Closed and Archived tabs, which offer
+  // different verbs. Only what the caller passes may be rendered — a leftover
+  // hard-coded button would show a Delete on the Archived tab.
+  it('renders exactly the actions it is given, in order, plus Clear', () => {
+    const onArchive = vi.fn()
+    const onClear = vi.fn()
+    render(
+      <I18nProvider>
+        <BulkSelectionBar
+          selectedCount={2}
+          actions={[
+            {
+              key: 'archive',
+              label: 'Archive selected',
+              variant: 'primary',
+              testId: 'bulk-archive-button',
+              onClick: onArchive,
+            },
+          ]}
+          onClear={onClear}
+        />
+      </I18nProvider>,
+    )
+
+    const bar = screen.getByTestId('bulk-selection-bar')
+    const buttons = Array.from(bar.querySelectorAll('button'))
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]).toHaveAttribute('data-testid', 'bulk-archive-button')
+    expect(buttons[0]).toHaveTextContent('Archive selected')
+    expect(buttons[1]).toHaveAttribute('data-testid', 'bulk-clear-button')
+
+    expect(screen.queryByTestId('bulk-submit-button')).toBeNull()
+    expect(screen.queryByTestId('bulk-delete-button')).toBeNull()
+
+    fireEvent.click(buttons[0])
+    expect(onArchive).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders only Clear when the caller passes no actions', () => {
+    const onClear = vi.fn()
+    render(
+      <I18nProvider>
+        <BulkSelectionBar selectedCount={1} actions={[]} onClear={onClear} />
+      </I18nProvider>,
+    )
+    const buttons = Array.from(screen.getByTestId('bulk-selection-bar').querySelectorAll('button'))
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toHaveAttribute('data-testid', 'bulk-clear-button')
   })
 })

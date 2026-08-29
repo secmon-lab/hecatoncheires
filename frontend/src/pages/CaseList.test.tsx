@@ -6,7 +6,12 @@ import { MockedProvider, MockLink, type MockedResponse } from '@apollo/client/te
 import { GraphQLError } from 'graphql'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { I18nProvider } from '../i18n'
-import { GET_CASES, GET_CASES_WITH_SLACK_LINK } from '../graphql/case'
+import {
+  BULK_ARCHIVE_CASES,
+  BULK_UNARCHIVE_CASES,
+  GET_CASES,
+  GET_CASES_WITH_SLACK_LINK,
+} from '../graphql/case'
 import { GET_CASE_STATUS_CONFIG } from '../graphql/caseStatus'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -76,6 +81,7 @@ interface CaseRowMock {
   slackThreadTS: string | null
   isThreadBound: boolean
   boardStatus: string | null
+  archivedAt: string | null
   createdAt: string
   updatedAt: string
   fields: Array<{ fieldId: string; value: unknown }>
@@ -98,9 +104,17 @@ const caseRow = (id: number, title: string, status: 'OPEN' | 'CLOSED' | 'DRAFT')
   slackThreadTS: null,
   isThreadBound: false,
   boardStatus: null,
+  archivedAt: null,
   createdAt: '2026-05-01T00:00:00Z',
   updatedAt: '2026-05-01T00:00:00Z',
   fields: [],
+})
+
+// An archived Case is CLOSED with a non-null archivedAt; there is no derived
+// `archived` boolean on the wire.
+const archivedCaseRow = (id: number, title: string): CaseRowMock => ({
+  ...caseRow(id, title, 'CLOSED'),
+  archivedAt: '2026-05-02T00:00:00Z',
 })
 
 interface StatusDefMock {
@@ -172,6 +186,18 @@ function casesMock(
   }
 }
 
+// The Archived tab asks for the archived slice with no lifecycle status:
+// every archived case is CLOSED by construction.
+function archivedCasesMock(workspaceId: string, rows?: CaseRowMock[]): MockedResponse {
+  return {
+    request: {
+      query: GET_CASES_WITH_SLACK_LINK,
+      variables: { workspaceId, filter: 'ARCHIVED' },
+    },
+    result: { data: { cases: rows ?? [] } },
+  }
+}
+
 // Row titles are zero-padded so "Open 021" is findable by exact text without
 // also matching "Open 0210".
 function numberedOpenCases(count: number) {
@@ -216,6 +242,7 @@ function renderAt(
     caseStatusConfigMock(workspaceId, statusConfig),
     casesMock(workspaceId, 'OPEN', openRows),
     casesMock(workspaceId, 'CLOSED'),
+    archivedCasesMock(workspaceId),
     draftsMock(workspaceId),
   ]
   const probeRef: LocationProbeRef = { path: '', state: null }
@@ -236,7 +263,12 @@ function renderAt(
 }
 
 function activeTabTestId(): string | null {
-  const candidates = ['status-tab-open', 'status-tab-closed', 'status-tab-draft']
+  const candidates = [
+    'status-tab-open',
+    'status-tab-closed',
+    'status-tab-draft',
+    'status-tab-archived',
+  ]
   for (const id of candidates) {
     const el = screen.queryByTestId(id)
     if (el && el.className.includes('on')) return id
@@ -748,5 +780,220 @@ describe('CaseList cache sharing with the narrower GET_CASES', () => {
       expect(screen.getByText('Created Row')).toBeInTheDocument()
     })
     expect(screen.getByText('Existing Row')).toBeInTheDocument()
+  })
+})
+
+// Archiving takes a CLOSED Case out of the default list and the board. The
+// Cases page is where it is driven from: the Closed tab selects rows and
+// archives them, and the Archived tab shows what was put away and restores it.
+describe('CaseList archive tab and bulk actions', () => {
+  const WORKSPACE = 'risk'
+
+  function renderArchiveList(
+    initialPath: string,
+    opts: {
+      closedRows?: CaseRowMock[]
+      archivedRows?: CaseRowMock[]
+      extraMocks?: MockedResponse[]
+    } = {},
+  ) {
+    const mocks: MockedResponse[] = [
+      fieldConfigMock(WORKSPACE),
+      caseStatusConfigMock(WORKSPACE, null),
+      casesMock(WORKSPACE, 'OPEN', [caseRow(1, 'Open Alpha', 'OPEN')]),
+      casesMock(WORKSPACE, 'CLOSED', opts.closedRows),
+      archivedCasesMock(WORKSPACE, opts.archivedRows),
+      draftsMock(WORKSPACE),
+      ...(opts.extraMocks ?? []),
+    ]
+    return render(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <MockedProvider mocks={mocks} addTypename={false}>
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/cases" element={<CaseList />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it('renders the Archived tab between Drafts and All', async () => {
+    renderArchiveList('/ws/risk/cases')
+    expect(await screen.findByTestId('status-tab-archived')).toBeInTheDocument()
+
+    const tabs = Array.from(document.querySelectorAll('.seg button')).map((b) =>
+      b.getAttribute('data-testid'),
+    )
+    expect(tabs).toEqual([
+      'status-tab-open',
+      'status-tab-closed',
+      'status-tab-draft',
+      'status-tab-archived',
+      'status-tab-all',
+    ])
+  })
+
+  it('restores the Archived tab from ?status=archived and shows the archived slice', async () => {
+    renderArchiveList('/ws/risk/cases?status=archived', {
+      archivedRows: [archivedCaseRow(20, 'Archived Zeta')],
+    })
+    await waitFor(() => {
+      expect(activeTabTestId()).toBe('status-tab-archived')
+    })
+    expect(await screen.findByText('Archived Zeta')).toBeInTheDocument()
+    // The archived row must not leak into the tabs beside it.
+    expect(screen.queryByText('Closed Beta')).toBeNull()
+  })
+
+  it('writes ?status=archived when the user clicks the Archived tab', async () => {
+    renderArchiveList('/ws/risk/cases')
+    fireEvent.click(await screen.findByTestId('status-tab-archived'))
+    await waitFor(() => {
+      expect(activeTabTestId()).toBe('status-tab-archived')
+    })
+  })
+
+  it('offers row selection on the Closed and Archived tabs but not on Open or All', async () => {
+    renderArchiveList('/ws/risk/cases')
+    await screen.findByTestId('status-tab-closed')
+    expect(screen.queryByTestId('bulk-header-checkbox')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('status-tab-closed'))
+    expect(await screen.findByTestId('bulk-header-checkbox')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('status-tab-all'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('bulk-header-checkbox')).toBeNull()
+    })
+  })
+
+  it('archives the selected closed cases and removes their rows', async () => {
+    const closedRows = [caseRow(2, 'Closed Beta', 'CLOSED'), caseRow(3, 'Closed Gamma', 'CLOSED')]
+    let archiveCalled = false
+    const archiveMock: MockedResponse = {
+      request: {
+        query: BULK_ARCHIVE_CASES,
+        variables: { workspaceId: WORKSPACE, ids: [2, 3] },
+      },
+      result: () => {
+        archiveCalled = true
+        return { data: { bulkArchiveCases: [2, 3] } }
+      },
+    }
+
+    renderArchiveList('/ws/risk/cases?status=closed', {
+      closedRows,
+      extraMocks: [archiveMock],
+    })
+
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-2'))
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-3'))
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('2')
+
+    fireEvent.click(screen.getByTestId('bulk-archive-button'))
+
+    await waitFor(() => {
+      expect(archiveCalled).toBe(true)
+    })
+    // The accepted ids are removed locally: the server archives them in the
+    // background, so a refetch could not reflect completion.
+    await waitFor(() => {
+      expect(screen.queryByText('Closed Beta')).toBeNull()
+    })
+    expect(screen.queryByText('Closed Gamma')).toBeNull()
+  })
+
+  it('restores the selected archived cases and removes their rows', async () => {
+    let unarchiveCalled = false
+    const unarchiveMock: MockedResponse = {
+      request: {
+        query: BULK_UNARCHIVE_CASES,
+        variables: { workspaceId: WORKSPACE, ids: [20] },
+      },
+      result: () => {
+        unarchiveCalled = true
+        return { data: { bulkUnarchiveCases: [20] } }
+      },
+    }
+
+    renderArchiveList('/ws/risk/cases?status=archived', {
+      archivedRows: [archivedCaseRow(20, 'Archived Zeta')],
+      extraMocks: [unarchiveMock],
+    })
+
+    expect(await screen.findByText('Archived Zeta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-20'))
+    fireEvent.click(screen.getByTestId('bulk-unarchive-button'))
+
+    await waitFor(() => {
+      expect(unarchiveCalled).toBe(true)
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('Archived Zeta')).toBeNull()
+    })
+  })
+
+  it('offers only Archive on the Closed tab and only Restore on the Archived tab', async () => {
+    renderArchiveList('/ws/risk/cases?status=closed', {
+      closedRows: [caseRow(2, 'Closed Beta', 'CLOSED')],
+      archivedRows: [archivedCaseRow(20, 'Archived Zeta')],
+    })
+
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-2'))
+    expect(screen.getByTestId('bulk-archive-button')).toBeInTheDocument()
+    expect(screen.queryByTestId('bulk-unarchive-button')).toBeNull()
+    expect(screen.queryByTestId('bulk-submit-button')).toBeNull()
+    expect(screen.queryByTestId('bulk-delete-button')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('status-tab-archived'))
+    expect(await screen.findByText('Archived Zeta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-20'))
+    expect(screen.getByTestId('bulk-unarchive-button')).toBeInTheDocument()
+    expect(screen.queryByTestId('bulk-archive-button')).toBeNull()
+  })
+
+  it('drops the selection when the user leaves the tab', async () => {
+    renderArchiveList('/ws/risk/cases?status=closed', {
+      closedRows: [caseRow(2, 'Closed Beta', 'CLOSED')],
+      archivedRows: [archivedCaseRow(20, 'Archived Zeta')],
+    })
+
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bulk-row-checkbox-2'))
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('1')
+
+    fireEvent.click(screen.getByTestId('status-tab-archived'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('bulk-selection-bar')).toBeNull()
+    })
+
+    fireEvent.click(screen.getByTestId('status-tab-closed'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('bulk-selection-bar')).toBeNull()
+    })
+  })
+
+  it('excludes an inaccessible row from selection', async () => {
+    const denied: CaseRowMock = {
+      ...caseRow(4, '', 'CLOSED'),
+      isPrivate: true,
+      accessDenied: true,
+    }
+    renderArchiveList('/ws/risk/cases?status=closed', {
+      closedRows: [caseRow(2, 'Closed Beta', 'CLOSED'), denied],
+    })
+
+    expect(await screen.findByText('Closed Beta')).toBeInTheDocument()
+    const deniedBox = screen.getByTestId('bulk-row-checkbox-4') as HTMLInputElement
+    expect(deniedBox.disabled).toBe(true)
+
+    fireEvent.click(screen.getByTestId('bulk-header-checkbox'))
+    // Select-all covers only the accessible row.
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('1')
+    expect(deniedBox.checked).toBe(false)
   })
 })

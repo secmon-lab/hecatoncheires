@@ -1,13 +1,17 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { useQuery } from '@apollo/client'
+import { useMutation, useQuery } from '@apollo/client'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import { GET_CASES_WITH_SLACK_LINK } from '../graphql/case'
+import {
+  BULK_ARCHIVE_CASES,
+  BULK_UNARCHIVE_CASES,
+  GET_CASES_WITH_SLACK_LINK,
+} from '../graphql/case'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
-import BulkSelectionBar from '../components/BulkSelectionBar'
+import BulkSelectionBar, { type BulkAction } from '../components/BulkSelectionBar'
 import BulkDeleteConfirmDialog from '../components/BulkDeleteConfirmDialog'
 import BulkResultDialog from '../components/BulkResultDialog'
 import {
@@ -46,13 +50,18 @@ const DEFAULT_PAGE_SIZE = 20
 // user's display, not of the workspace being viewed.
 const PAGE_SIZE_STORAGE_KEY = 'caseListPageSize'
 
-type StatusFilter = 'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'
+type StatusFilter = 'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT' | 'ARCHIVED'
 
 // URL representation of the tab. Lower-case so the query string stays
 // readable; OPEN is the implicit default and is never emitted.
-type StatusQuery = 'closed' | 'draft' | 'all'
+type StatusQuery = 'closed' | 'draft' | 'all' | 'archived'
 export const CASE_LIST_STATUS_PARAM = 'status'
 export const CASE_LIST_PAGE_PARAM = 'page'
+
+// Tabs that offer row selection and a bulk action bar. ALL and OPEN are
+// excluded: a bulk archive there would mix cases the operation cannot apply to
+// (archiving is CLOSED-only) with ones it can.
+const SELECTABLE_TABS: readonly StatusFilter[] = ['DRAFT', 'CLOSED', 'ARCHIVED']
 
 function parsePageSize(raw: string | null): number {
   const n = Number(raw)
@@ -72,6 +81,7 @@ function parseStatusFilter(raw: string | null): StatusFilter {
   switch ((raw ?? '').toLowerCase()) {
     case 'closed': return 'CLOSED'
     case 'draft': return 'DRAFT'
+    case 'archived': return 'ARCHIVED'
     case 'all': return 'ALL'
     case 'open': return 'OPEN'
     default: return 'OPEN'
@@ -82,6 +92,7 @@ function statusToQuery(filter: StatusFilter): StatusQuery | undefined {
   switch (filter) {
     case 'CLOSED': return 'closed'
     case 'DRAFT': return 'draft'
+    case 'ARCHIVED': return 'archived'
     case 'ALL': return 'all'
     case 'OPEN': return undefined
   }
@@ -121,6 +132,9 @@ interface CaseRow {
   slackChannelURL?: string | null
   slackThreadTS?: string | null
   boardStatus?: string | null
+  // Null for an active case. There is no derived `archived` boolean on the
+  // wire; a row is archived when this is non-null.
+  archivedAt?: string | null
   createdAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
@@ -325,15 +339,25 @@ export default function CaseList() {
   // resulting cache read is incomplete, and without this the list would blank
   // out until the network round-trip lands. Partial rows simply fall back to
   // the slack.com link form.
-  const { data: openData } = useQuery(GET_CASES_WITH_SLACK_LINK, {
+  const { data: openData, refetch: refetchOpen } = useQuery(GET_CASES_WITH_SLACK_LINK, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
     returnPartialData: true,
   })
-  const { data: closedData } = useQuery(GET_CASES_WITH_SLACK_LINK, {
+  const { data: closedData, refetch: refetchClosed } = useQuery(GET_CASES_WITH_SLACK_LINK, {
     variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
+    skip: !currentWorkspace,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    returnPartialData: true,
+  })
+  // The Archived tab asks for the archived slice and no lifecycle status:
+  // every archived case is CLOSED by construction, so a status filter would
+  // only be a second way to say the same thing.
+  const { data: archivedData, refetch: refetchArchived } = useQuery(GET_CASES_WITH_SLACK_LINK, {
+    variables: { workspaceId: currentWorkspace?.id, filter: 'ARCHIVED' },
     skip: !currentWorkspace,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
@@ -358,25 +382,37 @@ export default function CaseList() {
   const openCount = openData?.cases?.length ?? 0
   const closedCount = closedData?.cases?.length ?? 0
   const draftCount = draftData?.drafts?.length ?? 0
+  const archivedCount = archivedData?.cases?.length ?? 0
+
+  // Ids whose bulk archive / restore the server has accepted but not yet
+  // finished. The mutation returns the accepted ids and processes them in the
+  // background, so a refetch straight after cannot reflect completion — the
+  // rows are removed here instead and the next natural load reconciles.
+  const [pendingIds, setPendingIds] = useState<Set<number>>(() => new Set())
 
   const cases: CaseRow[] = useMemo(() => {
     if (statusFilter === 'OPEN') return openData?.cases || []
     if (statusFilter === 'CLOSED') return closedData?.cases || []
     if (statusFilter === 'DRAFT') return draftData?.drafts || []
+    if (statusFilter === 'ARCHIVED') return archivedData?.cases || []
     // ALL view merges two separately-fetched lists, so re-sort the combined
     // result newest-first; otherwise all OPEN cases would precede all CLOSED.
     // createdAt is an RFC3339 UTC string, so lexicographic compare equals
     // chronological order without per-comparison Date allocation.
+    //
+    // Archived cases stay out: ALL means "every case the tabs beside it show",
+    // and it already excludes drafts for the same reason.
     return [...(openData?.cases || []), ...(closedData?.cases || [])].sort(
       (a, b) => b.createdAt.localeCompare(a.createdAt)
     )
-  }, [statusFilter, openData, closedData, draftData])
+  }, [statusFilter, openData, closedData, draftData, archivedData])
 
   const filtered = useMemo(() => {
-    if (!searchText.trim()) return cases
+    const visible = pendingIds.size === 0 ? cases : cases.filter((c) => !pendingIds.has(c.id))
+    if (!searchText.trim()) return visible
     const q = searchText.toLowerCase()
-    return cases.filter((c) => !c.accessDenied && c.title.toLowerCase().includes(q))
-  }, [cases, searchText])
+    return visible.filter((c) => !c.accessDenied && c.title.toLowerCase().includes(q))
+  }, [cases, searchText, pendingIds])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   // The URL can name a page that does not exist right now — the page size was
@@ -389,9 +425,9 @@ export default function CaseList() {
   const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
 
-  // Bulk selection state — only used when the Drafts tab is active.
+  // Bulk selection state — used on the Drafts, Closed and Archived tabs.
   // Storing as a Set keeps add/remove/lookup O(1) and survives across
-  // pagination as long as the user stays on the Drafts tab.
+  // pagination as long as the user stays on the same tab.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [resultDialog, setResultDialog] = useState<
@@ -399,40 +435,87 @@ export default function CaseList() {
   >({ open: false, kind: 'submit', results: [] })
   const { state: bulkState, run: runBulk } = useBulkDraftAction()
 
-  // Leaving the Drafts tab (or switching workspace) drops the selection so
-  // the user does not return to a mismatched state.
+  const [bulkArchiveCases, { loading: bulkArchiving }] = useMutation(BULK_ARCHIVE_CASES)
+  const [bulkUnarchiveCases, { loading: bulkUnarchiving }] = useMutation(BULK_UNARCHIVE_CASES)
+
+  const isDraftsTab = statusFilter === 'DRAFT'
+  const isClosedTab = statusFilter === 'CLOSED'
+  const isArchivedTab = statusFilter === 'ARCHIVED'
+  const selectionEnabled = SELECTABLE_TABS.includes(statusFilter)
+  const bulkBusy = bulkState.loading || bulkArchiving || bulkUnarchiving
+
+  // Switching tab (or workspace) drops the selection: each tab selects from a
+  // different set of rows and offers a different action, so carrying a
+  // selection across would leave the count describing rows the user can no
+  // longer see.
   useEffect(() => {
-    if (statusFilter !== 'DRAFT') {
-      setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
-    }
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
   }, [statusFilter, wsKey])
 
-  // Drafts can disappear between renders (other tab's mutations, draft TTL
-  // expiry). Drop selections for IDs that no longer exist so the action
-  // count stays honest.
+  // Revalidate the tab the user just switched to. All five queries mount once
+  // and stay mounted, so cache-and-network only revalidates them on the first
+  // render — without this, a case moved between slices (archived from the
+  // Closed tab, restored from the Archived tab, closed in another window) is
+  // missing from the destination tab until a full page reload.
   //
-  // Return null while the drafts query has not produced data yet — a
-  // refetch / network blip can briefly null out `draftData`, and without
-  // this guard we would interpret "no data" as "every draft is gone" and
-  // wipe the user's selection.
-  const draftIdSet = useMemo(() => {
-    if (!draftData?.drafts) return null
-    const ids = new Set<number>()
-    for (const d of draftData.drafts) ids.add(d.id)
-    return ids
-  }, [draftData])
+  // Bulk archive / restore is asynchronous server-side, so a refetch fired
+  // immediately after a large batch can still land mid-flight; the next visit
+  // to the tab reconciles. Single-row changes are effectively complete by the
+  // time the user switches.
   useEffect(() => {
-    if (!draftIdSet) return
+    if (!currentWorkspace) return
+    switch (statusFilter) {
+      case 'OPEN':
+        void refetchOpen()
+        break
+      case 'CLOSED':
+        void refetchClosed()
+        break
+      case 'ARCHIVED':
+        void refetchArchived()
+        break
+      case 'DRAFT':
+        void refetchDrafts()
+        break
+      case 'ALL':
+        void refetchOpen()
+        void refetchClosed()
+        break
+    }
+    // Deliberately keyed on the tab and the workspace only: including the
+    // refetch callbacks would re-run this on every Apollo state change.
+  }, [statusFilter, wsKey])
+
+  // Rows can disappear between renders (another tab's mutation, a draft TTL
+  // expiry, someone else archiving). Drop selections for ids that no longer
+  // exist so the action count stays honest.
+  //
+  // Return null while the active tab's query has not produced data yet — a
+  // refetch / network blip can briefly null out the payload, and without this
+  // guard we would read "no data" as "every row is gone" and wipe the user's
+  // selection.
+  const visibleIdSet = useMemo(() => {
+    let rows: CaseRow[] | undefined
+    if (statusFilter === 'DRAFT') rows = draftData?.drafts
+    else if (statusFilter === 'CLOSED') rows = closedData?.cases
+    else if (statusFilter === 'ARCHIVED') rows = archivedData?.cases
+    if (!rows) return null
+    const ids = new Set<number>()
+    for (const r of rows) ids.add(r.id)
+    return ids
+  }, [statusFilter, draftData, closedData, archivedData])
+  useEffect(() => {
+    if (!visibleIdSet) return
     setSelectedIds((prev) => {
       let changed = false
       const next = new Set<number>()
       for (const id of prev) {
-        if (draftIdSet.has(id)) next.add(id)
+        if (visibleIdSet.has(id)) next.add(id)
         else changed = true
       }
       return changed ? next : prev
     })
-  }, [draftIdSet])
+  }, [visibleIdSet])
 
   const allColumns = [
     ...BUILTIN_COLUMNS.map((c) => ({ key: c.key, label: t(c.labelKey), width: c.width, custom: false as const })),
@@ -517,21 +600,19 @@ export default function CaseList() {
     fromPage: page > 0 ? page + 1 : undefined,
   }
 
-  const isDraftsTab = statusFilter === 'DRAFT'
-
-  // Drafts the user is allowed to select. accessDenied rows have an
-  // opaque title and we cannot act on them server-side either, so they
-  // are excluded from select-all and from the per-row checkbox.
-  const selectableDrafts = useMemo(() => {
-    if (!isDraftsTab) return [] as CaseRow[]
+  // Rows the user is allowed to select. accessDenied rows have an opaque
+  // title and we cannot act on them server-side either, so they are excluded
+  // from select-all and from the per-row checkbox.
+  const selectableRows = useMemo(() => {
+    if (!selectionEnabled) return [] as CaseRow[]
     return filtered.filter((c) => !c.accessDenied)
-  }, [isDraftsTab, filtered])
+  }, [selectionEnabled, filtered])
 
   // Three-state checkbox state for the header: all / some / none of the
-  // selectable drafts (across pages) are selected.
+  // selectable rows (across pages) are selected.
   const allSelectableIds = useMemo(
-    () => selectableDrafts.map((c) => c.id),
-    [selectableDrafts],
+    () => selectableRows.map((c) => c.id),
+    [selectableRows],
   )
   const allSelected =
     allSelectableIds.length > 0 && allSelectableIds.every((id) => selectedIds.has(id))
@@ -573,12 +654,18 @@ export default function CaseList() {
     setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
   }, [])
 
-  const selectedDrafts = useMemo(() => {
-    if (!isDraftsTab) return [] as { id: number; title: string }[]
-    return selectableDrafts
-      .filter((c) => selectedIds.has(c.id))
-      .map((c) => ({ id: c.id, title: c.title }))
-  }, [isDraftsTab, selectableDrafts, selectedIds])
+  const selectedRows = useMemo(
+    () =>
+      selectableRows
+        .filter((c) => selectedIds.has(c.id))
+        .map((c) => ({ id: c.id, title: c.title })),
+    [selectableRows, selectedIds],
+  )
+
+  const selectedDrafts = useMemo(
+    () => (isDraftsTab ? selectedRows : ([] as { id: number; title: string }[])),
+    [isDraftsTab, selectedRows],
+  )
 
   const performBulk = useCallback(
     async (kind: BulkActionKind) => {
@@ -616,6 +703,106 @@ export default function CaseList() {
     setConfirmDeleteOpen(false)
     void performBulk('discard')
   }, [performBulk])
+
+  // Bulk archive / restore go through one mutation that returns the ACCEPTED
+  // ids and does the work in the background. No refetch follows: it could not
+  // reflect completion, and it would put the rows back on screen. The accepted
+  // ids are removed locally instead, and the next natural load reconciles.
+  //
+  // No confirmation dialog: archiving is reversible from the Archived tab, and
+  // the rows were picked explicitly with checkboxes. The delete confirmation
+  // beside it exists because deletion is not reversible.
+  const runBulkArchive = useCallback(
+    async (kind: 'archive' | 'unarchive') => {
+      if (!currentWorkspace || selectedRows.length === 0) return
+      const ids = selectedRows.map((r) => r.id)
+      const mutate = kind === 'archive' ? bulkArchiveCases : bulkUnarchiveCases
+      const field = kind === 'archive' ? 'bulkArchiveCases' : 'bulkUnarchiveCases'
+      try {
+        const res = await mutate({
+          variables: { workspaceId: currentWorkspace.id, ids },
+        })
+        const accepted: number[] = res.data?.[field] ?? []
+        setPendingIds((prev) => {
+          const next = new Set(prev)
+          for (const id of accepted) next.add(id)
+          return next
+        })
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          for (const id of accepted) next.delete(id)
+          return next
+        })
+      } catch (e) {
+        // The rows stay on screen and stay selected, so the user can retry.
+        console.error('Failed to bulk change case archive state', e)
+      }
+    },
+    [currentWorkspace, selectedRows, bulkArchiveCases, bulkUnarchiveCases],
+  )
+
+  const handleBulkArchive = useCallback(() => {
+    void runBulkArchive('archive')
+  }, [runBulkArchive])
+
+  const handleBulkUnarchive = useCallback(() => {
+    void runBulkArchive('unarchive')
+  }, [runBulkArchive])
+
+  // The bar's verbs are per-tab; everything else about it (count label,
+  // progress label, disabled handling) is shared.
+  const bulkActions: BulkAction[] = useMemo(() => {
+    if (isDraftsTab) {
+      return [
+        {
+          key: 'submit',
+          label: t('bulkSelectionBarSubmit'),
+          variant: 'primary',
+          testId: 'bulk-submit-button',
+          onClick: handleBulkSubmit,
+        },
+        {
+          key: 'delete',
+          label: t('bulkSelectionBarDelete'),
+          variant: 'danger',
+          testId: 'bulk-delete-button',
+          onClick: handleBulkDeleteRequest,
+        },
+      ]
+    }
+    if (isClosedTab) {
+      return [
+        {
+          key: 'archive',
+          label: t('bulkSelectionBarArchive'),
+          variant: 'primary',
+          testId: 'bulk-archive-button',
+          onClick: handleBulkArchive,
+        },
+      ]
+    }
+    if (isArchivedTab) {
+      return [
+        {
+          key: 'unarchive',
+          label: t('bulkSelectionBarUnarchive'),
+          variant: 'primary',
+          testId: 'bulk-unarchive-button',
+          onClick: handleBulkUnarchive,
+        },
+      ]
+    }
+    return []
+  }, [
+    isDraftsTab,
+    isClosedTab,
+    isArchivedTab,
+    t,
+    handleBulkSubmit,
+    handleBulkDeleteRequest,
+    handleBulkArchive,
+    handleBulkUnarchive,
+  ])
 
   return (
     <div className="h-main-inner">
@@ -705,6 +892,14 @@ export default function CaseList() {
             <span style={{ marginLeft: 6, opacity: 0.7 }}>{draftCount}</span>
           </button>
           <button
+            className={statusFilter === 'ARCHIVED' ? 'on' : ''}
+            onClick={() => setStatusFilter('ARCHIVED')}
+            data-testid="status-tab-archived"
+          >
+            {t('tabArchived')}
+            <span style={{ marginLeft: 6, opacity: 0.7 }}>{archivedCount}</span>
+          </button>
+          <button
             className={statusFilter === 'ALL' ? 'on' : ''}
             onClick={() => setStatusFilter('ALL')}
             data-testid="status-tab-all"
@@ -712,13 +907,12 @@ export default function CaseList() {
             {t('tabAll')}
           </button>
         </div>
-        {isDraftsTab && (
+        {selectionEnabled && (
           <BulkSelectionBar
-            selectedCount={selectedDrafts.length}
-            onSubmit={handleBulkSubmit}
-            onDelete={handleBulkDeleteRequest}
+            selectedCount={selectedRows.length}
+            actions={bulkActions}
             onClear={clearSelection}
-            disabled={bulkState.loading}
+            disabled={bulkBusy}
             progressLabel={
               bulkState.loading
                 ? t('bulkProgress', { done: bulkState.done, total: bulkState.total })
@@ -746,7 +940,7 @@ export default function CaseList() {
         <table className="h-table">
           <thead>
             <tr>
-              {isDraftsTab && (
+              {selectionEnabled && (
                 <th style={{ width: 36 }}>
                   <input
                     ref={headerCheckboxRef}
@@ -755,7 +949,7 @@ export default function CaseList() {
                     aria-label={t('bulkSelectAllAria')}
                     checked={allSelected}
                     onChange={toggleAll}
-                    disabled={allSelectableIds.length === 0 || bulkState.loading}
+                    disabled={allSelectableIds.length === 0 || bulkBusy}
                   />
                 </th>
               )}
@@ -771,7 +965,7 @@ export default function CaseList() {
             {pageRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + visibleColumns.length + (isDraftsTab ? 1 : 0)}
+                  colSpan={3 + visibleColumns.length + (selectionEnabled ? 1 : 0)}
                   style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}
                 >
                   {t('noDataAvailable')}
@@ -779,7 +973,7 @@ export default function CaseList() {
               </tr>
             )}
             {pageRows.map((c) => {
-              const rowSelected = isDraftsTab && selectedIds.has(c.id)
+              const rowSelected = selectionEnabled && selectedIds.has(c.id)
               // Drafts share the regular case detail page — Submit / Discard
               // surface there based on status.
               const caseHref = `/ws/${currentWorkspace!.id}/cases/${c.id}`
@@ -830,7 +1024,7 @@ export default function CaseList() {
                     background: rowSelected ? 'var(--bg-highlight)' : undefined,
                   }}
                 >
-                  {isDraftsTab && (
+                  {selectionEnabled && (
                     <td style={{ width: 36 }}>
                       <input
                         type="checkbox"
@@ -838,7 +1032,7 @@ export default function CaseList() {
                         aria-label={t('bulkSelectRowAria', { id: c.id })}
                         checked={selectedIds.has(c.id)}
                         onChange={() => toggleRow(c.id)}
-                        disabled={c.accessDenied || bulkState.loading}
+                        disabled={c.accessDenied || bulkBusy}
                       />
                     </td>
                   )}

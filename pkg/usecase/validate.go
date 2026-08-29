@@ -36,6 +36,13 @@ const (
 	// IssueKindLifecycleMismatch is a thread-mode Case whose lifecycle Status
 	// disagrees with whether its BoardStatus is configured as closed.
 	IssueKindLifecycleMismatch ValidationIssueKind = "lifecycle_status_mismatch"
+	// IssueKindArchivedNotClosed is an archived Case whose lifecycle Status is
+	// not CLOSED. Only a CLOSED case may be archived, and ReopenCase /
+	// UpdateCaseStatus refuse to take an archived case back to OPEN, so this
+	// state is unreachable through the usecase layer. It is reported anyway
+	// because if it ever arises the Case appears in no list, no board, no
+	// dashboard and no Job scan — an operator has no other way to find it.
+	IssueKindArchivedNotClosed ValidationIssueKind = "archived_case_not_closed"
 	// IssueKindActionStatus is an Action whose Status is not part of the
 	// workspace's configured action status set.
 	IssueKindActionStatus ValidationIssueKind = "action_status_invalid"
@@ -294,6 +301,7 @@ func (uc *UseCases) validateCases(ctx context.Context, entry *model.WorkspaceEnt
 			collectCaseRefs(refWanted, target, defByID, c.FieldValues)
 		}
 		checkCaseStatuses(acc, entry, c, target)
+		checkCaseArchiveState(acc, c, target)
 		return nil
 	})
 	if err != nil {
@@ -418,6 +426,27 @@ func checkCaseStatuses(acc *issueAccumulator, entry *model.WorkspaceEntry, c *mo
 		acc.add(IssueKindLifecycleMismatch, "", target,
 			string(expected), string(actual),
 			"lifecycle status disagrees with whether the board status is configured as closed")
+	}
+}
+
+// checkCaseArchiveState reports an archived Case whose lifecycle Status is not
+// CLOSED. The invariant is enforced on every write path (ArchiveCase refuses a
+// non-closed case; ReopenCase and UpdateCaseStatus refuse an archived one), so
+// a finding here means the document was written by something else — a data
+// import, a manual edit, or a lost race between archive and reopen. It matters
+// because such a Case is filtered out of every listing at once and cannot be
+// found without this check.
+//
+// Unlike checkCaseStatuses this is not gated on CaseMode: the invariant holds
+// for channel-mode and thread-mode Cases alike.
+func checkCaseArchiveState(acc *issueAccumulator, c *model.Case, target ValidationTarget) {
+	if !c.IsArchived() {
+		return
+	}
+	if actual := c.Status.Normalize(); actual != types.CaseStatusClosed {
+		acc.add(IssueKindArchivedNotClosed, "", target,
+			string(types.CaseStatusClosed), string(actual),
+			"archived case is not closed; unarchive it or close it")
 	}
 }
 

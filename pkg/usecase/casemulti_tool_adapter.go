@@ -39,8 +39,11 @@ func NewCaseMultiCaseAdapter(uc *CaseUseCase) casemulti.CaseUsecase {
 	return &caseMultiCaseAdapter{uc: uc}
 }
 
+// ListCases pins the archive scope to active-only: an archived case has been
+// put away by the team, so the agent should stop considering it. The tool
+// exposes no archive argument, so the adapter's own signature is unchanged.
 func (a *caseMultiCaseAdapter) ListCases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*model.Case, error) {
-	return a.uc.ListCases(ctx, workspaceID, status)
+	return a.uc.ListCases(ctx, workspaceID, status, interfaces.CaseArchiveScopeActiveOnly)
 }
 
 func (a *caseMultiCaseAdapter) GetCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {

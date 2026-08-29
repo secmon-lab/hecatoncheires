@@ -1058,7 +1058,7 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		_, err = uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
-		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, cases).Length(2)
@@ -1082,14 +1082,14 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 
 		// Filter by OPEN status
 		openStatus := types.CaseStatusOpen
-		openCases, err := uc.ListCases(ctx, testWorkspaceID, &openStatus)
+		openCases, err := uc.ListCases(ctx, testWorkspaceID, &openStatus, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 		gt.Array(t, openCases).Length(1)
 		gt.Value(t, openCases[0].Title).Equal("Open Case 2")
 
 		// Filter by CLOSED status
 		closedStatus := types.CaseStatusClosed
-		closedCases, err := uc.ListCases(ctx, testWorkspaceID, &closedStatus)
+		closedCases, err := uc.ListCases(ctx, testWorkspaceID, &closedStatus, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 		gt.Array(t, closedCases).Length(1)
 		gt.Value(t, closedCases[0].Title).Equal("Open Case 1")
@@ -1118,7 +1118,7 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		seed("newest", base)
 		seed("oldest", base.Add(-2*time.Hour))
 
-		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 		gt.Array(t, cases).Length(3)
 		gt.Value(t, cases[0].Title).Equal("newest")
@@ -1785,7 +1785,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// List cases
-		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 		gt.Array(t, cases).Length(3)
 
@@ -2427,7 +2427,7 @@ func TestCaseUseCase_CreateCase_DuplicateRequestKey(t *testing.T) {
 		gt.Value(t, duplicate.Title).Equal("First Case")
 
 		// Verify only one case exists
-		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeActiveOnly)
 		gt.NoError(t, err).Required()
 		gt.Array(t, cases).Length(1)
 	})
@@ -4480,6 +4480,667 @@ func TestCaseUseCase_CreateCase_ThreadModeMonitorUnconfigured(t *testing.T) {
 	cases, listErr := repo.Case().List(ctx, "support")
 	gt.NoError(t, listErr).Required()
 	gt.Array(t, cases).Length(0)
+}
+
+// archiveTestCtx is the actor context every archive test runs under. Archiving
+// is a Web-only operation, so the real path always carries an auth token.
+func archiveTestCtx() context.Context {
+	return auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-ARCHIVER"})
+}
+
+// seedCase creates a case directly through the repository so a test can put it
+// in any lifecycle / archive state without walking the creation flow.
+func seedArchiveCase(t *testing.T, repo *memory.Repository, c *model.Case) *model.Case {
+	t.Helper()
+	if c.ReporterID == "" {
+		c.ReporterID = "U-REPORTER"
+	}
+	now := time.Now().UTC()
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = now
+	}
+	if c.UpdatedAt.IsZero() {
+		c.UpdatedAt = now
+	}
+	created, err := repo.Case().Create(context.Background(), testWorkspaceID, c)
+	gt.NoError(t, err).Required()
+	return created
+}
+
+func TestCaseUseCase_ArchiveCase(t *testing.T) {
+	t.Run("archives a closed case without changing its status", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		before := time.Now().UTC().Add(-time.Hour)
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:     "Closed case",
+			Status:    types.CaseStatusClosed,
+			UpdatedAt: before,
+		})
+
+		archived, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+		gt.Value(t, archived.Status).Equal(types.CaseStatusClosed)
+		gt.Bool(t, archived.UpdatedAt.After(before)).True()
+
+		stored, err := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.ArchivedAt).NotNil().Required()
+		gt.Bool(t, stored.ArchivedAt.Equal(*archived.ArchivedAt)).True()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusClosed)
+	})
+
+	t.Run("rejects an open case and leaves it untouched", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Open case", Status: types.CaseStatusOpen})
+
+		_, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotClosed)
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("rejects a draft case and leaves it untouched", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Draft case", Status: types.CaseStatusDraft})
+
+		_, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotClosed)
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("rejects an already archived case without overwriting the timestamp", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Closed case", Status: types.CaseStatusClosed})
+		first, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseAlreadyArchived)
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.ArchivedAt).NotNil().Required()
+		gt.Bool(t, stored.ArchivedAt.Equal(*first.ArchivedAt)).True()
+	})
+
+	t.Run("reports a missing case as not found", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		_, err := uc.ArchiveCase(archiveTestCtx(), testWorkspaceID, 4242)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("denies a non-member of a private case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private closed case",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+
+		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-OUTSIDER"})
+		_, err := uc.ArchiveCase(outsiderCtx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("allows a member of a private case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private closed case",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-MEMBER"})
+		archived, err := uc.ArchiveCase(memberCtx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+	})
+
+	// A context with no token is a system / agent context. Project policy is to
+	// bypass the private-case check there rather than fail, so the GraphQL
+	// resolver is what makes a token mandatory for the user-facing path.
+	t.Run("bypasses the private check when the context carries no token", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private closed case",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+
+		archived, err := uc.ArchiveCase(context.Background(), testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+	})
+}
+
+func TestCaseUseCase_UnarchiveCase(t *testing.T) {
+	t.Run("restores an archived case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Closed case", Status: types.CaseStatusClosed})
+		archived, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+
+		restored, err := uc.UnarchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, restored.ArchivedAt).Nil()
+		gt.Bool(t, restored.IsArchived()).False()
+		gt.Value(t, restored.Status).Equal(types.CaseStatusClosed)
+		gt.Bool(t, restored.UpdatedAt.After(archived.UpdatedAt) ||
+			restored.UpdatedAt.Equal(archived.UpdatedAt)).True()
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.ArchivedAt).Nil()
+	})
+
+	t.Run("rejects a case that is not archived", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Closed case", Status: types.CaseStatusClosed})
+
+		_, err := uc.UnarchiveCase(archiveTestCtx(), testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotArchived)
+	})
+
+	t.Run("denies a non-member of a private case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		archivedAt := time.Now().UTC()
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private archived case",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+			ArchivedAt:     &archivedAt,
+		})
+
+		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-OUTSIDER"})
+		_, err := uc.UnarchiveCase(outsiderCtx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+}
+
+func TestCaseUseCase_ArchiveCase_SlackNotification(t *testing.T) {
+	t.Run("posts one context line into the thread of a thread-mode case", func(t *testing.T) {
+		ctx := archiveTestCtx()
+		uc, slackMock, created, _ := newThreadNotifyCase(t, ctx)
+
+		// A thread-mode case closes by moving to a closed board status; drive
+		// the real path so the case reaches CLOSED the way production does.
+		closed, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, closed.Status).Equal(types.CaseStatusClosed)
+		slackMock.threadCalls = nil
+
+		archived, err := uc.ArchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		call := slackMock.threadCalls[0]
+		gt.Value(t, call.channelID).Equal("C-MONITOR")
+		gt.Value(t, call.threadTS).Equal(created.SlackThreadTS)
+		gt.String(t, call.text).Contains("archived this case")
+		gt.String(t, call.text).Contains("U-ARCHIVER")
+	})
+
+	t.Run("posts one context line on unarchive", func(t *testing.T) {
+		ctx := archiveTestCtx()
+		uc, slackMock, created, _ := newThreadNotifyCase(t, ctx)
+
+		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.NoError(t, err).Required()
+		_, err = uc.ArchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		slackMock.threadCalls = nil
+
+		restored, err := uc.UnarchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, restored.IsArchived()).False()
+
+		gt.Array(t, slackMock.threadCalls).Length(1).Required()
+		gt.String(t, slackMock.threadCalls[0].text).Contains("unarchived this case")
+	})
+
+	// A channel-mode case has a dedicated channel but no thread, so it gets no
+	// post — the same range as every other Case change notification.
+	t.Run("posts nothing for a channel-mode case", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID},
+			CaseMode:  model.CaseModeChannel,
+		})
+		slackMock := &threadNotifySlackMock{}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Channel-mode closed case",
+			Status:         types.CaseStatusClosed,
+			SlackChannelID: "C-CASE",
+		})
+
+		archived, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+		gt.Array(t, slackMock.threadCalls).Length(0)
+	})
+
+	// The notification is best-effort: it is reported through errutil.Handle
+	// and must never roll back or fail the archive that already persisted.
+	t.Run("still archives when the Slack post fails", func(t *testing.T) {
+		ctx := archiveTestCtx()
+		uc, slackMock, created, repo := newThreadNotifyCase(t, ctx)
+
+		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.NoError(t, err).Required()
+		slackMock.threadCalls = nil
+		slackMock.postThreadErr = errors.New("slack is down")
+
+		archived, err := uc.ArchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived.IsArchived()).True()
+		gt.Array(t, slackMock.threadCalls).Length(1)
+
+		stored, getErr := repo.Case().Get(ctx, "support", created.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+}
+
+func TestCaseUseCase_BulkArchiveCases(t *testing.T) {
+	t.Run("archives every closed case in the batch", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed})
+
+		archived, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, c2.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(2).Required()
+		for _, c := range archived {
+			gt.Bool(t, c.IsArchived()).True()
+		}
+	})
+
+	t.Run("skips an id that is already archived", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed})
+		c3 := seedArchiveCase(t, repo, &model.Case{Title: "C", Status: types.CaseStatusClosed})
+		_, err := uc.ArchiveCase(ctx, testWorkspaceID, c2.ID)
+		gt.NoError(t, err).Required()
+
+		archived, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, c2.ID, c3.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(2).Required()
+
+		gotIDs := map[int64]bool{}
+		for _, c := range archived {
+			gotIDs[c.ID] = true
+		}
+		gt.Bool(t, gotIDs[c1.ID]).True()
+		gt.Bool(t, gotIDs[c2.ID]).False()
+		gt.Bool(t, gotIDs[c3.ID]).True()
+
+		// The skipped case is still archived, just not newly so.
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c2.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+
+	// The selection is made against a snapshot of the Closed tab, so someone
+	// else reopening one of the rows in between must not fail the whole batch.
+	t.Run("skips an id that is no longer closed", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		reopened := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusOpen})
+		c3 := seedArchiveCase(t, repo, &model.Case{Title: "C", Status: types.CaseStatusClosed})
+
+		archived, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, reopened.ID, c3.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(2).Required()
+
+		gotIDs := map[int64]bool{}
+		for _, c := range archived {
+			gotIDs[c.ID] = true
+		}
+		gt.Bool(t, gotIDs[c1.ID]).True()
+		gt.Bool(t, gotIDs[reopened.ID]).False()
+		gt.Bool(t, gotIDs[c3.ID]).True()
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, reopened.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	// Only staleness is skipped. A real failure — access denied here — must
+	// reach the caller rather than being swallowed.
+	t.Run("propagates an access denial", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		private := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+
+		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-OUTSIDER"})
+		_, err := uc.BulkArchiveCases(outsiderCtx, testWorkspaceID, []int64{c1.ID, private.ID})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	t.Run("propagates a missing id", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+
+		_, err := uc.BulkArchiveCases(ctx, testWorkspaceID, []int64{c1.ID, 9999})
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("an empty batch returns an empty non-nil slice", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		archived, err := uc.BulkArchiveCases(archiveTestCtx(), testWorkspaceID, nil)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, archived == nil).False()
+		gt.Array(t, archived).Length(0)
+	})
+}
+
+func TestCaseUseCase_BulkUnarchiveCases(t *testing.T) {
+	t.Run("restores every archived case in the batch", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		archivedAt := time.Now().UTC()
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed, ArchivedAt: &archivedAt})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed, ArchivedAt: &archivedAt})
+
+		restored, err := uc.BulkUnarchiveCases(ctx, testWorkspaceID, []int64{c1.ID, c2.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, restored).Length(2).Required()
+		for _, c := range restored {
+			gt.Bool(t, c.IsArchived()).False()
+		}
+	})
+
+	t.Run("skips an id that is not archived", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		archivedAt := time.Now().UTC()
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed, ArchivedAt: &archivedAt})
+		active := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed})
+
+		restored, err := uc.BulkUnarchiveCases(ctx, testWorkspaceID, []int64{c1.ID, active.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, restored).Length(1).Required()
+		gt.Value(t, restored[0].ID).Equal(c1.ID)
+	})
+
+	t.Run("propagates an access denial", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		archivedAt := time.Now().UTC()
+		private := seedArchiveCase(t, repo, &model.Case{
+			Title:          "Private",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+			ArchivedAt:     &archivedAt,
+		})
+
+		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-OUTSIDER"})
+		_, err := uc.BulkUnarchiveCases(outsiderCtx, testWorkspaceID, []int64{private.ID})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	t.Run("an empty batch returns an empty non-nil slice", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		restored, err := uc.BulkUnarchiveCases(archiveTestCtx(), testWorkspaceID, nil)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, restored == nil).False()
+		gt.Array(t, restored).Length(0)
+	})
+}
+
+func TestCaseUseCase_BulkArchiveCasesAsync(t *testing.T) {
+	t.Run("archives the whole batch after the async tail drains", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed})
+
+		uc.BulkArchiveCasesAsync(ctx, testWorkspaceID, []int64{c1.ID, c2.ID})
+		async.Wait()
+
+		for _, id := range []int64{c1.ID, c2.ID} {
+			stored, err := repo.Case().Get(ctx, testWorkspaceID, id)
+			gt.NoError(t, err).Required()
+			gt.Bool(t, stored.IsArchived()).True()
+		}
+	})
+
+	t.Run("restores the whole batch after the async tail drains", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		archivedAt := time.Now().UTC()
+		c1 := seedArchiveCase(t, repo, &model.Case{Title: "A", Status: types.CaseStatusClosed, ArchivedAt: &archivedAt})
+		c2 := seedArchiveCase(t, repo, &model.Case{Title: "B", Status: types.CaseStatusClosed, ArchivedAt: &archivedAt})
+
+		uc.BulkUnarchiveCasesAsync(ctx, testWorkspaceID, []int64{c1.ID, c2.ID})
+		async.Wait()
+
+		for _, id := range []int64{c1.ID, c2.ID} {
+			stored, err := repo.Case().Get(ctx, testWorkspaceID, id)
+			gt.NoError(t, err).Required()
+			gt.Bool(t, stored.IsArchived()).False()
+		}
+	})
+}
+
+func TestCaseUseCase_ArchivedCaseCannotReturnToOpen(t *testing.T) {
+	t.Run("ReopenCase rejects an archived case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := archiveTestCtx()
+
+		c := seedArchiveCase(t, repo, &model.Case{Title: "Closed case", Status: types.CaseStatusClosed})
+		_, err := uc.ArchiveCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ReopenCase(ctx, testWorkspaceID, c.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseArchived)
+
+		stored, getErr := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusClosed)
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+
+	t.Run("UpdateCaseStatus rejects a move to an open column", func(t *testing.T) {
+		ctx := archiveTestCtx()
+		uc, _, created, repo := newThreadNotifyCase(t, ctx)
+
+		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.NoError(t, err).Required()
+		_, err = uc.ArchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "triage")
+		gt.Error(t, err).Is(usecase.ErrCaseArchived)
+
+		stored, getErr := repo.Case().Get(ctx, "support", created.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.BoardStatus).Equal("done")
+		gt.Value(t, stored.Status).Equal(types.CaseStatusClosed)
+	})
+
+	// The guard is on "is archived", not on "is the target column open": an
+	// archived case takes no board writes at all.
+	t.Run("UpdateCaseStatus rejects a move between closed columns", func(t *testing.T) {
+		ctx := archiveTestCtx()
+		uc, _, created, repo := newThreadNotifyCase(t, ctx)
+
+		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.NoError(t, err).Required()
+		_, err = uc.ArchiveCase(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		gt.Error(t, err).Is(usecase.ErrCaseArchived)
+
+		stored, getErr := repo.Case().Get(ctx, "support", created.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+}
+
+func TestCaseUseCase_ListCases_ArchiveScope(t *testing.T) {
+	repo := memory.New()
+	uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	ctx := archiveTestCtx()
+
+	open := seedArchiveCase(t, repo, &model.Case{Title: "Open", Status: types.CaseStatusOpen})
+	activeClosed := seedArchiveCase(t, repo, &model.Case{Title: "Closed active", Status: types.CaseStatusClosed})
+	toArchive := seedArchiveCase(t, repo, &model.Case{Title: "Closed archived", Status: types.CaseStatusClosed})
+	_, err := uc.ArchiveCase(ctx, testWorkspaceID, toArchive.ID)
+	gt.NoError(t, err).Required()
+
+	idsOf := func(cases []*model.Case) map[int64]bool {
+		seen := make(map[int64]bool, len(cases))
+		for _, c := range cases {
+			seen[c.ID] = true
+		}
+		return seen
+	}
+
+	t.Run("active-only hides the archived case", func(t *testing.T) {
+		got, listErr := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeActiveOnly)
+		gt.NoError(t, listErr).Required()
+		seen := idsOf(got)
+		gt.Bool(t, seen[open.ID]).True()
+		gt.Bool(t, seen[activeClosed.ID]).True()
+		gt.Bool(t, seen[toArchive.ID]).False()
+	})
+
+	t.Run("archived-only returns just the archived case", func(t *testing.T) {
+		got, listErr := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeArchivedOnly)
+		gt.NoError(t, listErr).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].ID).Equal(toArchive.ID)
+		gt.Bool(t, got[0].IsArchived()).True()
+	})
+
+	t.Run("all returns every non-draft case", func(t *testing.T) {
+		got, listErr := uc.ListCases(ctx, testWorkspaceID, nil, interfaces.CaseArchiveScopeAll)
+		gt.NoError(t, listErr).Required()
+		seen := idsOf(got)
+		gt.Bool(t, seen[open.ID]).True()
+		gt.Bool(t, seen[activeClosed.ID]).True()
+		gt.Bool(t, seen[toArchive.ID]).True()
+	})
+
+	t.Run("the status filter combines with the scope", func(t *testing.T) {
+		closedStatus := types.CaseStatusClosed
+		got, listErr := uc.ListCases(ctx, testWorkspaceID, &closedStatus, interfaces.CaseArchiveScopeActiveOnly)
+		gt.NoError(t, listErr).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].ID).Equal(activeClosed.ID)
+	})
+}
+
+// ListReferenceableCases feeds the case_ref picker. A case that was put away
+// must stop being offered as a new reference.
+func TestCaseUseCase_ListReferenceableCases_ExcludesArchived(t *testing.T) {
+	repo := memory.New()
+	uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+	ctx := archiveTestCtx()
+
+	visible := seedArchiveCase(t, repo, &model.Case{Title: "Still referenceable", Status: types.CaseStatusClosed})
+	hidden := seedArchiveCase(t, repo, &model.Case{Title: "Put away", Status: types.CaseStatusClosed})
+	_, err := uc.ArchiveCase(ctx, testWorkspaceID, hidden.ID)
+	gt.NoError(t, err).Required()
+
+	refs, err := uc.ListReferenceableCases(ctx, testWorkspaceID, "", 50)
+	gt.NoError(t, err).Required()
+
+	seen := map[int64]bool{}
+	for _, ref := range refs {
+		seen[ref.ID] = true
+	}
+	gt.Bool(t, seen[visible.ID]).True()
+	gt.Bool(t, seen[hidden.ID]).False()
 }
 
 // threadNotifyCall captures one PostThreadMessage invocation.

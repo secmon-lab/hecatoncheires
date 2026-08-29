@@ -30,6 +30,28 @@ var (
 	// on a mismatched column, desyncing the two. The boundary rejects it so a
 	// mis-wired caller fails loudly instead of producing the inconsistent state.
 	ErrCaseThreadModeUseStatus = errors.New("thread-mode case lifecycle must change via board status")
+
+	// Archive errors
+	//
+	// ErrCaseNotClosed is returned by ArchiveCase when the targeted case is not
+	// CLOSED (it is OPEN or DRAFT). Archiving hides a case from the default
+	// Cases list, the board, the dashboard and the Job scan at once; an OPEN
+	// case vanishing from all of them gives an operator no way to see why, so
+	// only a CLOSED case may be archived.
+	ErrCaseNotClosed = errors.New("case is not closed")
+	// ErrCaseAlreadyArchived is returned by ArchiveCase when the case is
+	// already archived. Archiving is not silently idempotent so a caller can
+	// distinguish "already done" from "now done"; BulkArchiveCases is what
+	// treats it as a skip.
+	ErrCaseAlreadyArchived = errors.New("case is already archived")
+	// ErrCaseNotArchived is returned by UnarchiveCase when the case is not
+	// archived.
+	ErrCaseNotArchived = errors.New("case is not archived")
+	// ErrCaseArchived is returned by ReopenCase / UpdateCaseStatus when the
+	// targeted case is archived. An archived case that went back to OPEN would
+	// appear in no list, no board, no dashboard and no Job scan — unreachable
+	// state. Unarchive it first.
+	ErrCaseArchived = errors.New("case is archived")
 	// ErrMissingRequiredOnSubmit is returned by SubmitDraft when the draft
 	// is missing one or more required custom fields. The wrapping goerr
 	// carries the field IDs and human-friendly names (see MissingFieldIDsKey /

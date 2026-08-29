@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -729,6 +730,79 @@ func TestValidateDB_BoardStatusInvalid(t *testing.T) {
 	// Both offenders collapse into one group; the lower case id wins the sample.
 	gt.Value(t, issue.Sample.CaseID).Equal(undefined.ID)
 	gt.Value(t, issue.Actual).Equal("RETIRED")
+}
+
+func TestValidateDB_ArchivedCaseNotClosed(t *testing.T) {
+	wsID := "ws-archived-not-closed"
+	repo, uc := setupValidateTest(t, wsID, &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}})
+	ctx := context.Background()
+
+	archivedAt := time.Now().UTC()
+
+	// The offender: archived but still OPEN. Unreachable through the usecase
+	// layer, but a Case in this state appears in no listing at all, so the
+	// check is what surfaces it.
+	offender, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Archived but open",
+		Status:     types.CaseStatusOpen,
+		ArchivedAt: &archivedAt,
+	})
+	gt.NoError(t, err).Required()
+
+	// A correctly archived case and an ordinary open case must not be flagged.
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Archived and closed",
+		Status:     types.CaseStatusClosed,
+		ArchivedAt: &archivedAt,
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Open and active",
+		Status:     types.CaseStatusOpen,
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(1).Required()
+
+	issue := result.Issues[0]
+	gt.Value(t, issue.Kind).Equal(usecase.IssueKindArchivedNotClosed)
+	gt.Value(t, issue.FieldID).Equal("")
+	gt.Value(t, issue.Count).Equal(int64(1))
+	gt.Value(t, issue.Sample.CaseID).Equal(offender.ID)
+	gt.Value(t, issue.Expected).Equal(string(types.CaseStatusClosed))
+	gt.Value(t, issue.Actual).Equal(string(types.CaseStatusOpen))
+}
+
+func TestValidateDB_ArchivedCaseClosedIsClean(t *testing.T) {
+	wsID := "ws-archived-clean"
+	repo, uc := setupValidateTest(t, wsID, &config.FieldSchema{Labels: config.EntityLabels{Case: "Case"}})
+	ctx := context.Background()
+
+	archivedAt := time.Now().UTC()
+	_, err := repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Archived and closed",
+		Status:     types.CaseStatusClosed,
+		ArchivedAt: &archivedAt,
+	})
+	gt.NoError(t, err).Required()
+
+	_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT",
+		Title:      "Open and active",
+		Status:     types.CaseStatusOpen,
+	})
+	gt.NoError(t, err).Required()
+
+	result, err := uc.ValidateDB(ctx)
+	gt.NoError(t, err).Required()
+	gt.Array(t, result.Issues).Length(0)
 }
 
 func TestValidateDB_BoardStatusSkippedForChannelMode(t *testing.T) {

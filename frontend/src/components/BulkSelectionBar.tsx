@@ -1,10 +1,20 @@
 import { useTranslation } from '../i18n'
 import Button from './Button'
 
+/** One action offered by the bar. The caller supplies the label and the
+ *  test id so each tab keeps its own wording and selectors. */
+export interface BulkAction {
+  key: string
+  label: string
+  variant: 'primary' | 'danger' | 'secondary' | 'ghost'
+  testId: string
+  onClick: () => void
+}
+
 interface BulkSelectionBarProps {
   selectedCount: number
-  onSubmit: () => void
-  onDelete: () => void
+  /** Rendered left to right, before the always-present Clear button. */
+  actions: BulkAction[]
   onClear: () => void
   disabled?: boolean
   /** Replaces the "N selected" label while a bulk action is running.
@@ -13,15 +23,19 @@ interface BulkSelectionBarProps {
   progressLabel?: string
 }
 
-// BulkSelectionBar is an inline cluster — count label + 3 actions — that
-// the caller drops between the status tabs and the search input. The
-// component renders nothing when no rows are selected and no progress is
+// BulkSelectionBar is an inline cluster — count label + the caller's actions +
+// Clear — that the caller drops between the status tabs and the search input.
+// The component renders nothing when no rows are selected and no progress is
 // in flight, so the row height stays constant whether selection is active
 // or not (no layout shift).
+//
+// The actions are a prop rather than fixed buttons because three tabs share
+// this bar with different verbs (Drafts submits and deletes, Closed archives,
+// Archived restores) while the count label, the progress label, the disabled
+// handling and the no-layout-shift rule are identical for all of them.
 export default function BulkSelectionBar({
   selectedCount,
-  onSubmit,
-  onDelete,
+  actions,
   onClear,
   disabled = false,
   progressLabel,
@@ -45,24 +59,18 @@ export default function BulkSelectionBar({
       >
         {label}
       </span>
-      <Button
-        size="sm"
-        variant="primary"
-        disabled={disabled || selectedCount <= 0}
-        onClick={onSubmit}
-        data-testid="bulk-submit-button"
-      >
-        {t('bulkSelectionBarSubmit')}
-      </Button>
-      <Button
-        size="sm"
-        variant="danger"
-        disabled={disabled || selectedCount <= 0}
-        onClick={onDelete}
-        data-testid="bulk-delete-button"
-      >
-        {t('bulkSelectionBarDelete')}
-      </Button>
+      {actions.map((action) => (
+        <Button
+          key={action.key}
+          size="sm"
+          variant={action.variant}
+          disabled={disabled || selectedCount <= 0}
+          onClick={action.onClick}
+          data-testid={action.testId}
+        >
+          {action.label}
+        </Button>
+      ))}
       <Button
         size="sm"
         variant="ghost"

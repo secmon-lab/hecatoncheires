@@ -270,6 +270,8 @@ const (
 	MsgCaseChangeStatus             // ":arrows_counterclockwise: %s changed the case status: %s -> %s"
 	MsgCaseChangeAssigneeAssigned   // ":bust_in_silhouette: %s assigned %s"
 	MsgCaseChangeAssigneeUnassigned // ":bust_in_silhouette: %s unassigned %s"
+	MsgCaseChangeArchived           // ":file_cabinet: %s archived this case"
+	MsgCaseChangeUnarchived         // ":outbox_tray: %s unarchived this case"
 
 	msgKeyCount // sentinel for validation
 )

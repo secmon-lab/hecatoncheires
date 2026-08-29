@@ -371,6 +371,399 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 	})
 }
 
+// archiveCaseRow is the Case shape the archive tests select.
+type archiveCaseRow struct {
+	ID          int     `json:"id"`
+	WorkspaceID string  `json:"workspaceId"`
+	Status      string  `json:"status"`
+	ArchivedAt  *string `json:"archivedAt"`
+}
+
+// decodeArchiveCases unmarshals a `cases` query payload.
+func decodeArchiveCases(t *testing.T, resp *graphQLResponse) []archiveCaseRow {
+	t.Helper()
+	var result struct {
+		Cases []archiveCaseRow `json:"cases"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+	return result.Cases
+}
+
+// archiveTestCaseIDs pulls the ids out of a `cases` query payload.
+func archiveTestCaseIDs(t *testing.T, resp *graphQLResponse) map[int]bool {
+	t.Helper()
+	rows := decodeArchiveCases(t, resp)
+	ids := make(map[int]bool, len(rows))
+	for _, row := range rows {
+		ids[row.ID] = true
+	}
+	return ids
+}
+
+func TestGraphQLHandler_CaseArchive(t *testing.T) {
+	const actor = "U-ARCHIVER"
+
+	casesQuery := `
+		query($workspaceId: String!, $filter: CaseArchiveFilter) {
+			cases(workspaceId: $workspaceId, filter: $filter) {
+				id
+				workspaceId
+				archivedAt
+			}
+		}
+	`
+	archiveMutation := `
+		mutation($workspaceId: String!, $id: Int!) {
+			archiveCase(workspaceId: $workspaceId, id: $id) {
+				id
+				workspaceId
+				status
+				archivedAt
+			}
+		}
+	`
+	unarchiveMutation := `
+		mutation($workspaceId: String!, $id: Int!) {
+			unarchiveCase(workspaceId: $workspaceId, id: $id) {
+				id
+				workspaceId
+				archivedAt
+			}
+		}
+	`
+
+	seed := func(t *testing.T, repo interfaces.Repository, title string, status types.CaseStatus) *model.Case {
+		t.Helper()
+		created, err := repo.Case().Create(context.Background(), testWorkspaceID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      title,
+			Status:     status,
+		})
+		gt.NoError(t, err).Required()
+		return created
+	}
+
+	t.Run("archiveCase sets archivedAt and keeps the case closed", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		closed := seed(t, repo, "Closed case", types.CaseStatusClosed)
+
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          closed.ID,
+		}, actor)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+
+		var result struct {
+			ArchiveCase archiveCaseRow `json:"archiveCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.ArchiveCase.ID).Equal(int(closed.ID))
+		gt.Value(t, result.ArchiveCase.Status).Equal("CLOSED")
+		gt.Value(t, result.ArchiveCase.ArchivedAt).NotNil()
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, closed.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+	})
+
+	t.Run("archivedAt is null for an active case", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		seed(t, repo, "Open case", types.CaseStatusOpen)
+
+		rec := executeGraphQLRequestWithAuth(t, handler, casesQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+
+		rows := decodeArchiveCases(t, resp)
+		gt.Array(t, rows).Length(1).Required()
+		gt.Value(t, rows[0].ArchivedAt).Nil()
+	})
+
+	t.Run("the cases filter selects the archive slice", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		openCase := seed(t, repo, "Open", types.CaseStatusOpen)
+		activeClosed := seed(t, repo, "Closed active", types.CaseStatusClosed)
+		archived := seed(t, repo, "Closed archived", types.CaseStatusClosed)
+
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          archived.ID,
+		}, actor)
+		gt.Array(t, parseGraphQLResponse(t, rec).Errors).Length(0).Required()
+
+		// No filter argument: the schema default ACTIVE applies, so an existing
+		// client keeps seeing exactly what it saw before archiving existed.
+		rec = executeGraphQLRequestWithAuth(t, handler, casesQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, actor)
+		ids := archiveTestCaseIDs(t, parseGraphQLResponse(t, rec))
+		gt.Bool(t, ids[int(openCase.ID)]).True()
+		gt.Bool(t, ids[int(activeClosed.ID)]).True()
+		gt.Bool(t, ids[int(archived.ID)]).False()
+
+		rec = executeGraphQLRequestWithAuth(t, handler, casesQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"filter":      "ARCHIVED",
+		}, actor)
+		ids = archiveTestCaseIDs(t, parseGraphQLResponse(t, rec))
+		gt.Number(t, len(ids)).Equal(1)
+		gt.Bool(t, ids[int(archived.ID)]).True()
+
+		rec = executeGraphQLRequestWithAuth(t, handler, casesQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"filter":      "ALL",
+		}, actor)
+		ids = archiveTestCaseIDs(t, parseGraphQLResponse(t, rec))
+		gt.Number(t, len(ids)).Equal(3)
+		gt.Bool(t, ids[int(archived.ID)]).True()
+	})
+
+	t.Run("unarchiveCase clears archivedAt", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		closed := seed(t, repo, "Closed case", types.CaseStatusClosed)
+
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          closed.ID,
+		}, actor)
+		gt.Array(t, parseGraphQLResponse(t, rec).Errors).Length(0).Required()
+
+		rec = executeGraphQLRequestWithAuth(t, handler, unarchiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          closed.ID,
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+
+		var result struct {
+			UnarchiveCase archiveCaseRow `json:"unarchiveCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.UnarchiveCase.ID).Equal(int(closed.ID))
+		gt.Value(t, result.UnarchiveCase.ArchivedAt).Nil()
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, closed.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("archiveCase rejects an open case", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		openCase := seed(t, repo, "Open case", types.CaseStatusOpen)
+
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          openCase.ID,
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, openCase.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	// Without a token the usecase would treat the call as a system context and
+	// skip the private-case check, so the resolver refuses it outright.
+	t.Run("archiveCase requires an auth token", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		closed := seed(t, repo, "Closed case", types.CaseStatusClosed)
+
+		rec := executeGraphQLRequest(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          closed.ID,
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, closed.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("archiveCase denies a non-member of a private case", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		created, err := repo.Case().Create(context.Background(), testWorkspaceID, &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Private closed case",
+			Status:         types.CaseStatusClosed,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+		gt.NoError(t, err).Required()
+
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          created.ID,
+		}, "U-OUTSIDER")
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, created.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+}
+
+func TestGraphQLHandler_BulkCaseArchive(t *testing.T) {
+	const actor = "U-ARCHIVER"
+
+	bulkArchive := `
+		mutation($workspaceId: String!, $ids: [Int!]!) {
+			bulkArchiveCases(workspaceId: $workspaceId, ids: $ids)
+		}
+	`
+	bulkUnarchive := `
+		mutation($workspaceId: String!, $ids: [Int!]!) {
+			bulkUnarchiveCases(workspaceId: $workspaceId, ids: $ids)
+		}
+	`
+
+	seedClosed := func(t *testing.T, repo interfaces.Repository, title string) *model.Case {
+		t.Helper()
+		created, err := repo.Case().Create(context.Background(), testWorkspaceID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      title,
+			Status:     types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+		return created
+	}
+
+	acceptedIDs := func(t *testing.T, resp *graphQLResponse, field string) []int {
+		t.Helper()
+		var payload map[string][]int
+		gt.NoError(t, json.Unmarshal(resp.Data, &payload)).Required()
+		ids, ok := payload[field]
+		gt.Bool(t, ok).True().Required()
+		return ids
+	}
+
+	t.Run("returns the accepted ids and archives them in the async tail", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		c1 := seedClosed(t, repo, "A")
+		c2 := seedClosed(t, repo, "B")
+
+		rec := executeGraphQLRequestWithAuth(t, handler, bulkArchive, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int64{c1.ID, c2.ID},
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+
+		accepted := acceptedIDs(t, resp, "bulkArchiveCases")
+		gt.Array(t, accepted).Length(2).Required()
+		gt.Value(t, accepted[0]).Equal(int(c1.ID))
+		gt.Value(t, accepted[1]).Equal(int(c2.ID))
+
+		async.Wait()
+		for _, id := range []int64{c1.ID, c2.ID} {
+			stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, id)
+			gt.NoError(t, getErr).Required()
+			gt.Bool(t, stored.IsArchived()).True()
+		}
+	})
+
+	t.Run("bulk unarchive restores them in the async tail", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		c1 := seedClosed(t, repo, "A")
+		rec := executeGraphQLRequestWithAuth(t, handler, bulkArchive, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int64{c1.ID},
+		}, actor)
+		gt.Array(t, parseGraphQLResponse(t, rec).Errors).Length(0).Required()
+		async.Wait()
+
+		rec = executeGraphQLRequestWithAuth(t, handler, bulkUnarchive, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int64{c1.ID},
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+		gt.Array(t, acceptedIDs(t, resp, "bulkUnarchiveCases")).Length(1)
+
+		async.Wait()
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, c1.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	// The auth check runs before the dispatch, so an unauthenticated call must
+	// start no background work at all.
+	t.Run("requires an auth token and starts no background work without one", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		c1 := seedClosed(t, repo, "A")
+
+		rec := executeGraphQLRequest(t, handler, bulkArchive, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int64{c1.ID},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+		async.Wait()
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, c1.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("an empty id list returns an empty list and does nothing", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		rec := executeGraphQLRequestWithAuth(t, handler, bulkArchive, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int64{},
+		}, actor)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0).Required()
+		gt.Array(t, acceptedIDs(t, resp, "bulkArchiveCases")).Length(0)
+		async.Wait()
+	})
+}
+
 func TestGraphQLHandler_CaseQuery(t *testing.T) {
 	repo := memory.New()
 	handler, err := setupGraphQLServer(repo)

@@ -38,6 +38,7 @@ func buildCaseTable(ctx context.Context, schema *config.FieldSchema, cases []*mo
 			"is_private":       c.IsPrivate,
 			"is_test":          c.IsTest,
 			"request_key":      c.RequestKey,
+			"archived_at":      c.ArchivedAt,
 			"created_at":       c.CreatedAt,
 			"updated_at":       c.UpdatedAt,
 		}
@@ -439,6 +440,7 @@ func fixedCaseColumns() []Column {
 		{Name: "is_private", Type: TypeBool, Nullable: true},
 		{Name: "is_test", Type: TypeBool, Nullable: true},
 		{Name: "request_key", Type: TypeString, Nullable: true},
+		{Name: "archived_at", Type: TypeTimestamp, Nullable: true},
 		{Name: "created_at", Type: TypeTimestamp, Nullable: true},
 		{Name: "updated_at", Type: TypeTimestamp, Nullable: true},
 	}
