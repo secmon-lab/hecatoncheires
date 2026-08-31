@@ -40,6 +40,48 @@ func TestNanoUSDFormatAtMinInt64(t *testing.T) {
 	gt.String(t, got).Equal("-$9223372036.85")
 }
 
+// TestFloorCent pins why the method exists: an amount that is both SHOWN and
+// ENFORCED must render as no more than it is. USD rounds to the nearest cent, so
+// $0.856 reads as "$0.86" — and a reader allocating the $0.86 it was told it had
+// would then be refused against the $0.856 actually available.
+func TestFloorCent(t *testing.T) {
+	testCases := map[string]struct {
+		value    pricing.NanoUSD
+		want     pricing.NanoUSD
+		wantText string
+	}{
+		"a sub-cent remainder that USD would round up": {
+			value: 856_000_000, want: 850_000_000, wantText: "$0.85",
+		},
+		"a sub-cent remainder that USD would round down": {
+			value: 854_000_000, want: 850_000_000, wantText: "$0.85",
+		},
+		"a whole cent is unchanged": {
+			value: 850_000_000, want: 850_000_000, wantText: "$0.85",
+		},
+		"zero": {value: 0, want: 0, wantText: "$0.00"},
+		"less than a cent floors to nothing": {
+			value: 4_000_000, want: 0, wantText: "$0.00",
+		},
+		// Away from zero, as the name says. Nothing here passes a negative — a
+		// remaining allowance is clamped at zero — but rounding one the other way
+		// would make the method a trap for a later caller.
+		"a negative amount floors away from zero": {
+			value: -856_000_000, want: -860_000_000, wantText: "-$0.86",
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			got := tc.value.FloorCent()
+			gt.Value(t, got).Equal(tc.want)
+			// The whole point: the floored amount renders exactly, so the figure a
+			// reader is shown is the figure that is enforced.
+			gt.String(t, got.USD()).Equal(tc.wantText)
+		})
+	}
+}
+
 // TestNanoUSDValue pins the conversion the GraphQL field carries. It is the one
 // place a money value becomes a float, so what matters is that the stored integer
 // survives the trip: a fraction of a cent must not round to zero, and an amount

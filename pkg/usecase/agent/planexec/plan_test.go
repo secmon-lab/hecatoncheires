@@ -437,6 +437,26 @@ func TestTaskBudgetsAreValidatedAgainstWhatIsLeft(t *testing.T) {
 	}
 }
 
+// TestAnUnconvertibleTaskBudgetIsRejected pins the direction that matters about a
+// bad figure: it must not grant MORE money than a good one.
+//
+// `budget_usd` is a float64 from a model and pricing.FromUSD does not saturate, so
+// a figure above roughly 9.2e9 lands negative in NanoUSD. Checked as a float it
+// looks positive; unchecked in NanoUSD it would make the round's sum negative and
+// clear the sum check, and WithBudget would then read the non-positive amount as
+// "unset" and hand the child the deployment default.
+func TestAnUnconvertibleTaskBudgetIsRejected(t *testing.T) {
+	remaining := pricing.FromUSD(1)
+	raw := plannedTasks(
+		`{"id":"t-1","title":"t","description":"d","acceptance_criteria":"a",` +
+			`"tools":["slack_ro"],"budget_usd":1e13}`)
+
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false, &remaining)
+	gt.Value(t, err).NotNil()
+	_, err = planexec.ParseReplanResultForTest(raw, knownTools, false, &remaining)
+	gt.Value(t, err).NotNil()
+}
+
 // TestTaskBudgetsAreNotCheckedWithoutARemainingFigure pins the backward-compatible
 // half: a host that wired no Config.Remaining is not asking the planner to
 // allocate anything, so a plan without budgets is accepted and its children keep

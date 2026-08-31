@@ -183,9 +183,10 @@ type QuestionResult struct {
 // Validate enforces TaskPlan invariants. KnownToolIDs is the
 // host-supplied allowlist (RunRequest.KnownToolIDs); every entry in
 // TaskPlan.Tools must be a member.
-// Validate checks one task. requireBudget is true when the host wired
-// Config.Remaining, which is what makes BudgetUSD part of the contract.
-func (t *TaskPlan) Validate(knownToolIDs []string, requireBudget bool) error {
+// Validate checks one task's own shape. The per-task budget is NOT checked here:
+// its rules are stated against the round's remaining allowance, so they live in
+// validateTaskList where that figure is in hand.
+func (t *TaskPlan) Validate(knownToolIDs []string) error {
 	if t == nil {
 		return goerr.New("task plan is nil")
 	}
@@ -221,13 +222,6 @@ func (t *TaskPlan) Validate(knownToolIDs []string, requireBudget bool) error {
 				goerr.V("tool_id", id),
 				goerr.V("known", knownToolIDs))
 		}
-	}
-	if requireBudget && t.BudgetUSD <= 0 {
-		// Rejected rather than defaulted: a task with no allowance would inherit the
-		// run's whole budget, which is the state this field exists to end.
-		return goerr.New("task plan budget must be a positive amount in USD",
-			goerr.V("task_id", t.ID),
-			goerr.V("budget_usd", t.BudgetUSD))
 	}
 	return nil
 }
@@ -444,7 +438,7 @@ func validateTaskList(tasks []TaskPlan, knownToolIDs []string, remaining *pricin
 	var sum pricing.NanoUSD
 	for i := range tasks {
 		task := &tasks[i]
-		if err := task.Validate(knownToolIDs, remaining != nil); err != nil {
+		if err := task.Validate(knownToolIDs); err != nil {
 			return goerr.Wrap(err, "task invalid",
 				goerr.V("index", i))
 		}
@@ -453,13 +447,52 @@ func validateTaskList(tasks []TaskPlan, knownToolIDs []string, remaining *pricin
 				goerr.V("id", task.ID))
 		}
 		seenID[task.ID] = struct{}{}
+		if remaining == nil {
+			continue
+		}
+		if err := checkTaskBudget(task, *remaining); err != nil {
+			return err
+		}
 		sum += pricing.FromUSD(task.BudgetUSD)
 	}
-	// The per-task check above bounds one task; this bounds the ROUND. Without it
-	// a planner could hand every one of five tasks the whole remaining allowance.
+	// The per-task check bounds one task; this bounds the ROUND. Without it a
+	// planner could hand every one of five tasks the whole remaining allowance.
+	//
+	// The sum cannot overflow: checkTaskBudget has already bounded every term by
+	// the remaining allowance, and there are at most maxTasksPerPhase of them.
 	if remaining != nil && sum > *remaining {
 		return goerr.New("task budgets exceed the remaining allowance",
 			goerr.V("sum", sum.USD()),
+			goerr.V("remaining", remaining.USD()))
+	}
+	return nil
+}
+
+// checkTaskBudget holds the whole per-task budget contract, in the units it is
+// actually enforced in.
+//
+// Both bounds are stated against the CONVERTED amount rather than the float the
+// model emitted, and that is the point of the function. `budget_usd` is a float64
+// from a model, and pricing.FromUSD does not saturate: a figure above roughly
+// 9.2e9 converts outside int64 and lands negative. A positive-float check alone
+// would pass it, the round's sum would go negative and clear the sum check, and
+// WithBudget would then read the non-positive amount as "unset" and hand the
+// child the deployment default — an invalid input granting MORE money than a
+// valid one. Bounding the converted amount above closes that direction and bounds
+// the sum at the same time.
+func checkTaskBudget(task *TaskPlan, remaining pricing.NanoUSD) error {
+	amount := pricing.FromUSD(task.BudgetUSD)
+	if amount <= 0 {
+		// Rejected rather than defaulted: a task with no allowance would inherit the
+		// run's whole budget, which is the state this field exists to end.
+		return goerr.New("task plan budget must be a positive amount in USD",
+			goerr.V("task_id", task.ID),
+			goerr.V("budget_usd", task.BudgetUSD))
+	}
+	if amount > remaining {
+		return goerr.New("task plan budget exceeds the remaining allowance",
+			goerr.V("task_id", task.ID),
+			goerr.V("budget", amount.USD()),
 			goerr.V("remaining", remaining.USD()))
 	}
 	return nil

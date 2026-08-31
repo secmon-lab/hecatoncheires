@@ -79,8 +79,9 @@ This prompt carries a line reading `[budget] remaining $X of $Y`: `$X` is what t
 
 You decide how `$X` is divided. Every task you emit carries a `budget_usd` — the amount that task's sub-agent may spend — and the rules are:
 
-- Each `budget_usd` must be greater than 0.
+- Each `budget_usd` must be greater than 0, and no single one may exceed `$X`.
 - The budgets of all tasks in one round must add up to no more than the remaining `$X`.
+- `$X` is stated to the cent and is exactly the figure your budgets are checked against, so allocating all of it is allowed rather than borderline.
 - Give the heavier task the larger share. A task that reads one thread needs far less than one that searches several sources and cross-references them.
 - Do not divide the whole of `$X` between the tasks of an early round. You will need rounds after this one, and the final answer is written out of what is left.
 

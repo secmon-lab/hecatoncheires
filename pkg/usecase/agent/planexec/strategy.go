@@ -1302,7 +1302,12 @@ func (s *strategy[T]) remainingBudget(sys agentkit.Syscalls) (remaining, total p
 		return 0, 0, false
 	}
 	remaining, total = s.cfg.Remaining(sys.Metadata(), sys.Metrics())
-	return remaining, total, true
+	// Floored to the cent because this ONE figure is both shown to the planner and
+	// enforced against its plan. A raw amount is shown rounded to the nearest cent
+	// and can therefore read higher than it is, and a plan allocating exactly what
+	// the planner was told it had would then be rejected — costing a planner call
+	// per attempt, paid out of the very allowance being divided.
+	return remaining.FloorCent(), total, true
 }
 
 // budgetLine is what the planner is told about its allowance, or "" when the host

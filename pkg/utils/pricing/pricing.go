@@ -50,6 +50,29 @@ func (n NanoUSD) USD() string {
 	return out
 }
 
+// nanoPerCent is the resolution USD formats at.
+const nanoPerCent = 10_000_000
+
+// FloorCent rounds the amount DOWN to a whole cent, so USD renders it exactly.
+//
+// It exists for a figure that is both SHOWN to a model and ENFORCED against it.
+// USD rounds to the NEAREST cent and can therefore round up: a raw $0.856 reads
+// as "$0.86", and an allocation of exactly the $0.86 the reader was told it had
+// is then rejected against the $0.856 actually available. Each such rejection
+// costs a model call. Flooring first makes the displayed and the enforced figure
+// the same number.
+//
+// A negative amount floors away from zero, as the name says. Nothing in this
+// application passes one — a remaining allowance is clamped at zero — but a
+// method that quietly rounded negatives the other way would be a trap.
+func (n NanoUSD) FloorCent() NanoUSD {
+	whole := (n / nanoPerCent) * nanoPerCent
+	if n < 0 && whole != n {
+		whole -= nanoPerCent
+	}
+	return whole
+}
+
 // USDValue is the amount in dollars, for a wire format that carries a number
 // rather than a formatted string (the GraphQL field a page displays).
 //

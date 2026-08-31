@@ -226,10 +226,16 @@ bound what you are charged.** Three things land on top of it:
 
 **Each sub-agent's share is decided by the planner.** When it plans a round, the
 planner is told what the run has left and states an amount for every task; the
-runtime rejects the plan unless each amount is positive and they add up to no more
-than what is left, and then gives each sub-agent exactly its stated share. So a
-round cannot spend more than the run had left, and the heavy task can be given the
-larger share — which an even split could not do.
+runtime rejects the plan unless each amount is positive, no single amount exceeds
+what is left, and they add up to no more than what is left. Each sub-agent is then
+given exactly its stated share, so the heavy task can have the larger one — which
+an even split could not do.
+
+What this bounds is the round's **allocations**, not its spend. Two things sit
+between the two: the figure is read before the planning call that itself costs
+something, and a sub-agent that crosses its share is told to conclude rather than
+stopped, exactly as the run is. `--agent-max-steps` and `--agent-task-max-*`
+remain the only hard bounds.
 
 A sub-agent that spends its share is told to conclude, exactly as the run is: it
 makes its final tool call and reports. A task given far too little therefore

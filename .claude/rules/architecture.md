@@ -901,18 +901,30 @@ same metadata key — so one resolver serves both tiers. Input and output stay
 separate because output tokens cost several times what input tokens do.
 
 **A child's money allowance is decided by the PLANNER, out of what the run has
-left.** Every `TaskPlan` carries a `budget_usd`; `parseReplanResult` /
-`parsePlanResult` reject a round whose budgets are not all positive or whose sum
-exceeds the remaining allowance, and `spawnChild` stamps each figure onto that
-child's metadata with `agentkernel.WithBudget`. So the round as a whole is bounded
-by what is left, not just each child individually.
+left.** Every `TaskPlan` carries a `budget_usd`; `checkTaskBudget` rejects an
+amount that is not positive or that exceeds the remaining allowance on its own,
+`validateTaskList` rejects a round whose amounts sum past it, and `spawnChild`
+stamps each figure onto that child's metadata with `agentkernel.WithBudget`.
 
-Four properties a change here must preserve:
+**What that bounds is the round's ALLOCATIONS, not its spend.** Do not write it
+the other way round: money answers only notices, so a child that does not conclude
+keeps going to its step or token ceiling, and the remaining figure is read before
+the planning call that itself costs something. `--agent-max-steps` and the Task
+tier's ceilings are still the only hard bounds.
+
+Five properties a change here must preserve:
 
 - **The remaining figure is read at the moment of the call**, from
   `Config[T].Remaining(sys.Metadata(), sys.Metrics())` — never carried on the
   checkpointed state. A round's children can spend a great deal between two of the
   parent's transitions, and a stale figure would be divided up as if they had not.
+- **It is read ONCE per planning transition, BEFORE the generate, and floored to
+  the cent.** The same value is both shown to the planner and enforced against its
+  plan, so the two cannot disagree: re-reading it after the call would validate
+  against a figure smaller than the one the planner was given, and `USD()` rounds
+  to the NEAREST cent, so an unfloored amount can read higher than it is. Either
+  way a plan that did exactly what it was told is rejected, and each rejection
+  costs a planner call out of the allowance being divided.
 - **The planner is the one who divides it**, because it is the only party that
   knows which of the tasks it just wrote is the heavy one. An even split is not a
   fallback: a plan with a missing, zero or over-sum budget is rejected and
