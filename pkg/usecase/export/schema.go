@@ -261,6 +261,12 @@ func jobRunEventColumns() []Column {
 
 		// LLM_REQUEST / LLM_RESPONSE.
 		{Name: "model", Type: TypeString, Nullable: true},
+		// conversation_id groups the LLM_REQUEST rows of one conversation, and
+		// messages_prefix_len says how many of that conversation's leading
+		// messages the earlier rows already carried. messages_json holds only
+		// what follows; see model.LLMRequestPayload and docs/export.md.
+		{Name: "conversation_id", Type: TypeString, Nullable: true},
+		{Name: "messages_prefix_len", Type: TypeInt, Nullable: true},
 		{Name: "messages_json", Type: TypeString, Nullable: true},
 		{Name: "tools_json", Type: TypeString, Nullable: true},
 		{Name: "texts_json", Type: TypeString, Nullable: true},
@@ -318,6 +324,8 @@ func jobRunEventRows(ctx context.Context, events []*model.JobRunEvent) []map[str
 func addEventPayload(ctx context.Context, row map[string]any, e *model.JobRunEvent) {
 	if p := e.LLMRequest; p != nil {
 		row["model"] = p.Model
+		row["conversation_id"] = p.ConversationID
+		row["messages_prefix_len"] = int64(p.MessagesPrefixLen)
 		row["messages_json"] = encodeEventJSON(ctx, e, "messages", p.Messages)
 		row["tools_json"] = encodeEventJSON(ctx, e, "tools", p.Tools)
 	}

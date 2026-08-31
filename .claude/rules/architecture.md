@@ -490,6 +490,32 @@ Two properties this relies on, which a change here must preserve:
   `gollem.WithTrace`, which published the handler for the whole `Execute`; after
   the migration nothing did, and those calls vanished from the timeline. This
   cannot duplicate a Generate: an agentkit Generate never runs inside a tool.
+- **An `LLM_REQUEST` records only the messages its conversation has not recorded
+  yet**, and every conversation reaching one Handler needs its own scope. A
+  conversation grows by appending, so recording the whole list per call stored it
+  once per call — `job_run_events` outgrew every other exported table by two
+  orders of magnitude and eventually killed the `export` process. `runtrace`
+  writes `ConversationID` + `MessagesPrefixLen` instead (see
+  `model.LLMRequestPayload`). Three things a change here must preserve:
+  - **The claim's own conversation needs no wiring**: a Handler is built per
+    claim, and a sub-agent is a separate Process with a separate one.
+  - **A tool that reaches an LLM itself is scoped from its SPAN, not from a
+    context value the middleware adds.** `Handler.StartToolExec` allocates the
+    conversation onto the tool span and `Handler.StartLLMCall` inherits it from
+    the enclosing span. A context value cannot do this job: `trace.Multi` records
+    a per-handler context at each `Start*` and hands that same one back at the
+    matching `End*`, so anything the runtime adds to its own context after the
+    claim opened never reaches the handler. `toolCallMiddleware` therefore stays
+    unaware of conversations. Pinned by
+    `TestAToolsOwnLLMCallIsItsOwnConversation` (kernel) and
+    `TestANestedToolLLMCallIsItsOwnConversation` (runtrace).
+  - **The diff is self-checking.** A request that does not continue what was
+    recorded — a fingerprint mismatch at the recorded boundary — is recorded in
+    full, so a missed scope costs storage, never messages.
+
+  Two consumers depend on the format: `toGraphQLJobRunEvents` reassembles it for
+  the run-detail page, and `docs/export.md` documents the BigQuery
+  reconstruction.
 - **A `TOOL_CALL`'s `ParentSequence` is resolved when the tool STARTS**
   (`Handler.StartToolExec`, held on the span), never when it ends. Because of the
   bullet above, a tool that reaches an LLM itself records an `LLM_RESPONSE` while

@@ -860,7 +860,9 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			Kind:        model.JobRunEventKindLLMRequest,
 			Phase:       "execute",
 			LLMRequest: &model.LLMRequestPayload{
-				Model: "claude-opus-4-7",
+				Model:             "claude-opus-4-7",
+				ConversationID:    "conv-1",
+				MessagesPrefixLen: 3,
 				Messages: []model.LLMMessage{
 					{
 						Role: "user",
@@ -948,6 +950,8 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.Value(t, got[0].Kind).Equal(model.JobRunEventKindLLMRequest)
 		gt.Value(t, got[0].LLMRequest).NotNil()
 		gt.String(t, got[0].LLMRequest.Model).Equal("claude-opus-4-7")
+		gt.String(t, got[0].LLMRequest.ConversationID).Equal("conv-1")
+		gt.Number(t, got[0].LLMRequest.MessagesPrefixLen).Equal(3)
 		gt.Array(t, got[0].LLMRequest.Messages).Length(1).Required()
 		gt.String(t, got[0].LLMRequest.Messages[0].Role).Equal("user")
 		gt.Array(t, got[0].LLMRequest.Messages[0].Contents).Length(1).Required()

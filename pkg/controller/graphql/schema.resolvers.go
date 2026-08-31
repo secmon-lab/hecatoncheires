@@ -1809,15 +1809,7 @@ func (r *queryResolver) JobRunEvents(ctx context.Context, workspaceID string, ca
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*graphql1.JobRunEvent, 0, len(events))
-	for _, ev := range events {
-		gq, err := toGraphQLJobRunEvent(ev)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, gq)
-	}
-	return out, nil
+	return toGraphQLJobRunEvents(events)
 }
 
 // CaseJobs is the resolver for the caseJobs field.
