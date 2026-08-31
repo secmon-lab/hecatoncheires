@@ -31,7 +31,7 @@ import (
 // draftPlan is the opening plan every draft fixture uses: one investigation, so
 // the turn walks plan → sub-agent → replan → final output rather than the
 // degenerate single-call shape.
-const draftPlan = `{"message":"gathering context","tasks":[{"id":"t-1","title":"Read the thread","description":"read the thread","acceptance_criteria":"summarised","tools":["slack_ro"]}]}`
+const draftPlan = `{"message":"gathering context","tasks":[{"id":"t-1","title":"Read the thread","description":"read the thread","acceptance_criteria":"summarised","tools":["slack_ro"],"budget_usd":0.01}]}`
 
 // draftReplanDone terminates the planner loop; the draft itself is the final
 // output that follows it.
@@ -105,7 +105,7 @@ func bindDraftRuntimeWithoutWorker(
 	locator, err := agentkernel.NewLocator(procRepo)
 	gt.NoError(t, err).Required()
 
-	d, err := proposal.NewDurable(repo, registry, uc.DurableDraftHost(), locator)
+	d, err := proposal.NewDurable(repo, registry, uc.DurableDraftHost(), locator, models)
 	gt.NoError(t, err).Required()
 	gt.NoError(t, d.Register(reg, taskAgent, nil,
 		testAgentRootBudget.Limiter(models.Resolve), history)).Required()
@@ -956,12 +956,12 @@ func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) 
 
 	llm := newScriptedClient([]string{
 		// Turn 1, round 1 (mention): investigate one task.
-		`{"message":"Looking at the thread","tasks":[{"id":"inv-1","title":"thread scan","description":"scan thread","acceptance_criteria":"got summary","tools":["slack_ro"]}]}`,
+		`{"message":"Looking at the thread","tasks":[{"id":"inv-1","title":"thread scan","description":"scan thread","acceptance_criteria":"got summary","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		"summary: all messages mention an outage but never name a severity.",
 		// Turn 1, round 2 (after the observation): ask the user.
 		`{"message":"still missing severity","question":{"reason":"need severity to fill the schema","items":[{"id":"q-sev","text":"What is the severity?","type":"select","options":["low","high"]}]}}`,
 		// Turn 2, round 1 (after the thread reply): no more investigation needed.
-		`{"message":"user answered","tasks":[{"id":"inv-2","title":"confirm","description":"confirm the answer","acceptance_criteria":"confirmed","tools":["slack_ro"]}]}`,
+		`{"message":"user answered","tasks":[{"id":"inv-2","title":"confirm","description":"confirm the answer","acceptance_criteria":"confirmed","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		"summary: the user says the severity is high.",
 		`{"message":"ready","finalize":{"reason":"severity known"}}`,
 		draftFinal("ws-1", "Outage X", "Service degraded since morning.", `{"severity":"high"}`),
@@ -1213,7 +1213,7 @@ func TestLifecycle_DraftFlow_ParallelInvestigationsThenMaterialize(t *testing.T)
 	// The two sub-agent answers are interchangeable on purpose: the tasks run
 	// concurrently, so which one draws which entry is not fixed.
 	llm := newScriptedClient([]string{
-		`{"message":"Looking up two angles","tasks":[{"id":"inv-A","title":"thread","description":"scan thread A","acceptance_criteria":"a","tools":["slack_ro"]},{"id":"inv-B","title":"channel","description":"scan channel B","acceptance_criteria":"b","tools":["slack_ro"]}]}`,
+		`{"message":"Looking up two angles","tasks":[{"id":"inv-A","title":"thread","description":"scan thread A","acceptance_criteria":"a","tools":["slack_ro"],"budget_usd":0.01},{"id":"inv-B","title":"channel","description":"scan channel B","acceptance_criteria":"b","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		"summary: high signal",
 		"summary: confirms",
 		draftReplanDone,

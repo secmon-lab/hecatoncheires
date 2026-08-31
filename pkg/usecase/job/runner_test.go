@@ -846,7 +846,7 @@ func TestJobRunner_DurablePlanexecRunRecordsItsOutcome(t *testing.T) {
 
 	llm := scriptedReplyLLM(
 		// plan: one task
-		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"the case is read","tools":["core_job"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"the case is read","tools":["core_job"],"budget_usd":0.01}]}`,
 		// the child task's answer
 		`the case is a stalled deploy`,
 		// replan: finalize
@@ -902,7 +902,7 @@ func TestJobRunner_InteractiveJobSuspendsAndResumes(t *testing.T) {
 	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
 
 	llm := scriptedReplyLLM(
-		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"read","tools":["core_job"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read the case","description":"read it","acceptance_criteria":"read","tools":["core_job"],"budget_usd":0.01}]}`,
 		`the case does not say which environment`,
 		// The replan round asks rather than finalising.
 		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
@@ -2328,7 +2328,7 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 
 	llm := &inputCapturingLLM{responses: []string{
 		// Turn 1, round 1: plan one task.
-		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["core_job"]}]}`,
+		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["core_job"],"budget_usd":0.01}]}`,
 		// Turn 1: sub-agent observation (carries the marker we assert on later).
 		observationMarker + " was found in the prod logs.",
 		// Turn 1, replan: ask the user which environment.

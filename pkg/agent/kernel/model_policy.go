@@ -204,6 +204,45 @@ func (p ModelPolicy) Cost(sc Scope, m agentkit.Metrics) pricing.NanoUSD {
 		m.CacheReadInputTokens, m.CacheCreationInputTokens)
 }
 
+// Remaining reports what the run this metadata describes may still spend, and
+// the total it was allowed. It is what a planner is shown so it can size the
+// tasks it plans, and what a per-task allowance is carved out of.
+//
+// It takes the metadata rather than the Process because the caller that needs it
+// is a strategy deciding how to split what is left, and a strategy holds a
+// Syscalls, not a row.
+//
+// remaining is clamped at zero. A run whose children folded in more than its
+// ceiling has nothing left to give away, not a negative amount — and handing a
+// negative figure to a planner would invite it to allocate one.
+func (p ModelPolicy) Remaining(m map[string]string, metrics agentkit.Metrics,
+) (remaining, total pricing.NanoUSD) {
+	sc := ScopeFrom(m)
+	total = p.defaultBudget
+	if sc.Budget > 0 {
+		total = sc.Budget
+	}
+	if spent := p.Cost(sc, metrics); spent < total {
+		remaining = total - spent
+	}
+	return remaining, total
+}
+
+// RemainingFunc returns Remaining in the shape a plan-execute host hands to
+// planexec, or nil for the empty policy.
+//
+// The nil is the point: a deployment with no LLM configured prices nothing, so
+// Remaining would answer "$0.00 of $0.00" and every plan allocating a positive
+// budget would be rejected. nil turns per-task budgets off instead, which is the
+// correct reading of "there is no figure here". Keeping the check in one place
+// stops each of the five hosts from having to remember it.
+func (p ModelPolicy) RemainingFunc() func(map[string]string, agentkit.Metrics) (pricing.NanoUSD, pricing.NanoUSD) {
+	if p.IsZero() {
+		return nil
+	}
+	return p.Remaining
+}
+
 // ModelName names the model a run generated through — the provider's own model
 // name, not the reference name, because that is the value an operator can match
 // against a provider's billing.

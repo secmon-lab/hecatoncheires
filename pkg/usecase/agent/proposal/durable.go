@@ -113,6 +113,9 @@ type Durable struct {
 	registry *model.WorkspaceRegistry
 	host     Host
 	locator  agentkernel.Locator
+	// models answers what a run may still spend, which is what the planner
+	// divides between the tasks of a round.
+	models agentkernel.ModelPolicy
 
 	agent  agentkit.Agent[planexec.Input]
 	kernel *agentkit.Kernel
@@ -125,7 +128,7 @@ type Durable struct {
 // re-delivered Slack event from a busy thread; a nil locator makes every delivery
 // look fresh, which the idempotency key still covers.
 func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
-	host Host, locator agentkernel.Locator,
+	host Host, locator agentkernel.Locator, models agentkernel.ModelPolicy,
 ) (*Durable, error) {
 	if repo == nil {
 		return nil, goerr.New("repository is required")
@@ -136,7 +139,9 @@ func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
 	if host == nil {
 		return nil, goerr.New("host is required")
 	}
-	return &Durable{repo: repo, registry: registry, host: host, locator: locator}, nil
+	return &Durable{
+		repo: repo, registry: registry, host: host, locator: locator, models: models,
+	}, nil
 }
 
 // Register registers the case-draft agent and wires this host as its completion
@@ -155,6 +160,7 @@ func (d *Durable) Register(
 			// inside the regeneration loop, so a bad option id is fed back and the
 			// draft re-emitted rather than reaching the human as a broken preview.
 			Finalizers: []planexec.Finalizer[Draft]{d.validateAgainstRegistry},
+			Remaining:  d.models.RemainingFunc(),
 		},
 		agentkit.WithHistoryStore[planexec.Output[Draft]](store),
 		agentkit.WithOnFinish(d.onFinish),

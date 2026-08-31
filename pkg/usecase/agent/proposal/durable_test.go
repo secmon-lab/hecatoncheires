@@ -25,17 +25,32 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
+// testModelPolicy is the one-model policy these turns are priced at: $1 / $5 per
+// MTok against a $100 budget, far above anything they spend. It answers both what
+// a run is judged against and what it may still spend, so the limiter and the
+// planner's allowance cannot disagree.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
+
 // testSpend is what these runs are judged against in money. A limiter with no
 // resolver stops every run, so one is required even though these tests are about
-// the draft a turn produces rather than what it costs; the allowance is far above
-// anything they spend.
-func testSpend() budget.LimitResolver {
-	return func(*agentkit.Process) budget.RunLimit {
-		return budget.RunLimit{
-			Budget: pricing.FromUSD(1000),
-			Rate:   pricing.Rate{Input: 1, Output: 1},
-		}
-	}
+// the draft a turn produces rather than what it costs.
+func testSpend(t *testing.T) budget.LimitResolver {
+	t.Helper()
+	return testModelPolicy(t).Resolve
 }
 
 const (
@@ -175,15 +190,15 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	gt.NoError(t, err).Required()
 
 	host := &durableHost{}
-	d, err := proposal.NewDurable(repo, registry, host, locator)
+	d, err := proposal.NewDurable(repo, registry, host, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	store := agentarchive.NewMemoryHistoryStore()
 	cfg := budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(testSpend()), store)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(testSpend(t)), store)
 	gt.NoError(t, err).Required()
-	gt.NoError(t, d.Register(reg, taskAgent, nil, cfg.Limiter(testSpend()), store)).Required()
+	gt.NoError(t, d.Register(reg, taskAgent, nil, cfg.Limiter(testSpend(t)), store)).Required()
 
 	k, err := agentkit.New(procRepo, llm, reg,
 		agentkit.WithToolFactory(func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
@@ -269,7 +284,7 @@ func (h *durableHarness) run(t *testing.T, req proposal.TurnRequest) *agentkit.P
 }
 
 const (
-	draftPlan     = `{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"read","tools":["slack_ro"]}]}`
+	draftPlan     = `{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"read","tools":["slack_ro"],"budget_usd":0.01}]}`
 	draftFinalize = `{"finalize":{"reason":"enough is known"}}`
 )
 
@@ -571,13 +586,13 @@ func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(draftWorkspace())
 
-	_, err := proposal.NewDurable(nil, registry, &durableHost{}, nil)
+	_, err := proposal.NewDurable(nil, registry, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 
-	_, err = proposal.NewDurable(memory.New(), nil, &durableHost{}, nil)
+	_, err = proposal.NewDurable(memory.New(), nil, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 
-	_, err = proposal.NewDurable(memory.New(), registry, nil, nil)
+	_, err = proposal.NewDurable(memory.New(), registry, nil, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 }
 
@@ -585,7 +600,7 @@ func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(draftWorkspace())
-	d, err := proposal.NewDurable(memory.New(), registry, &durableHost{}, nil)
+	d, err := proposal.NewDurable(memory.New(), registry, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.NoError(t, err).Required()
 
 	_, err = d.StartTurn(context.Background(), proposal.TurnRequest{

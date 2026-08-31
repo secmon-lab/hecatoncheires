@@ -900,13 +900,36 @@ input tokens + output tokens + notice ratio) applies to the Task tier, and
 same metadata key — so one resolver serves both tiers. Input and output stay
 separate because output tokens cost several times what input tokens do.
 
-**A child's money allowance is currently the ROOT's, inherited unchanged.**
-`spawnChild` copies the parent's metadata, so each child is judged against the
-run's whole budget measured on its OWN metrics: one child cannot exceed the run's
-budget, but a round of up to five together can. This tier therefore bounds one
-child, not a round. Giving each child a share of what is left — allocated by the
-planner when it defines the task — is a separate change; do not describe the
-current state as bounding a round.
+**A child's money allowance is decided by the PLANNER, out of what the run has
+left.** Every `TaskPlan` carries a `budget_usd`; `parseReplanResult` /
+`parsePlanResult` reject a round whose budgets are not all positive or whose sum
+exceeds the remaining allowance, and `spawnChild` stamps each figure onto that
+child's metadata with `agentkernel.WithBudget`. So the round as a whole is bounded
+by what is left, not just each child individually.
+
+Four properties a change here must preserve:
+
+- **The remaining figure is read at the moment of the call**, from
+  `Config[T].Remaining(sys.Metadata(), sys.Metrics())` — never carried on the
+  checkpointed state. A round's children can spend a great deal between two of the
+  parent's transitions, and a stale figure would be divided up as if they had not.
+- **The planner is the one who divides it**, because it is the only party that
+  knows which of the tasks it just wrote is the heavy one. An even split is not a
+  fallback: a plan with a missing, zero or over-sum budget is rejected and
+  re-planned, so the planner cannot opt out by omitting the field.
+- **The instruction and the schema property travel together.**
+  `plannerPromptInput.AllocatesBudget` and `schemaOptions.withBudget` both follow
+  `Config[T].Remaining != nil`. A prompt asking for a field the schema does not
+  offer drives the planner into a rejection loop; a schema offering a field the
+  host never reads invites a number nothing uses.
+- **`Config[T].Remaining` nil turns the whole thing off**, and that is the
+  degradation an unpriced deployment gets: `ModelPolicy.RemainingFunc` answers nil
+  for the empty policy, because a policy that prices nothing would report "$0.00
+  of $0.00" and reject every plan. A child then inherits the run's own figure, as
+  it did before this existed.
+
+The direct path is the exception: it spawns ONE child whose text is the reply, so
+there is nothing to divide and it is given the whole remaining allowance.
 
 **MONEY NEVER STOPS A RUN.** A crossed money ceiling answers `LimitKindNotice`,
 and keeps answering it however far past the budget the run lands. Stop is read at

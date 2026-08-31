@@ -130,7 +130,7 @@ func (d *Durable) Register(
 
 	mention, err := planexec.Register(reg, agentkernel.AgentCaseThread, threadMentionVersion,
 		taskAgent, progress, limiter,
-		planexec.Config[Decision]{},
+		planexec.Config[Decision]{Remaining: d.models.RemainingFunc()},
 		agentkit.WithHistoryStore[planexec.Output[Decision]](store),
 		agentkit.WithOnFinish(d.onMentionFinish),
 	)
@@ -148,6 +148,7 @@ func (d *Durable) Register(
 			// host AFTER the turn, because a persistence failure is not something the
 			// model can repair by re-emitting the same JSON.
 			Finalizers: []planexec.Finalizer[CreateDecision]{d.validateAgainstSchema},
+			Remaining:  d.models.RemainingFunc(),
 		},
 		agentkit.WithHistoryStore[planexec.Output[CreateDecision]](store),
 		agentkit.WithOnFinish(d.onCreateFinish),

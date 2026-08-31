@@ -3,6 +3,7 @@ package planexec_test
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -284,7 +285,7 @@ func decodeText(t *testing.T, raw []byte) planexec.Output[planexec.TextResult] {
 func TestPlanCollectReplanFinal(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
 		// plan: one task
-		`{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"the thread is summarised","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"the thread is summarised","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		// the child task's own answer
 		`the thread says the deploy failed`,
 		// replan: finalize
@@ -332,7 +333,7 @@ func TestPlanCollectReplanFinal(t *testing.T) {
 // all.
 func TestChildInheritsTheParentScopeWithItsOwnToolsets(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["notion"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["notion"],"budget_usd":0.01}]}`,
 		`read`,
 		`{"finalize":{"reason":"done"}}`,
 		`ok`,
@@ -364,7 +365,7 @@ func TestChildInheritsTheParentScopeWithItsOwnToolsets(t *testing.T) {
 func TestRejectedPlanIsCorrectedOnTheNextTransition(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
 		`not json at all`,
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`answer`,
@@ -387,7 +388,7 @@ func TestRejectedPlanIsCorrectedOnTheNextTransition(t *testing.T) {
 // later turn on the thread.
 func TestQuestionEndsTheTurn(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"question":{"reason":"the environment is ambiguous","items":[{"id":"env","text":"Which environment?","type":"free_text"}]}}`,
 	}}
@@ -501,7 +502,7 @@ func TestTheDirectChildIsPromptedToWriteTheUsersReply(t *testing.T) {
 // next round whether the partial picture is enough.
 func TestAFailedChildIsReportedToThePlanner(t *testing.T) {
 	const (
-		planJSON     = `{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`
+		planJSON     = `{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`
 		finalizeJSON = `{"finalize":{"reason":"enough"}}`
 	)
 	// Call 1 is the parent's plan. Calls 2 and 3 are the child's two attempts —
@@ -574,7 +575,7 @@ func TestAFailedChildIsReportedToThePlanner(t *testing.T) {
 // model can fix its own JSON but cannot fix an infrastructure error.
 func TestStructuredFinalIsValidatedAndRegenerated(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		// First terminal output fails Validate (empty title).
@@ -623,7 +624,7 @@ func TestStructuredFinalIsValidatedAndRegenerated(t *testing.T) {
 // the host still has the observation trail to tell the user what was learnt.
 func TestStructuredFinalFallsBackAfterTooManyRejections(t *testing.T) {
 	replies := []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 	}
@@ -652,7 +653,7 @@ func TestStructuredFinalFallsBackAfterTooManyRejections(t *testing.T) {
 // mid-investigation with nothing to show.
 func TestBudgetNoticeWrapsTheRunUp(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		// No replan reply is scripted: reaching one would fail the test.
 		`the partial answer`,
@@ -698,7 +699,7 @@ func TestASpentBudgetWrapsTheRunUpInsteadOfFailingIt(t *testing.T) {
 	writer := &recordingTool{name: "knowledge__create_knowledge"}
 	planner := &toolCallingPlanner{replies: []any{
 		// 1: the parent plans one task.
-		`{"tasks":[{"id":"t1","title":"Record","description":"record it","acceptance_criteria":"the entry exists","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Record","description":"record it","acceptance_criteria":"the entry exists","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		// 2-3: the child performs the write and reports it.
 		&gollem.FunctionCall{ID: "w1", Name: "knowledge__create_knowledge", Arguments: map[string]any{"title": "e"}},
 		`recorded the entry`,
@@ -764,7 +765,7 @@ func TestASpentBudgetWrapsTheRunUpInsteadOfFailingIt(t *testing.T) {
 func TestTheReserveAllowsATerminalToolCall(t *testing.T) {
 	writer := &recordingTool{name: "case__update_case"}
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		// No replan reply is scripted: reaching one would fail the test, which is
 		// how the run is pinned to going straight to the terminal call.
@@ -810,7 +811,7 @@ func TestTheReserveAllowsATerminalToolCall(t *testing.T) {
 // nothing — the exact outcome this path exists to avoid.
 func TestAnEmptyFirstReserveMoveStillGetsTheOutputAsked(t *testing.T) {
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		// The reserve's first move: obeyed "do not write the terminal output", made
 		// no tool call, and said nothing.
@@ -843,7 +844,7 @@ func TestAnEmptyFirstReserveMoveStillGetsTheOutputAsked(t *testing.T) {
 // alongside it, and a model cannot satisfy both.
 func TestATerminalOutputRetryInTheReserveIsAskedForTheOutput(t *testing.T) {
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		// The reserve's first move answers with a terminal output that Validate
 		// rejects, which sends stepFinal into its retry path.
@@ -878,7 +879,7 @@ func TestATerminalOutputRetryInTheReserveIsAskedForTheOutput(t *testing.T) {
 func TestTheReserveDoesNotStarveTheTerminalPrompt(t *testing.T) {
 	writer := &recordingTool{name: "case__update_case"}
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		&gollem.FunctionCall{ID: "w1", Name: "case__update_case", Arguments: map[string]any{"id": "case-1"}},
 		`the final answer`,
@@ -1073,7 +1074,7 @@ func TestPlannerToolCallRunsBeforeThePlan(t *testing.T) {
 		// round 1: look the workspace up instead of deciding
 		&gollem.FunctionCall{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}},
 		// with the answer in hand, plan
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`The severity field is set.`,
@@ -1125,7 +1126,7 @@ func TestPlannerToolCallsAreAlwaysAnswered(t *testing.T) {
 		// Four rounds spend the allowance; the fifth is past it and must STILL be
 		// answered rather than dropped.
 		call(), call(), call(), call(), call(),
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`Answered.`,
@@ -1171,6 +1172,156 @@ func TestTheToolAllowanceIsToldInTheSystemPrompt(t *testing.T) {
 	gt.String(t, spent).Contains("host prompt")
 }
 
+// TestTheAllowanceIsToldInTheSystemPrompt pins where the planner learns what it
+// may divide, and that the guidance asking it to divide arrives with the figure.
+//
+// It is the SYSTEM prompt for the reason the tool-allowance notice is: a planning
+// call following a tool round sends no user turn, so a figure the planner has to
+// have cannot ride on one.
+func TestTheAllowanceIsToldInTheSystemPrompt(t *testing.T) {
+	line := planexec.BudgetPrefixForTest(pricing.FromUSD(0.217), pricing.FromUSD(2))
+	gt.String(t, line).Equal("[budget] remaining $0.22 of $2.00")
+
+	with, err := planexec.PlannerSystemPromptWithBudgetForTest(0, line)
+	gt.NoError(t, err).Required()
+	gt.String(t, with).Contains(line)
+	// The instruction that makes the figure actionable is there too. A figure with
+	// no instruction leaves the planner nothing to do with it; an instruction with
+	// no figure asks it to divide an amount it was never told.
+	gt.String(t, with).Contains("Every task you emit carries a `budget_usd`")
+	gt.String(t, with).Contains("host prompt")
+
+	// A host that wired no remaining figure gets neither.
+	without, err := planexec.PlannerSystemPromptWithBudgetForTest(0, "")
+	gt.NoError(t, err).Required()
+	gt.Bool(t, contains(without, "[budget]")).False()
+	gt.Bool(t, contains(without, "budget_usd")).False()
+}
+
+// runBudgetMeta is the run-level metadata these tests spawn with: a $2.00 budget,
+// so the root's own figure is distinguishable from any share it hands a child.
+var runBudgetMeta = map[string]string{"budget_nano_usd": "2000000000"}
+
+// budgetRecorder reads the spend ceiling off every Process the runtime builds
+// tools for — the only place a test can see what a spawn actually wrote to a
+// child's metadata.
+//
+// It keys on the Process id because agentkit calls the ToolFactory once per
+// transition, not once per Process: a plain slice would report the same run
+// several times and say nothing about how many Processes there were.
+type budgetRecorder struct {
+	mu   sync.Mutex
+	seen map[string]string
+}
+
+func newBudgetRecorder() *budgetRecorder {
+	return &budgetRecorder{seen: map[string]string{}}
+}
+
+func (r *budgetRecorder) factory() agentkit.ToolFactory {
+	return func(_ context.Context, proc *agentkit.Process) ([]gollem.Tool, error) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.seen[string(proc.ID)] = agentkernel.ScopeFrom(proc.Metadata).Budget.USD()
+		return nil, nil
+	}
+}
+
+// amounts returns one allowance per Process, sorted, so a test names the figures
+// rather than their order.
+func (r *budgetRecorder) amounts() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.seen))
+	for _, usd := range r.seen {
+		out = append(out, usd)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestEachChildIsSpawnedWithItsOwnAllowance is what the whole per-task budget
+// exists for: the amount the planner wrote for a task reaches that task's Process,
+// so the limiter judges the child against its share rather than against the run's
+// whole budget.
+func TestEachChildIsSpawnedWithItsOwnAllowance(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[` +
+			`{"id":"t1","title":"Heavy","description":"search everything","acceptance_criteria":"a","tools":["slack_ro"],"budget_usd":0.30},` +
+			`{"id":"t2","title":"Light","description":"read one thread","acceptance_criteria":"b","tools":["slack_ro"],"budget_usd":0.05}]}`,
+		`the heavy one`,
+		`the light one`,
+		`{"finalize":{"reason":"done"}}`,
+		`the answer`,
+	}}
+
+	rec := newBudgetRecorder()
+	remaining := func(map[string]string, agentkit.Metrics) (pricing.NanoUSD, pricing.NanoUSD) {
+		return pricing.FromUSD(1), pricing.FromUSD(2)
+	}
+	rt := newRuntimeWithSpend(t, planner.client(), generousBudget(), testSpend(), nil, rec.factory(),
+		planexec.Config[planexec.TextResult]{TextOnly: true, Remaining: remaining})
+
+	proc := rt.run(t, textInput(), runBudgetMeta)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// Three Processes: the root on the run's own $2.00, and its two children on the
+	// unequal shares the planner wrote — not on the $1.00 that was left, and not on
+	// half of it each.
+	gt.Array(t, rec.amounts()).Equal([]string{"$0.05", "$0.30", "$2.00"})
+}
+
+// TestAChildInheritsTheRunsBudgetWithoutARemainingFigure pins the other side: a
+// host that wired no Config.Remaining leaves the child's metadata as it was, so
+// the child is judged against the run's own figure on its own metrics. That is
+// weaker than a share of what is left, and it is what every host had before the
+// planner was asked to allocate.
+func TestAChildInheritsTheRunsBudgetWithoutARemainingFigure(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"a","tools":["slack_ro"]}]}`,
+		`read`,
+		`{"finalize":{"reason":"done"}}`,
+		`the answer`,
+	}}
+
+	rec := newBudgetRecorder()
+	rt := newRuntimeWithSpend(t, planner.client(), generousBudget(), testSpend(), nil, rec.factory(),
+		planexec.Config[planexec.TextResult]{TextOnly: true})
+
+	proc := rt.run(t, textInput(), runBudgetMeta)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// Both the root and its child report the run's own $2.00.
+	gt.Array(t, rec.amounts()).Equal([]string{"$2.00", "$2.00"})
+}
+
+// TestTheDirectChildGetsWhatIsLeft pins the one child nobody divides for: the
+// direct path spawns a single agent whose text IS the reply, so there is nothing
+// to split and no planner decision to respect.
+func TestTheDirectChildGetsWhatIsLeft(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"direct":{"tools":["slack_ro"]}}`,
+		`answered directly`,
+	}}
+
+	rec := newBudgetRecorder()
+	remaining := func(map[string]string, agentkit.Metrics) (pricing.NanoUSD, pricing.NanoUSD) {
+		return pricing.FromUSD(0.75), pricing.FromUSD(2)
+	}
+	in := textInput()
+	in.AllowDirect = true
+	rt := newRuntimeWithSpend(t, planner.client(), generousBudget(), testSpend(), nil, rec.factory(),
+		planexec.Config[planexec.TextResult]{TextOnly: true, Remaining: remaining})
+
+	proc := rt.run(t, in, runBudgetMeta)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputDirect)
+
+	// The root's own $2.00, and the direct child's whole remaining $0.75.
+	gt.Array(t, rec.amounts()).Equal([]string{"$0.75", "$2.00"})
+}
+
 // A planner turn asking for several tools at once is answered by ONE call
 // carrying every result. Reporting them one at a time is what a provider rejects
 // ("the number of function response parts is equal to the number of function call
@@ -1184,7 +1335,7 @@ func TestParallelPlannerToolCallsAreAnsweredInOneTurn(t *testing.T) {
 			{ID: "c2", Name: "get_workspace", Arguments: map[string]any{"id": "ws-2"}},
 			{ID: "c3", Name: "get_workspace", Arguments: map[string]any{"id": "ws-3"}},
 		},
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`Answered.`,
@@ -1229,7 +1380,7 @@ func TestAnsweredToolCallsSurviveAFailedPlanningCall(t *testing.T) {
 		// The planning call that reports them fails; agentkit retries the whole
 		// transition from the last checkpoint, which is the one the tool phase left.
 		goerr.New("the provider is briefly unavailable"),
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`Answered.`,
@@ -1271,7 +1422,7 @@ func TestASingleValueForAnArrayArgumentStillReachesTheTool(t *testing.T) {
 	}
 	planner := &toolCallingPlanner{replies: []any{
 		[]*gollem.FunctionCall{{ID: "c1", Name: "get_workspace", Arguments: map[string]any{"ids": "ws-1"}}},
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`Answered.`,
@@ -1345,7 +1496,7 @@ func TestPlannerToolResultsReachTheTerminalCall(t *testing.T) {
 func TestTerminalCallMayAskForATool(t *testing.T) {
 	lookup := &recordingTool{name: "get_workspace"}
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		// The terminal call asks for a lookup instead of writing the answer.
@@ -1382,7 +1533,7 @@ func TestTerminalCallIsToldWhenItsToolAllowanceIsSpent(t *testing.T) {
 		return &gollem.FunctionCall{ID: "f", Name: "get_workspace", Arguments: map[string]any{"id": "ws-1"}}
 	}
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		// Four terminal calls that each ask for a lookup instead of answering.
@@ -1437,7 +1588,7 @@ func TestAChildsStepsAreChargedToItsParent(t *testing.T) {
 	// The child is asked to call the tool four times before answering, so its own
 	// spend is unmistakably larger than the planner's handful of transitions.
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		&gollem.FunctionCall{ID: "a1", Name: "get_workspace", Arguments: map[string]any{"id": "1"}},
 		&gollem.FunctionCall{ID: "a2", Name: "get_workspace", Arguments: map[string]any{"id": "2"}},
 		&gollem.FunctionCall{ID: "a3", Name: "get_workspace", Arguments: map[string]any{"id": "3"}},
@@ -1472,7 +1623,7 @@ func TestAChildsStepsAreChargedToItsParent(t *testing.T) {
 func TestAParentIsStoppedByItsChildrensSpend(t *testing.T) {
 	tool := &recordingTool{name: "get_workspace"}
 	planner := &toolCallingPlanner{replies: []any{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		&gollem.FunctionCall{ID: "a1", Name: "get_workspace", Arguments: map[string]any{"id": "1"}},
 		&gollem.FunctionCall{ID: "a2", Name: "get_workspace", Arguments: map[string]any{"id": "2"}},
 		&gollem.FunctionCall{ID: "a3", Name: "get_workspace", Arguments: map[string]any{"id": "3"}},
@@ -1549,7 +1700,7 @@ func (p *countingProgress) counts() (posts, updates int) {
 // instance would start a second message.
 func TestProgressDrawsOneMessageAndUpdatesIt(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`read it`,
 		`{"finalize":{"reason":"done"}}`,
 		`Done.`,
@@ -1606,7 +1757,7 @@ func (a *recordingAsker) questions() []planexec.Question {
 // run finishes with its budget and history intact.
 func TestQuestionSuspendsAndResumesTheSameRun(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`the thread does not say which environment`,
 		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["staging","production"]}]}}`,
 		// After the answer the run replans and finalises.
@@ -1685,7 +1836,7 @@ func TestQuestionSuspendsAndResumesTheSameRun(t *testing.T) {
 // park on an await nobody can see, and wait forever.
 func TestSuspendOnQuestionRequiresAnAsker(t *testing.T) {
 	planner := &scriptedPlanner{replies: []string{
-		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		`nothing conclusive`,
 		`{"question":{"reason":"which environment?","items":[{"id":"env","text":"Which?","type":"select","options":["a","b"]}]}}`,
 	}}

@@ -51,6 +51,14 @@ type plannerPromptInput struct {
 	// response cannot perform side effects. Mirrors
 	// Input.AllowSubAgentWrites.
 	AllowSubAgentWrites bool
+
+	// AllocatesBudget toggles the "Budget" guidance: when true, every task
+	// carries a `budget_usd` the planner must set out of the allowance the
+	// budget line states. It follows Config.Remaining, so the guidance and
+	// the schema property that makes it actionable appear together — a
+	// prompt that asked for a field the schema does not offer would drive
+	// the planner into a rejection loop.
+	AllocatesBudget bool
 }
 
 // renderPlannerSystemPrompt builds the planner system prompt by piping

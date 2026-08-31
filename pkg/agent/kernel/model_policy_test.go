@@ -483,6 +483,103 @@ func runWithLimiter(t *testing.T, llm gollem.LLMClient, limiter agentkit.Limiter
 	}
 }
 
+// TestRemainingIsWhatThePlannerDivides pins the figure a plan-execute run carves
+// its per-task allowances out of: the run's budget minus what it has spent, priced
+// at the model it actually generates through.
+func TestRemainingIsWhatThePlannerDivides(t *testing.T) {
+	// $1 / $5 per MTok, so 100,000 input tokens cost $0.10.
+	policy, err := kernel.NewModelPolicy(kernel.ModelPolicyInput{
+		Defs: []kernel.ModelDef{
+			modelDef("main", "main-model", pricing.Rate{Input: 1000, Output: 5000}),
+			modelDef("cheap", "cheap-model", pricing.Rate{Input: 250, Output: 1250}),
+		},
+		DefaultRef:    "main",
+		Clients:       map[string]gollem.LLMClient{"cheap": &mock.LLMClientMock{}},
+		DefaultBudget: pricing.FromUSD(2),
+	})
+	gt.NoError(t, err).Required()
+
+	testCases := map[string]struct {
+		scope         kernel.Scope
+		metrics       agentkit.Metrics
+		wantRemaining pricing.NanoUSD
+		wantTotal     pricing.NanoUSD
+	}{
+		"nothing spent yet": {
+			scope:         kernel.Scope{},
+			wantRemaining: pricing.FromUSD(2),
+			wantTotal:     pricing.FromUSD(2),
+		},
+		"the deployment default is the total when the run names no budget": {
+			scope:         kernel.Scope{},
+			metrics:       agentkit.Metrics{InputTokens: 100_000}, // $0.10
+			wantRemaining: pricing.FromUSD(1.90),
+			wantTotal:     pricing.FromUSD(2),
+		},
+		"the run's own budget is the total when it names one": {
+			scope:         kernel.Scope{Budget: pricing.FromUSD(0.50)},
+			metrics:       agentkit.Metrics{InputTokens: 100_000},
+			wantRemaining: pricing.FromUSD(0.40),
+			wantTotal:     pricing.FromUSD(0.50),
+		},
+		// The same token counts leave four times as much on a model priced at a
+		// quarter of the other, which is why the figure is money and not tokens.
+		"a cheaper model leaves more": {
+			scope:         kernel.Scope{LLMModel: "cheap"},
+			metrics:       agentkit.Metrics{InputTokens: 100_000}, // $0.025
+			wantRemaining: pricing.FromUSD(1.975),
+			wantTotal:     pricing.FromUSD(2),
+		},
+		// A child folds its whole spend into its parent in one write, so a run can
+		// pass the budget between two of its own transitions. There is nothing left
+		// to divide then, and a negative figure would invite the planner to
+		// allocate one.
+		"an overspent run has nothing left rather than a negative amount": {
+			scope:         kernel.Scope{Budget: pricing.FromUSD(0.10)},
+			metrics:       agentkit.Metrics{InputTokens: 1_000_000}, // $1.00
+			wantRemaining: 0,
+			wantTotal:     pricing.FromUSD(0.10),
+		},
+		// Same fallback Resolve makes: a run whose model was removed from the
+		// configuration is priced at the default rate, not at the removed one's.
+		"an undefined model reference falls back to the default rate": {
+			scope:         kernel.Scope{LLMModel: "gone"},
+			metrics:       agentkit.Metrics{InputTokens: 100_000},
+			wantRemaining: pricing.FromUSD(1.90),
+			wantTotal:     pricing.FromUSD(2),
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			remaining, total := policy.Remaining(tc.scope.Metadata(), tc.metrics)
+			gt.Value(t, remaining).Equal(tc.wantRemaining)
+			gt.Value(t, total).Equal(tc.wantTotal)
+		})
+	}
+}
+
+// TestRemainingFuncIsNilForAnUnpricedDeployment pins the guard every plan-execute
+// host relies on. A deployment with no LLM configured prices nothing, so Remaining
+// would answer "$0.00 of $0.00" and every plan allocating a positive budget would
+// be rejected — a turn that could not plan at all. nil turns per-task budgets off
+// instead, which is what "there is no figure here" means.
+func TestRemainingFuncIsNilForAnUnpricedDeployment(t *testing.T) {
+	gt.Value(t, kernel.ModelPolicy{}.RemainingFunc()).Nil()
+
+	priced, err := kernel.NewModelPolicy(kernel.ModelPolicyInput{
+		Defs:          []kernel.ModelDef{modelDef("main", "main-model", pricing.Rate{Input: 1000, Output: 5000})},
+		DefaultRef:    "main",
+		DefaultBudget: pricing.FromUSD(2),
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, priced.RemainingFunc()).NotNil()
+
+	remaining, total := priced.RemainingFunc()(kernel.Scope{}.Metadata(), agentkit.Metrics{})
+	gt.Value(t, remaining).Equal(pricing.FromUSD(2))
+	gt.Value(t, total).Equal(pricing.FromUSD(2))
+}
+
 // TestAConfiguredBudgetBoundsTheRun is the end of the money path: the amount an
 // operator configured is what decides how far a real run gets.
 //

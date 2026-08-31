@@ -45,6 +45,9 @@ type Host interface {
 type Durable struct {
 	host    Host
 	locator agentkernel.Locator
+	// models answers what a run may still spend, which is what the planner
+	// divides between the tasks of a round.
+	models agentkernel.ModelPolicy
 
 	agent  agentkit.Agent[planexec.Input]
 	kernel *agentkit.Kernel
@@ -56,11 +59,13 @@ type Durable struct {
 // NewDurable builds the durable workspace-agent host. locator is used only to
 // tell a re-delivered Slack event from a busy thread; a nil locator makes every
 // delivery look fresh, which the idempotency key still covers.
-func NewDurable(host Host, locator agentkernel.Locator) (*Durable, error) {
+func NewDurable(host Host, locator agentkernel.Locator,
+	models agentkernel.ModelPolicy,
+) (*Durable, error) {
 	if host == nil {
 		return nil, goerr.New("host is required")
 	}
-	return &Durable{host: host, locator: locator}, nil
+	return &Durable{host: host, locator: locator, models: models}, nil
 }
 
 // Register registers the workspace agent and wires this host as its completion
@@ -78,7 +83,7 @@ func (d *Durable) Register(
 		taskAgent, progress, limiter,
 		// The workspace agent answers in prose: its reply goes straight to a
 		// Slack thread, so there is no structured object for a host to apply.
-		planexec.Config[planexec.TextResult]{TextOnly: true},
+		planexec.Config[planexec.TextResult]{TextOnly: true, Remaining: d.models.RemainingFunc()},
 		agentkit.WithHistoryStore[planexec.Output[planexec.TextResult]](store),
 		agentkit.WithOnFinish(d.onFinish),
 	)

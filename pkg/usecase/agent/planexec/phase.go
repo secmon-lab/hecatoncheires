@@ -26,6 +26,15 @@ type TaskPlan struct {
 	Description        string   `json:"description"`
 	AcceptanceCriteria string   `json:"acceptance_criteria"`
 	Tools              []string `json:"tools"`
+	// BudgetUSD is what this task's sub-agent may spend, in USD, carved by the
+	// planner out of what the run has left. It is the planner's job because the
+	// planner is the only party that knows which of the tasks it just wrote is the
+	// heavy one.
+	//
+	// It is omitempty and validated only when the host wired Config.Remaining: a
+	// host that did not is not asking for per-task budgets, and its children keep
+	// inheriting the run's own figure.
+	BudgetUSD float64 `json:"budget_usd,omitempty"`
 }
 
 // TaskStatus marks the outcome of a single sub-agent task.

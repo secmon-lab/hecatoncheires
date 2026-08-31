@@ -71,9 +71,23 @@ Sub-agents in this run may perform writes / side-effecting actions (posting a me
 - Give a write task an `acceptance_criteria` that asserts the action succeeded (e.g. "the summary was posted to the case channel"), so the next round can confirm it from the sub-agent's report.
 {{- end }}
 
+{{- if .AllocatesBudget }}
+
 ## Budget
 
-Every user-input message prepended to your prompt starts with a budget line like `[budget] planner 3/8 — investigations 5/16`. Plan against the **remaining** capacity. If you request more investigation tasks than slots remain, the runtime rejects the plan and asks you to re-plan with fewer tasks.
+This prompt carries a line reading `[budget] remaining $X of $Y`: `$X` is what this run may still spend, and `$Y` is what it was given in total. It is recomputed for every call, so it already accounts for what the tasks of earlier rounds cost.
+
+You decide how `$X` is divided. Every task you emit carries a `budget_usd` — the amount that task's sub-agent may spend — and the rules are:
+
+- Each `budget_usd` must be greater than 0.
+- The budgets of all tasks in one round must add up to no more than the remaining `$X`.
+- Give the heavier task the larger share. A task that reads one thread needs far less than one that searches several sources and cross-references them.
+- Do not divide the whole of `$X` between the tasks of an early round. You will need rounds after this one, and the final answer is written out of what is left.
+
+A plan that omits `budget_usd`, sets it to zero or below, or whose budgets exceed `$X` is rejected, and you will be asked to re-plan — which itself costs part of the allowance you are dividing.
+
+A sub-agent that spends its share is not killed: it is told to make its final tool call and then to report, so a task whose budget runs out still reports what it found. But it stops there, so a task given far too little returns a thin answer rather than a complete one.
+{{- end }}
 
 ## Reasoning vs final output
 

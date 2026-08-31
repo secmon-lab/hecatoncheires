@@ -984,9 +984,9 @@ intent (a question form posted to the thread), and only commits a Case once it
 can fill a valid title, description, and every **required** custom field. If
 validation fails — a required field missing, or a value outside the allowed
 options — the agent is told what is wrong and tries again, all bounded by the
-planner round budget. A pending question is answered by submitting the question
-form (not by a free-text reply). When the agent cannot conclude within budget,
-it posts a "couldn't conclude" notice. On success the bot posts a Block Kit
+turn's budget and step ceiling. A pending question is answered by submitting the
+question form (not by a free-text reply). When the agent cannot conclude, it posts
+a "couldn't conclude" notice. On success the bot posts a Block Kit
 summary of the created Case.
 
 The optional `[case.prompts]` sub-table injects workspace-specific guidance into
@@ -1103,7 +1103,7 @@ events.case = { on = ["created"] }
 | Strategy | When to use |
 |----------|-------------|
 | `simple` (default) | Single-step actions: post a digest, set a status, send a Slack reply. The Job's prompt is a direct instruction the agent executes in one ReAct loop. |
-| `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. The runtime budgets up to 8 planner rounds and 16 parallel sub-agent tasks per turn (configurable in the binary). |
+| `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. Each round runs up to 5 sub-agent tasks in parallel; how many rounds a turn gets is decided by its budget and step ceiling rather than by a round count. See [cli.md](./cli.md#agent-runtime-budgets). |
 
 ### Interactive Jobs (`interactive`)
 
@@ -1144,9 +1144,10 @@ Constraints and behaviour:
 - The question form is **not** suppressed by `quiet`: `quiet` only silences the
   operational session-log markers, whereas a question is a deliberate
   interaction with the user.
-- The planner budget is granted **fresh** when a run resumes (the human answer
-  is a natural checkpoint), so a resumed turn is not starved by work the
-  pre-question turn already spent.
+- An interactive Job's run **stays open** across the wait, so its budget and step
+  ceiling are not granted fresh when the human answers: the whole exchange is one
+  run against one set of ceilings. Size `budget_usd` for the exchange, not for the
+  first turn of it.
 
 Interactive Jobs require the agent conversation history to be persisted in a
 shared backend (Cloud Storage) so a resume — which may be handled by a

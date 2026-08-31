@@ -162,7 +162,7 @@ func (uc *AgentUseCase) RegisterAgents(
 
 	progress := agentProgress{uc: uc}
 
-	wa, err := wsagent.NewDurable(wsagentHost{uc: uc}, locator)
+	wa, err := wsagent.NewDurable(wsagentHost{uc: uc}, locator, models)
 	if err != nil {
 		return goerr.Wrap(err, "build the workspace agent")
 	}
