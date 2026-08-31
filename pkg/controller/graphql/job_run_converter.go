@@ -168,6 +168,7 @@ func toGraphQLJobRunEvent(ev *model.JobRunEvent) (*graphql1.JobRunEvent, error) 
 		ParentSequence: int(ev.ParentSequence),
 		Phase:          ev.Phase,
 		AgentLabel:     ev.AgentLabel,
+		ProcessID:      ev.ProcessID,
 		Payload:        payload,
 	}, nil
 }

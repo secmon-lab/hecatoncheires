@@ -345,6 +345,7 @@ type ComplexityRoot struct {
 		ParentSequence func(childComplexity int) int
 		Payload        func(childComplexity int) int
 		Phase          func(childComplexity int) int
+		ProcessID      func(childComplexity int) int
 		RunID          func(childComplexity int) int
 		Sequence       func(childComplexity int) int
 	}
@@ -2071,6 +2072,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.JobRunEvent.Phase(childComplexity), true
+	case "JobRunEvent.processId":
+		if e.ComplexityRoot.JobRunEvent.ProcessID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.JobRunEvent.ProcessID(childComplexity), true
 	case "JobRunEvent.runId":
 		if e.ComplexityRoot.JobRunEvent.RunID == nil {
 			break
@@ -5047,6 +5054,12 @@ type JobRunEvent {
   parentSequence: Int!
   phase: String!
   agentLabel: String!
+  # ProcessID names the agentkit Process whose claim recorded this event. It is
+  # what tells a sub-agent's calls from the planner's: on the durable runtime
+  # each sub-agent is a separate Process, and a run's timeline interleaves them.
+  # Group by it to get what one sub-agent actually cost. Empty for an event
+  # recorded before the field existed.
+  processId: String!
   # Exactly one of the four payload-shaped objects, encoded as JSON
   # for transport simplicity. Schema: see model.LLMRequestPayload /
   # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
@@ -5829,6 +5842,8 @@ func (ec *executionContext) childFields_JobRunEvent(ctx context.Context, field g
 		return ec.fieldContext_JobRunEvent_phase(ctx, field)
 	case "agentLabel":
 		return ec.fieldContext_JobRunEvent_agentLabel(ctx, field)
+	case "processId":
+		return ec.fieldContext_JobRunEvent_processId(ctx, field)
 	case "payload":
 		return ec.fieldContext_JobRunEvent_payload(ctx, field)
 	}
@@ -13613,6 +13628,29 @@ func (ec *executionContext) _JobRunEvent_agentLabel(ctx context.Context, field g
 	)
 }
 func (ec *executionContext) fieldContext_JobRunEvent_agentLabel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("JobRunEvent", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _JobRunEvent_processId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_JobRunEvent_processId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ProcessID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_JobRunEvent_processId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("JobRunEvent", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
@@ -25834,6 +25872,11 @@ func (ec *executionContext) _JobRunEvent(ctx context.Context, sel ast.SelectionS
 			}
 		case "agentLabel":
 			out.Values[i] = ec._JobRunEvent_agentLabel(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "processId":
+			out.Values[i] = ec._JobRunEvent_processId(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

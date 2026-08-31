@@ -401,6 +401,41 @@ func TestAToolsOwnLLMCallIsRecorded(t *testing.T) {
 // most recent response at the moment the tool returns is the tool's own. Reading
 // the parent then makes the tool call point at an event nested inside it, and the
 // run-detail page hangs the row under the wrong call.
+// TestTimelineEventsNameTheProcessThatRecordedThem pins the wiring the
+// attribution depends on: the claim middleware has to hand the Handler the
+// Process it is claiming.
+//
+// The Scope cannot supply it — a sub-agent inherits its parent's metadata, so
+// every Process of a run resolves to the same Scope — which is why runTimeline
+// takes the Process. runtrace's own
+// TestHandler_EventsCarryTheirOwnProcess covers what a timeline written by
+// several Processes then looks like; this covers that the id reaches it at all.
+func TestTimelineEventsNameTheProcessThatRecordedThem(t *testing.T) {
+	ctx := context.Background()
+	rt := newProbeRuntime(t)
+	seedCase(t, ctx, rt.repo, &model.Case{Title: "attribution target"})
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-probe", JobRunID: "run-probe",
+	}
+	proc := runToCompletion(t, rt, sc)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	events, err := rt.repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-probe"}, "run-probe")
+	gt.NoError(t, err).Required()
+	gt.Number(t, len(events)).GreaterOrEqual(2).Required()
+
+	// Non-empty as well as correct: an empty id would satisfy an equality check
+	// against a Process that was never read, which is the mistake this guards.
+	gt.String(t, string(proc.ID)).NotEqual("")
+	for _, ev := range events {
+		gt.String(t, ev.ProcessID).Equal(string(proc.ID))
+	}
+}
+
 func TestAToolsOwnLLMCallDoesNotBecomeItsParent(t *testing.T) {
 	ctx := context.Background()
 	rt := newProbeRuntime(t, embeddingProbeTool{})

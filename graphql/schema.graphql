@@ -1110,6 +1110,12 @@ type JobRunEvent {
   parentSequence: Int!
   phase: String!
   agentLabel: String!
+  # ProcessID names the agentkit Process whose claim recorded this event. It is
+  # what tells a sub-agent's calls from the planner's: on the durable runtime
+  # each sub-agent is a separate Process, and a run's timeline interleaves them.
+  # Group by it to get what one sub-agent actually cost. Empty for an event
+  # recorded before the field existed.
+  processId: String!
   # Exactly one of the four payload-shaped objects, encoded as JSON
   # for transport simplicity. Schema: see model.LLMRequestPayload /
   # LLMResponsePayload / ToolCallPayload / RunErrorPayload.

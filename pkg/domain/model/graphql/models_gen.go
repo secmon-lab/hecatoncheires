@@ -373,6 +373,7 @@ type JobRunEvent struct {
 	ParentSequence int             `json:"parentSequence"`
 	Phase          string          `json:"phase"`
 	AgentLabel     string          `json:"agentLabel"`
+	ProcessID      string          `json:"processId"`
 	Payload        string          `json:"payload"`
 }
 

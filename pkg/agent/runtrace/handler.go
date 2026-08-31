@@ -38,6 +38,15 @@ type Routing struct {
 	JobID       string
 	RunID       string
 	TraceID     string
+	// ProcessID names the Process this Handler records for. It belongs here
+	// rather than on the individual hooks for the same reason the identifiers
+	// above do: one Handler serves exactly one claim of one Process, so the value
+	// is fixed for the Handler's whole life.
+	//
+	// Empty for a caller that drives no child Processes (the in-process Job
+	// executor), which is the same thing an event written before the field
+	// existed carries.
+	ProcessID string
 }
 
 // handlerSpanKey is the context key under which Handler stashes per-span
@@ -595,6 +604,7 @@ func (h *Handler) baseEvent(kind model.JobRunEventKind, at time.Time) *model.Job
 		Kind:        kind,
 		Phase:       phase,
 		AgentLabel:  agentLabel,
+		ProcessID:   h.routing.ProcessID,
 	}
 }
 

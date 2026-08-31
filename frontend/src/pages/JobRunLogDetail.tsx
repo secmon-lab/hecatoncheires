@@ -24,6 +24,7 @@ interface JobRunEvent {
   parentSequence: number
   phase: string
   agentLabel: string
+  processId: string
   payload: string
 }
 

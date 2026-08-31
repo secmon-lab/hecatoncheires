@@ -43,6 +43,7 @@ describe('buildRunExport', () => {
         parentSequence: 1,
         phase: 'execute',
         agentLabel: 'planner',
+        processId: 'proc-1',
         payload: JSON.stringify({ InputTokens: 10, OutputTokens: 20 }),
       },
       {
@@ -54,6 +55,7 @@ describe('buildRunExport', () => {
         parentSequence: 0,
         phase: 'execute',
         agentLabel: 'planner',
+        processId: 'proc-1',
         payload: JSON.stringify({ Model: 'claude', Messages: [{ Role: 'user' }] }),
       },
     ]
@@ -78,6 +80,7 @@ describe('buildRunExport', () => {
         parentSequence: 0,
         phase: 'execute',
         agentLabel: '',
+        processId: 'proc-1',
         payload: 'not-json{',
       },
     ]
@@ -101,6 +104,9 @@ describe('buildRunExport', () => {
         parentSequence: 1,
         phase: 'execute',
         agentLabel: 'worker',
+        // A sub-agent is a different Process from the planner below, which is what
+        // the id is there to record.
+        processId: 'proc-child-1',
         payload: '{}',
       },
       {
@@ -112,6 +118,7 @@ describe('buildRunExport', () => {
         parentSequence: 0,
         phase: 'execute',
         agentLabel: 'planner',
+        processId: 'proc-1',
         payload: '{}',
       },
     ]

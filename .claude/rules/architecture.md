@@ -469,6 +469,20 @@ Two properties this relies on, which a change here must preserve:
   when its Scope names workspace, case, job and job-run id. A run that keeps no
   run record leaves the archive as its only trace — the intended outcome, not a
   gap.
+- **Every event names the Process whose claim recorded it**
+  (`JobRunEvent.ProcessID`, set from `runTimeline`'s Process argument). That is
+  what separates a sub-agent's calls from the planner's, and the SCOPE cannot do
+  it: a sub-agent inherits its parent's metadata, so every Process of a run
+  resolves to the same Scope. Group a run's events by it to get what one
+  sub-agent actually cost — the figure needed to judge whether the budget the
+  planner allocated to a task was reasonable.
+  `AgentLabel` was declared for this and never set by any production path (see
+  the field's own comment): a label is something the handler must be TOLD, while
+  the Process id is something the claim already holds. Do not "fix" the gap by
+  reviving `StartSubAgent` — on the durable runtime a sub-agent is a separate
+  Process with a separate Handler, so no handler is ever in a position to call
+  it. Pinned by `TestTimelineEventsNameTheProcessThatRecordedThem` (kernel) and
+  `TestHandler_EventsCarryTheirOwnProcess` (runtrace).
 - **`Sequence` is allocated by the repository inside each write**
   (`JobRunEventRepository.AppendNext`), so the several Handlers a run accumulates
   — this claim's, a later claim's on another instance, the run owner's

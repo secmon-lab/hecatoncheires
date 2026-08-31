@@ -258,6 +258,7 @@ func jobRunEventColumns() []Column {
 		{Name: "parent_sequence", Type: TypeInt, Nullable: true},
 		{Name: "phase", Type: TypeString, Nullable: true},
 		{Name: "agent_label", Type: TypeString, Nullable: true},
+		{Name: "process_id", Type: TypeString, Nullable: true},
 
 		// LLM_REQUEST / LLM_RESPONSE.
 		{Name: "model", Type: TypeString, Nullable: true},
@@ -311,6 +312,7 @@ func jobRunEventRows(ctx context.Context, events []*model.JobRunEvent) []map[str
 			"parent_sequence": e.ParentSequence,
 			"phase":           e.Phase,
 			"agent_label":     e.AgentLabel,
+			"process_id":      e.ProcessID,
 		}
 		addEventPayload(ctx, row, e)
 		rows = append(rows, row)
