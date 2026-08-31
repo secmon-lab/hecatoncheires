@@ -16,6 +16,11 @@ var ToGraphQLCaseJobForTest = toGraphQLCaseJob
 // the run-detail UI and the exported run file both read.
 var ToGraphQLJobRunEventForTest = toGraphQLJobRunEvent
 
+// ToGraphQLJobRunEventsForTest exposes the unexported list-level converter so a
+// test can assert that a conversation stored as per-call diffs is handed to the
+// run-detail UI as whole message lists again.
+var ToGraphQLJobRunEventsForTest = toGraphQLJobRunEvents
+
 // ToGraphQLJobRunLogForTest exposes the unexported toGraphQLJobRunLog so a test
 // can pin the wire form of a run record — the cost in particular, which is
 // stored in nano-USD and read in dollars.

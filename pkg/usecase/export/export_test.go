@@ -197,6 +197,10 @@ func seedJobRun(t *testing.T, repo interfaces.Repository, wsID string, caseID in
 	req := baseEvent(1, model.JobRunEventKindLLMRequest)
 	req.LLMRequest = &model.LLMRequestPayload{
 		Model: "claude-opus-4-7",
+		// A conversation's second call: the leading message was recorded by an
+		// earlier event, so only what follows is carried here.
+		ConversationID:    "conv-" + jobID,
+		MessagesPrefixLen: 1,
 		Messages: []model.LLMMessage{{
 			Role:     "user",
 			Contents: []model.LLMContentBlock{{Type: "text", Text: "investigate the case"}},
@@ -447,6 +451,9 @@ func TestExporter_Run_full(t *testing.T) {
 	gt.Value(t, reqRow["model"]).Equal("claude-opus-4-7")
 	gt.String(t, reqRow["messages_json"].(string)).Contains("investigate the case")
 	gt.String(t, reqRow["tools_json"].(string)).Contains("slack_search")
+	// messages_json is a diff, so its grouping key and offset travel with it.
+	gt.Value(t, reqRow["conversation_id"]).Equal("conv-triage")
+	gt.Value(t, reqRow["messages_prefix_len"]).Equal(int64(1))
 	gt.True(t, reqRow["tool_name"] == nil)
 
 	respRow := findEventRow(jobRunEvents, normalID, 2)

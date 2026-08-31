@@ -437,6 +437,55 @@ func TestAToolsOwnLLMCallDoesNotBecomeItsParent(t *testing.T) {
 	gt.Number(t, toolEvents[0].ParentSequence).Equal(byModel[probeModelName])
 }
 
+// TestAToolsOwnLLMCallIsItsOwnConversation pins the scoping the timeline's diff
+// recording depends on.
+//
+// An LLM_REQUEST stores only the messages its conversation has not recorded yet.
+// A tool that reaches an LLM itself shares the claim's handler, so without a
+// conversation of its own its request would be diffed against the agent's — and
+// the agent's next call diffed against the tool's — leaving neither
+// reconstructible.
+func TestAToolsOwnLLMCallIsItsOwnConversation(t *testing.T) {
+	ctx := context.Background()
+	rt := newProbeRuntime(t, embeddingProbeTool{})
+	seedCase(t, ctx, rt.repo, &model.Case{Title: "conversation scoping"})
+
+	sc := kernel.Scope{
+		WorkspaceID: "ws-1", CaseID: 1, ActorUserID: "U1",
+		ToolSets: []string{agent.ToolSetJira},
+		JobID:    "job-probe", JobRunID: "run-probe",
+	}
+	proc := runToCompletion(t, rt, sc)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	events, err := rt.repo.JobRunEvent().List(ctx,
+		model.JobRunKey{WorkspaceID: "ws-1", CaseID: 1, JobID: "job-probe"}, "run-probe")
+	gt.NoError(t, err).Required()
+
+	// The two request kinds are distinguishable by model: the Generate names
+	// probeModelName, the tool's own call names probeEmbeddingModelName.
+	byModel := map[string]map[string]bool{}
+	for _, ev := range events {
+		if ev.LLMRequest == nil {
+			continue
+		}
+		if byModel[ev.LLMRequest.Model] == nil {
+			byModel[ev.LLMRequest.Model] = map[string]bool{}
+		}
+		byModel[ev.LLMRequest.Model][ev.LLMRequest.ConversationID] = true
+	}
+	gt.Map(t, byModel).HasKey(probeModelName).Required()
+	gt.Map(t, byModel).HasKey(probeEmbeddingModelName).Required()
+
+	// Every request carries a conversation, and no conversation spans both.
+	for _, ids := range byModel {
+		gt.Map(t, ids).NotHasKey("")
+	}
+	for id := range byModel[probeModelName] {
+		gt.Bool(t, byModel[probeEmbeddingModelName][id]).False()
+	}
+}
+
 // llmCallSpans collects the call data of every llm_call span in a trace.
 func llmCallSpans(tr *trace.Trace) []*trace.LLMCallData {
 	var out []*trace.LLMCallData

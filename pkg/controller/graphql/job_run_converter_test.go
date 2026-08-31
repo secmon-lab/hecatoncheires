@@ -2,6 +2,7 @@ package graphql_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -88,6 +89,118 @@ func TestToGraphQLJobRunEvent(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, ev).NotNil().Required()
 		gt.String(t, ev.Payload).Equal("{}")
+	})
+}
+
+// llmRequestEvent builds one LLM_REQUEST event of a conversation, carrying only
+// the messages after prefixLen — the diff form the timeline stores.
+func llmRequestEvent(seq int64, conversationID string, prefixLen int, texts ...string) *model.JobRunEvent {
+	msgs := make([]model.LLMMessage, 0, len(texts))
+	for _, txt := range texts {
+		msgs = append(msgs, model.LLMMessage{
+			Role:     "user",
+			Contents: []model.LLMContentBlock{{Type: "text", Text: txt}},
+		})
+	}
+	return &model.JobRunEvent{
+		WorkspaceID: "ws1", CaseID: 16, JobID: "triage", RunID: "run-1",
+		EventID:  "ev-" + conversationID + "-" + strconv.FormatInt(seq, 10),
+		Sequence: seq,
+		Kind:     model.JobRunEventKindLLMRequest,
+		LLMRequest: &model.LLMRequestPayload{
+			Model:             "claude-opus-4-6",
+			ConversationID:    conversationID,
+			MessagesPrefixLen: prefixLen,
+			Messages:          msgs,
+		},
+	}
+}
+
+// payloadMessageTexts reads the message texts out of an encoded payload.
+func payloadMessageTexts(t *testing.T, payload string) []string {
+	t.Helper()
+	var got struct {
+		Messages []struct {
+			Contents []struct{ Text string }
+		}
+	}
+	gt.NoError(t, json.Unmarshal([]byte(payload), &got)).Required()
+	out := make([]string, 0, len(got.Messages))
+	for _, m := range got.Messages {
+		gt.Array(t, m.Contents).Length(1).Required()
+		out = append(out, m.Contents[0].Text)
+	}
+	return out
+}
+
+// TestToGraphQLJobRunEventsRestoresConversations pins the read side of the
+// diff-recorded conversation: the timeline stores each LLM_REQUEST as only what
+// was new, and the run-detail page must still be handed each call's whole
+// request.
+func TestToGraphQLJobRunEventsRestoresConversations(t *testing.T) {
+	t.Run("a conversation's diffs are concatenated back", func(t *testing.T) {
+		events := []*model.JobRunEvent{
+			llmRequestEvent(1, "conv-a", 0, "m0"),
+			llmRequestEvent(2, "conv-a", 1, "m1"),
+			llmRequestEvent(3, "conv-a", 2, "m2", "m3"),
+		}
+		got, err := graphqlctrl.ToGraphQLJobRunEventsForTest(events)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(3).Required()
+
+		gt.Value(t, payloadMessageTexts(t, got[0].Payload)).Equal([]string{"m0"})
+		gt.Value(t, payloadMessageTexts(t, got[1].Payload)).Equal([]string{"m0", "m1"})
+		gt.Value(t, payloadMessageTexts(t, got[2].Payload)).
+			Equal([]string{"m0", "m1", "m2", "m3"})
+
+		// The stored events are not rewritten: a caller's slice may be shared.
+		gt.Array(t, events[2].LLMRequest.Messages).Length(2)
+		gt.Number(t, events[2].LLMRequest.MessagesPrefixLen).Equal(2)
+	})
+
+	t.Run("two conversations interleaved on one run stay apart", func(t *testing.T) {
+		events := []*model.JobRunEvent{
+			llmRequestEvent(1, "conv-a", 0, "a0"),
+			llmRequestEvent(2, "conv-b", 0, "b0"),
+			llmRequestEvent(3, "conv-b", 1, "b1"),
+			llmRequestEvent(4, "conv-a", 1, "a1"),
+		}
+		got, err := graphqlctrl.ToGraphQLJobRunEventsForTest(events)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(4).Required()
+
+		gt.Value(t, payloadMessageTexts(t, got[2].Payload)).Equal([]string{"b0", "b1"})
+		gt.Value(t, payloadMessageTexts(t, got[3].Payload)).Equal([]string{"a0", "a1"})
+	})
+
+	t.Run("a record written before the diff existed reads as the whole request", func(t *testing.T) {
+		// No ConversationID, no prefix: every event carries its own full list,
+		// which is what the timeline held before this field was introduced.
+		events := []*model.JobRunEvent{
+			llmRequestEvent(1, "", 0, "m0"),
+			llmRequestEvent(2, "", 0, "m0", "m1"),
+		}
+		got, err := graphqlctrl.ToGraphQLJobRunEventsForTest(events)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(2).Required()
+
+		gt.Value(t, payloadMessageTexts(t, got[0].Payload)).Equal([]string{"m0"})
+		gt.Value(t, payloadMessageTexts(t, got[1].Payload)).Equal([]string{"m0", "m1"})
+	})
+
+	t.Run("the tool set recorded once is carried to the later calls", func(t *testing.T) {
+		first := llmRequestEvent(1, "conv-a", 0, "m0")
+		first.LLMRequest.Tools = []model.LLMToolSpec{{Name: "slack_search", Description: "search"}}
+		events := []*model.JobRunEvent{first, llmRequestEvent(2, "conv-a", 1, "m1")}
+
+		got, err := graphqlctrl.ToGraphQLJobRunEventsForTest(events)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(2).Required()
+
+		var second struct{ Tools []model.LLMToolSpec }
+		gt.NoError(t, json.Unmarshal([]byte(got[1].Payload), &second)).Required()
+		gt.Array(t, second.Tools).Length(1).Required()
+		gt.String(t, second.Tools[0].Name).Equal("slack_search")
 	})
 }
 

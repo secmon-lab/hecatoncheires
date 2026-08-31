@@ -76,6 +76,75 @@ func jobRunStageToGraphQL(s model.JobRunStage) graphql1.JobRunStage {
 	}
 }
 
+// toGraphQLJobRunEvents maps a run's whole timeline, in the order it was read,
+// and reassembles the conversations along the way.
+//
+// An LLM_REQUEST is stored as a diff: it carries only the messages that were
+// not already recorded by earlier events of the same conversation (see
+// model.LLMRequestPayload.MessagesPrefixLen). The run detail page shows one
+// call's request on its own, so the whole message list is put back here rather
+// than in every consumer. That makes this the list-level converter: the
+// reconstruction needs the earlier events, which a per-event call cannot see.
+func toGraphQLJobRunEvents(events []*model.JobRunEvent) ([]*graphql1.JobRunEvent, error) {
+	conversations := map[string][]model.LLMMessage{}
+	tools := map[string][]model.LLMToolSpec{}
+	out := make([]*graphql1.JobRunEvent, 0, len(events))
+	for _, ev := range events {
+		gq, err := toGraphQLJobRunEvent(restoreConversation(ev, conversations, tools))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, gq)
+	}
+	return out, nil
+}
+
+// restoreConversation returns ev with its LLM_REQUEST payload expanded back to
+// the full request, and records the result so the next event of the same
+// conversation can build on it. Any other event is returned unchanged.
+//
+// The event is never mutated: the payload is replaced on a copy, because the
+// caller's slice may be shared (a repository is free to hand out the documents
+// it cached) and a consumer must not find the timeline rewritten under it.
+func restoreConversation(
+	ev *model.JobRunEvent,
+	conversations map[string][]model.LLMMessage,
+	tools map[string][]model.LLMToolSpec,
+) *model.JobRunEvent {
+	if ev == nil || ev.LLMRequest == nil {
+		return ev
+	}
+	p := *ev.LLMRequest
+	id := p.ConversationID
+
+	// A prefix longer than what was seen cannot be honoured — an event read out
+	// of order, or a timeline whose earlier part was trimmed. Take what there
+	// is rather than dropping the messages this event does carry.
+	prefix := conversations[id]
+	if p.MessagesPrefixLen < len(prefix) {
+		prefix = prefix[:p.MessagesPrefixLen]
+	}
+	full := make([]model.LLMMessage, 0, len(prefix)+len(p.Messages))
+	full = append(full, prefix...)
+	full = append(full, p.Messages...)
+	conversations[id] = full
+
+	if len(p.Tools) > 0 {
+		tools[id] = p.Tools
+	} else {
+		p.Tools = tools[id]
+	}
+
+	p.Messages = full
+	// The payload now holds the whole request, so the diff bookkeeping would
+	// only mislead a reader of the GraphQL response.
+	p.MessagesPrefixLen = 0
+
+	restored := *ev
+	restored.LLMRequest = &p
+	return &restored
+}
+
 // toGraphQLJobRunEvent maps one event to its GraphQL form. The payload
 // is JSON-encoded as a string so a single field can carry every event
 // kind's distinct shape (LLM request/response, tool call, run error).

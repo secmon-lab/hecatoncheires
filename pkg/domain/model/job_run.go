@@ -671,9 +671,33 @@ func (e *JobRunEvent) Validate() error {
 // except the system prompt (which lives on JobRunLog because it doesn't
 // change turn-to-turn). Maps to gollem trace.LLMRequest + LLMCallData.Model.
 type LLMRequestPayload struct {
-	Model    string        // LLMCallData.Model
-	Messages []LLMMessage  // LLMRequest.Messages
-	Tools    []LLMToolSpec // LLMRequest.Tools (name + description only)
+	Model string // LLMCallData.Model
+	// ConversationID identifies the conversation this call was made in. Every
+	// LLM_REQUEST of one conversation carries the same value, which is what
+	// lets a consumer group the partial Messages below back into one list. It
+	// is empty on records written before the field existed, and on those
+	// Messages is always the whole request, so nothing needs grouping.
+	ConversationID string
+	// MessagesPrefixLen is how many leading messages of this conversation were
+	// already recorded by earlier events. Messages holds only what follows.
+	//
+	// A conversation grows by appending, so recording the whole message list on
+	// every call stores the same messages once per call: an investigation of N
+	// calls stores O(N^2) bytes, and job_run_events is by far the largest table
+	// the BigQuery export produces. A consumer that wants the full request
+	// concatenates, in Sequence order, the Messages of the earlier events
+	// carrying the same ConversationID.
+	//
+	// Zero means Messages is the whole request — either the conversation's
+	// first call, or one whose history no longer extended what was recorded
+	// (the recorder detects that and re-records in full rather than emitting a
+	// diff that would lose messages).
+	MessagesPrefixLen int
+	Messages          []LLMMessage // LLMRequest.Messages (see MessagesPrefixLen)
+	// Tools is recorded on the first event of a conversation and left empty on
+	// the following ones, which re-send the same set unchanged. It is recorded
+	// again whenever the set actually differs.
+	Tools []LLMToolSpec // LLMRequest.Tools (name + description only)
 }
 
 // LLMResponsePayload captures one assistant response. gollem returns

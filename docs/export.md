@@ -181,26 +181,55 @@ populated; the rest are NULL.
 
 | Columns | Populated for |
 |---------|---------------|
-| `model`, `messages_json`, `tools_json` | `LLM_REQUEST` |
+| `model`, `conversation_id`, `messages_prefix_len`, `messages_json`, `tools_json` | `LLM_REQUEST` |
 | `model`, `texts_json`, `function_calls_json`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `duration_ms` | `LLM_RESPONSE` |
 | `tool_name`, `tool_arguments_json`, `tool_result_json`, `tool_is_error`, `tool_error_message`, `tool_started_at`, `tool_ended_at` | `TOOL_CALL` |
 | `error_stage`, `error_message` | `RUN_ERROR` |
 
 **This table carries the agents' full conversation and tool payloads**, so it is
-by far the largest thing the export writes, and it grows superlinearly per run:
-each `LLM_REQUEST` holds the whole conversation as of that call, so a run with N
-LLM calls stores roughly N²/2 messages. Every export is a full refresh, so all of
-it is re-read from Firestore and re-written each time. Individual payload fields
-are capped at 800 KiB by the trace layer (longer values are truncated from the
-tail before they are persisted).
+by far the largest thing the export writes. Every export is a full refresh, so
+all of it is re-read from Firestore and re-written each time. Individual payload
+fields are capped at 800 KiB by the trace layer (longer values are truncated
+from the tail before they are persisted).
+
+##### `messages_json` is a diff, not the whole request
+
+An LLM conversation grows by appending: every call re-sends the history plus the
+new turn. Recording the whole message list on each call therefore stored the same
+messages once per call — a run with N LLM calls stored roughly N²/2 messages.
+
+An `LLM_REQUEST` row now carries only the messages that were not already recorded:
+
+- `conversation_id` groups the rows of one conversation. A run holds more than
+  one: the agent's own, plus a separate conversation for each tool that reaches
+  an LLM itself (a knowledge tool's embedding, webfetch's page analysis).
+- `messages_prefix_len` is how many of that conversation's leading messages the
+  earlier rows already carried.
+- `messages_json` holds what follows.
+
+To reconstruct one call's full request, concatenate — in `sequence` order — the
+`messages_json` of the earlier rows with the same `conversation_id`, take the
+first `messages_prefix_len` messages of that, and append this row's own. A row
+with `messages_prefix_len = 0` carries the whole request on its own, which is
+also how a row written before this column existed reads (`conversation_id` is
+empty and `messages_prefix_len` is 0 or NULL there, so nothing needs grouping).
+
+`tools_json` follows the same rule: the tool set is recorded on a conversation's
+first row and left NULL on the rows that re-send it unchanged. It is recorded
+again on any row whose set actually differs.
+
+The run detail page in the web UI is unaffected — it is handed the reconstructed
+conversations, not the stored diffs.
 
 A single JSON column is capped at the same 800 KiB. Individual payload strings
-are already truncated when recorded, but the arrays holding them are not bounded
-— an `LLM_REQUEST` carries the whole conversation as of that call — so a long run
-can produce a `messages_json` past the cap. Such a cell is replaced by
-`{"oversized":true,"original_bytes":<n>}` rather than cut at a byte offset,
-which would leave a value no consumer can parse. The cap is what keeps one row
-inside the Storage Write API's per-request limit, which no batching can split.
+are already truncated when recorded, but the arrays holding them are not bounded,
+so a call that adds a very large turn can still produce a `messages_json` past
+the cap. Such a cell is replaced by `{"oversized":true,"original_bytes":<n>}`
+rather than cut at a byte offset, which would leave a value no consumer can
+parse. The cap is what keeps one row inside the Storage Write API's per-request
+limit, which no batching can split. Note that a replaced cell breaks the
+reconstruction above for the rest of its conversation: the messages it held are
+gone, so every later row's prefix refers to something that is not there.
 
 Reading it costs one Firestore query per run, on top of one subcollection scan
 per case and one log query per (case, job) pair. Mention runs each get their own

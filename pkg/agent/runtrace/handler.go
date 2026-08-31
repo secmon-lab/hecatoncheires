@@ -51,6 +51,12 @@ type handlerSpan struct {
 	kind      string // "llm" / "tool"
 	startedAt time.Time
 
+	// conv is the conversation an LLM call recorded on this span belongs to,
+	// when it is not the claim's own. A tool span carries one because a tool
+	// that reaches an LLM holds a conversation of its own; an LLM span inherits
+	// its enclosing tool's. Nil means the handler's own conversation.
+	conv *conversation
+
 	// Tool-only.
 	toolName string
 	toolArgs map[string]any
@@ -75,6 +81,12 @@ type Handler struct {
 	routing   Routing
 	clock     func() time.Time
 	truncator payloadTruncator
+
+	// rootConv is the conversation an LLM call belongs to when neither its span
+	// nor its context names one. A Handler is built per claim, and a claim's own
+	// agent holds exactly one conversation, so this is that one. It carries its
+	// own mutex, so it is not guarded by mu.
+	rootConv *conversation
 
 	// State mutated under mu by hook callbacks.
 	mu                 sync.Mutex
@@ -171,6 +183,7 @@ func NewHandler(
 		clock:     clock,
 		truncator: defaultPayloadTruncator{},
 		phase:     phaseExecute,
+		rootConv:  newConversation(),
 	}
 }
 
@@ -189,11 +202,21 @@ func (h *Handler) EndAgentExecute(ctx context.Context, err error) {}
 
 // StartLLMCall records the start time in a context-scoped span. No event is
 // appended yet; we have no LLMCallData until End.
+//
+// A call opened INSIDE a tool execution — a knowledge tool's embedding,
+// webfetch's page analysis — inherits that tool's conversation, so its request
+// is recorded as a diff against the tool's own message list rather than against
+// the agent's. The link is made from the enclosing span rather than from a
+// context value the caller could add, because the context a handler is handed
+// at End* is the one it returned at Start* (trace.Multi records them per
+// handler), so a value added by the runtime after the claim opened never
+// arrives here.
 func (h *Handler) StartLLMCall(ctx context.Context) context.Context {
-	return context.WithValue(ctx, handlerSpanKey{}, &handlerSpan{
-		kind:      "llm",
-		startedAt: h.clock(),
-	})
+	span := &handlerSpan{kind: "llm", startedAt: h.clock()}
+	if parent := spanFromContext(ctx); parent != nil {
+		span.conv = parent.conv
+	}
+	return context.WithValue(ctx, handlerSpanKey{}, span)
 }
 
 // EndLLMCall appends two events: LLM_REQUEST built from data.Request +
@@ -246,9 +269,11 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 		h.mu.Unlock()
 	}
 
-	// LLM_REQUEST
+	// LLM_REQUEST. Only what this conversation has not recorded yet is written;
+	// see conversation.apply and model.LLMRequestPayload.MessagesPrefixLen.
 	reqEv := h.baseEvent(model.JobRunEventKindLLMRequest, endedAt)
 	reqEv.LLMRequest = h.truncator.LLMRequestFromTrace(data)
+	h.conversationFor(ctx, span).apply(reqEv.LLMRequest)
 	h.append(ctx, reqEv)
 
 	// LLM_RESPONSE
@@ -265,6 +290,19 @@ func (h *Handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 	h.totals.CacheCreationInputTokens += respEv.LLMResponse.CacheCreationInputTokens
 	h.totals.CacheReadInputTokens += respEv.LLMResponse.CacheReadInputTokens
 	h.mu.Unlock()
+}
+
+// conversationFor resolves which conversation an LLM call belongs to: the one
+// carried on its span (a call nested inside a tool), then one scoped to the
+// context (a sub-agent), and otherwise the claim's own.
+func (h *Handler) conversationFor(ctx context.Context, span *handlerSpan) *conversation {
+	if span != nil && span.conv != nil {
+		return span.conv
+	}
+	if c := conversationFrom(ctx); c != nil {
+		return c
+	}
+	return h.rootConv
 }
 
 // runTotals returns the tally counted so far by THIS handler. It is a
@@ -317,6 +355,10 @@ func (h *Handler) StartToolExec(ctx context.Context, toolName string, args map[s
 		toolName:  toolName,
 		toolArgs:  args,
 		parentSeq: parentSeq,
+		// A tool that reaches an LLM itself holds a conversation of its own.
+		// Allocated for every tool execution rather than on demand, so the LLM
+		// calls nested in it need no synchronisation to find it.
+		conv: newConversation(),
 	})
 }
 
@@ -458,12 +500,18 @@ func (h *Handler) CallStats() CallStats {
 }
 
 // StartSubAgent flags the handler so subsequent events carry the named
-// AgentLabel. The single-loop path never triggers this; planexec sub-agents do.
+// AgentLabel, and scopes a conversation of its own to the returned context: a
+// sub-agent's message list is not a continuation of its caller's.
+//
+// On the durable runtime nothing reaches this hook — a sub-agent there is a
+// separate Process, so it gets a separate claim and its own Handler, which
+// already separates the two conversations. This covers a gollem-driven agent,
+// where the same Handler serves both.
 func (h *Handler) StartSubAgent(ctx context.Context, name string) context.Context {
 	h.mu.Lock()
 	h.agentLabel = name
 	h.mu.Unlock()
-	return ctx
+	return withConversation(ctx)
 }
 
 // EndSubAgent clears the AgentLabel back to empty.
