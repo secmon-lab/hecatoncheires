@@ -27,32 +27,94 @@ import (
 // (one of the two valid stored forms) used to assert it is exported as a STRING.
 var dateFieldValue = time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
 
-// fakeSink captures the tables handed to it, keyed by "namespace.tableName". It
-// can be told to fail on specific table names to exercise error aggregation.
+// capturedTable is one committed full refresh: the schema it declared and every
+// row that reached it before Commit.
+type capturedTable struct {
+	Name    string
+	Columns []export.Column
+	Rows    []map[string]any
+	// Appends counts the AppendRows calls the table received. It is what
+	// distinguishes a table assembled in memory and handed over in one piece
+	// from one streamed in as it was read.
+	Appends int
+}
+
+// fakeSink captures the tables committed to it, keyed by "namespace.tableName".
+// A table that was aborted rather than committed is deliberately NOT captured:
+// that mirrors the real sink, where an abort leaves the destination holding the
+// previous snapshot. It can be told to fail on specific table names to exercise
+// error aggregation.
 type fakeSink struct {
-	tables map[string]*export.Table
+	tables map[string]*capturedTable
 	failOn map[string]bool
-	closed bool
+	// aborted counts the writers that ended without a Commit, so a test can tell
+	// "the table was never opened" from "it was opened and discarded".
+	aborted map[string]int
+	closed  bool
 }
 
 func newFakeSink() *fakeSink {
-	return &fakeSink{tables: map[string]*export.Table{}, failOn: map[string]bool{}}
+	return &fakeSink{
+		tables:  map[string]*capturedTable{},
+		failOn:  map[string]bool{},
+		aborted: map[string]int{},
+	}
 }
 
-func (f *fakeSink) WriteTable(_ context.Context, namespace string, t *export.Table) error {
-	if f.failOn[t.Name] {
-		return errors.New("injected sink failure for " + t.Name)
+func (f *fakeSink) BeginTable(_ context.Context, namespace, name string, columns []export.Column) (export.TableWriter, error) {
+	if f.failOn[name] {
+		return nil, errors.New("injected sink failure for " + name)
 	}
-	f.tables[namespace+"."+t.Name] = t
-	return nil
+	return &fakeTableWriter{
+		sink:      f,
+		namespace: namespace,
+		table:     &capturedTable{Name: name, Columns: columns},
+	}, nil
 }
 
 func (f *fakeSink) Close() error { f.closed = true; return nil }
 
-func (f *fakeSink) table(namespace, name string) *export.Table { return f.tables[namespace+"."+name] }
+func (f *fakeSink) table(namespace, name string) *capturedTable {
+	return f.tables[namespace+"."+name]
+}
+
+// fakeTableWriter accumulates appended rows and publishes them to the sink only
+// on Commit.
+type fakeTableWriter struct {
+	sink      *fakeSink
+	namespace string
+	table     *capturedTable
+	finished  bool
+}
+
+func (w *fakeTableWriter) AppendRows(_ context.Context, rows []map[string]any) error {
+	if w.finished {
+		return errors.New("append after finish for " + w.table.Name)
+	}
+	w.table.Rows = append(w.table.Rows, rows...)
+	w.table.Appends++
+	return nil
+}
+
+func (w *fakeTableWriter) Commit(_ context.Context) error {
+	if w.finished {
+		return errors.New("commit after finish for " + w.table.Name)
+	}
+	w.finished = true
+	w.sink.tables[w.namespace+"."+w.table.Name] = w.table
+	return nil
+}
+
+func (w *fakeTableWriter) Abort(_ context.Context) {
+	if w.finished {
+		return
+	}
+	w.finished = true
+	w.sink.aborted[w.namespace+"."+w.table.Name]++
+}
 
 // findRow returns the first row whose column equals want, or nil.
-func findRow(t *export.Table, column string, want any) map[string]any {
+func findRow(t *capturedTable, column string, want any) map[string]any {
 	if t == nil {
 		return nil
 	}
@@ -67,7 +129,7 @@ func findRow(t *export.Table, column string, want any) map[string]any {
 // findEventRow returns the job_run_events row for the given case and sequence.
 // Sequence alone is not unique across the table (every run numbers its events
 // from 1), so both keys are needed to address one row.
-func findEventRow(t *export.Table, caseID, sequence int64) map[string]any {
+func findEventRow(t *capturedTable, caseID, sequence int64) map[string]any {
 	if t == nil {
 		return nil
 	}
@@ -80,7 +142,7 @@ func findEventRow(t *export.Table, caseID, sequence int64) map[string]any {
 }
 
 // hasColumn reports whether the table declares a column with the given name.
-func hasColumn(t *export.Table, name string) bool {
+func hasColumn(t *capturedTable, name string) bool {
 	if t == nil {
 		return false
 	}
@@ -601,6 +663,91 @@ func TestExporter_Run_eventFailureKeepsJobRunTables(t *testing.T) {
 	gt.Value(t, sink.table("ds", "memos")).NotNil()
 	gt.Value(t, sink.table("ds", "knowledge")).NotNil()
 	gt.Value(t, sink.table("ds", "tags")).NotNil()
+}
+
+// partialEventReadFailingRepository serves the first run's events and then
+// fails. It is the case the whole-table read could not produce: a failure that
+// arrives after rows have already been handed to the sink.
+type partialEventReadFailingRepository struct {
+	interfaces.Repository
+	inner *partialFailingJobRunEventRepository
+}
+
+func (r partialEventReadFailingRepository) JobRunEvent() interfaces.JobRunEventRepository {
+	return r.inner
+}
+
+type partialFailingJobRunEventRepository struct {
+	inner interfaces.JobRunEventRepository
+	calls int
+}
+
+func (r *partialFailingJobRunEventRepository) Append(ctx context.Context, ev *model.JobRunEvent) error {
+	return r.inner.Append(ctx, ev)
+}
+
+func (r *partialFailingJobRunEventRepository) AppendNext(ctx context.Context, ev *model.JobRunEvent) error {
+	return r.inner.AppendNext(ctx, ev)
+}
+
+func (r *partialFailingJobRunEventRepository) LatestLLMResponseSequence(ctx context.Context, key model.JobRunKey, runID string) (int64, error) {
+	return r.inner.LatestLLMResponseSequence(ctx, key, runID)
+}
+
+func (r *partialFailingJobRunEventRepository) List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error) {
+	r.calls++
+	if r.calls > 1 {
+		return nil, errors.New("injected job run event read failure")
+	}
+	return r.inner.List(ctx, key, runID)
+}
+
+// TestExporter_Run_eventFailureAfterAppendPublishesNothing pins the streaming
+// path's completeness guarantee. The event rows now reach the sink run by run,
+// so a read that fails partway has already handed some of them over; the table
+// must still be abandoned rather than published as a full refresh missing every
+// later run.
+func TestExporter_Run_eventFailureAfterAppendPublishesNothing(t *testing.T) {
+	ctx := context.Background()
+	repo, entry, _, _, _, _ := seededWorkspace(t)
+	sink := newFakeSink()
+
+	failing := partialEventReadFailingRepository{
+		Repository: repo,
+		inner:      &partialFailingJobRunEventRepository{inner: repo.JobRunEvent()},
+	}
+	err := export.New(failing, sink).Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})
+	gt.Error(t, err)
+
+	// Rows did reach the writer before the failure...
+	gt.Number(t, failing.inner.calls).Equal(2)
+	// ...and none of them were published.
+	gt.Value(t, sink.table("ds", "job_run_events")).Nil()
+	gt.Number(t, sink.aborted["ds.job_run_events"]).Equal(1)
+
+	// The levels above were read in full and are refreshed as usual.
+	gt.Value(t, sink.table("ds", "job_runs")).NotNil()
+	gt.Value(t, sink.table("ds", "job_run_logs")).NotNil()
+}
+
+// TestExporter_Run_streamsEventsPerRun pins the shape that bounds the exporter's
+// peak memory: job_run_events is fed to the sink one repository read at a time,
+// so what is held at once is one run's timeline rather than the workspace's.
+// Every other table is handed over in a single append.
+func TestExporter_Run_streamsEventsPerRun(t *testing.T) {
+	ctx := context.Background()
+	repo, entry, _, _, _, _ := seededWorkspace(t)
+	sink := newFakeSink()
+
+	gt.NoError(t, export.New(repo, sink).
+		Run(ctx, []export.Target{{Entry: entry, Namespace: "ds"}})).Required()
+
+	events := sink.table("ds", "job_run_events")
+	gt.Value(t, events).NotNil().Required()
+	// Two seeded runs, each read and appended on its own.
+	gt.Number(t, events.Appends).Equal(2)
+	gt.Number(t, sink.table("ds", "job_runs").Appends).Equal(1)
+	gt.Number(t, sink.table("ds", "cases").Appends).Equal(1)
 }
 
 // deleteTableOnCleanup registers dataset.table for deletion and fails the test

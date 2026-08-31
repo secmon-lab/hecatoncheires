@@ -1,10 +1,16 @@
 // Package export implements the `export` subcommand's core: reading the current
 // state of every configured workspace out of the repository and writing it, one
 // table per entity, to a pluggable Sink (BigQuery today). The Exporter is
-// sink-agnostic — it builds a generic Table (typed columns + rows of natural Go
-// values) and hands it to the Sink, which owns all backend-specific concerns
-// (schema evolution, full-refresh, encoding). This keeps a future Cloud Storage
-// sink a drop-in without touching the read/normalize logic here.
+// sink-agnostic — it describes a table as typed columns plus rows of natural Go
+// values and streams those rows into the Sink, which owns all backend-specific
+// concerns (schema evolution, full-refresh, encoding). This keeps a future Cloud
+// Storage sink a drop-in without touching the read/normalize logic here.
+//
+// Rows are streamed rather than assembled: a table is opened with BeginTable,
+// fed with AppendRows as the rows are read, and published with Commit. That is
+// what keeps the exporter's peak memory bounded by one read's worth of rows
+// instead of by the workspace's total volume — job_run_events alone reaches
+// gigabytes on a busy workspace, which is enough to end the process.
 package export
 
 import (
@@ -44,22 +50,56 @@ type Column struct {
 	Nullable bool
 }
 
-// Table is a full-refresh unit: a named table with a typed schema and its rows.
-// Row values are natural Go types keyed by column name; a missing key is NULL.
-// Backend-specific encoding (e.g. TIMESTAMP -> microseconds) is the Sink's job.
-type Table struct {
-	Name    string
-	Columns []Column
-	Rows    []map[string]any
+// TableWriter is one table's in-progress full refresh. Row values are natural
+// Go types keyed by column name; a missing key is NULL. Backend-specific
+// encoding (e.g. TIMESTAMP -> microseconds) is the Sink's job.
+//
+// A writer is used by a single goroutine and exactly once: append as many
+// batches as the caller has, then either Commit or Abort.
+type TableWriter interface {
+	// AppendRows stages rows. It may flush to the backend at its discretion,
+	// so the caller must not assume anything is durable until Commit.
+	AppendRows(ctx context.Context, rows []map[string]any) error
+	// Commit publishes everything staged as the table's new full contents.
+	Commit(ctx context.Context) error
+	// Abort discards what was staged and leaves the destination untouched.
+	// It is a no-op after a successful Commit, so it is safe to defer.
+	Abort(ctx context.Context)
 }
 
 // Sink is a destination that fully replaces (洗替) a table's schema and rows.
-// Implementations MUST make each WriteTable a full refresh of the named table
-// within the given namespace.
+// Implementations MUST make each BeginTable/Commit pair a full refresh of the
+// named table within the given namespace, and MUST leave the destination at its
+// previous contents when the pair ends in Abort or in any error.
 type Sink interface {
-	// WriteTable replaces the table's schema and data within namespace.
-	WriteTable(ctx context.Context, namespace string, table *Table) error
+	// BeginTable starts a full refresh of namespace.name with the given schema.
+	BeginTable(ctx context.Context, namespace, name string, columns []Column) (TableWriter, error)
 	io.Closer
+}
+
+// WriteTable is the one-shot form of the streaming protocol: open the table,
+// append every row, publish. It exists so a caller with the whole table already
+// in hand does not have to repeat the abort-on-failure bookkeeping, which is
+// what keeps a half-written refresh from ever reaching the destination.
+func WriteTable(ctx context.Context, sink Sink, namespace, name string, columns []Column, rows []map[string]any) error {
+	w, err := sink.BeginTable(ctx, namespace, name, columns)
+	if err != nil {
+		return goerr.Wrap(err, "failed to begin table",
+			goerr.V("namespace", namespace), goerr.V("table", name))
+	}
+	defer w.Abort(ctx)
+
+	if len(rows) > 0 {
+		if err := w.AppendRows(ctx, rows); err != nil {
+			return goerr.Wrap(err, "failed to append rows",
+				goerr.V("namespace", namespace), goerr.V("table", name))
+		}
+	}
+	if err := w.Commit(ctx); err != nil {
+		return goerr.Wrap(err, "failed to commit table",
+			goerr.V("namespace", namespace), goerr.V("table", name))
+	}
+	return nil
 }
 
 // Target binds one workspace to its destination namespace (a BigQuery dataset)
@@ -100,13 +140,12 @@ func New(repo interfaces.Repository, sink Sink, opts ...Option) *Exporter {
 	return e
 }
 
-// writeTable applies the (optional) table-name prefix and hands the table to the
-// sink.
-func (e *Exporter) writeTable(ctx context.Context, namespace string, t *Table) error {
-	if e.tablePrefix != "" {
-		t.Name = e.tablePrefix + t.Name
-	}
-	return e.sink.WriteTable(ctx, namespace, t)
+// tableName applies the (optional) table-name prefix.
+func (e *Exporter) tableName(name string) string { return e.tablePrefix + name }
+
+// writeTable fully refreshes one table whose rows are already in hand.
+func (e *Exporter) writeTable(ctx context.Context, namespace, name string, columns []Column, rows []map[string]any) error {
+	return WriteTable(ctx, e.sink, namespace, e.tableName(name), columns, rows)
 }
 
 // Run exports every target. A failure on one target is logged and collected but
@@ -166,7 +205,8 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 		// memory repo does not implement ExcludePrivateCaseActions).
 		keptCaseIDs := caseIDSet(cases)
 
-		if err := e.writeTable(ctx, ns, buildCaseTable(ctx, t.Entry.FieldSchema, cases)); err != nil {
+		if err := e.writeTable(ctx, ns, "cases",
+			caseColumns(t.Entry.FieldSchema), caseRows(ctx, t.Entry.FieldSchema, cases)); err != nil {
 			errs = append(errs, goerr.Wrap(err, "failed to write cases table"))
 		}
 
@@ -175,7 +215,8 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 		memos, memoErr := e.collectMemos(ctx, wsID, cases)
 		if memoErr != nil {
 			errs = append(errs, memoErr)
-		} else if err := e.writeTable(ctx, ns, buildMemoTable(ctx, t.Entry.MemoConfig, memos)); err != nil {
+		} else if err := e.writeTable(ctx, ns, "memos",
+			memoColumns(t.Entry.MemoConfig), memoRows(ctx, t.Entry.MemoConfig, memos)); err != nil {
 			errs = append(errs, goerr.Wrap(err, "failed to write memos table"))
 		}
 
@@ -188,47 +229,26 @@ func (e *Exporter) exportWorkspace(ctx context.Context, t Target) error {
 			errs = append(errs, goerr.Wrap(actionsErr, "failed to list actions"))
 		} else {
 			actions = filterActionsByCases(actions, keptCaseIDs)
-			if err := e.writeTable(ctx, ns, buildActionTable(actions)); err != nil {
+			if err := e.writeTable(ctx, ns, "actions", actionColumns(), actionRows(actions)); err != nil {
 				errs = append(errs, goerr.Wrap(err, "failed to write actions table"))
 			}
 		}
 
-		// Agent run history is Case-scoped and read per Case, so iterating the
-		// kept cases excludes an excluded Case's runs the same way memos are
-		// excluded. Each of the three tables is written only if its own level was
-		// collected in full — a partial level is skipped rather than published as
-		// a full refresh, so one broken event query does not blank the summaries.
-		history := e.collectJobRuns(ctx, wsID, cases)
-		errs = append(errs, history.errs...)
-		if history.runsComplete {
-			if err := e.writeTable(ctx, ns, buildJobRunTable(history.runs)); err != nil {
-				errs = append(errs, goerr.Wrap(err, "failed to write job runs table"))
-			}
-		}
-		if history.logsComplete {
-			if err := e.writeTable(ctx, ns, buildJobRunLogTable(history.logs)); err != nil {
-				errs = append(errs, goerr.Wrap(err, "failed to write job run logs table"))
-			}
-		}
-		if history.eventsComplete {
-			if err := e.writeTable(ctx, ns, buildJobRunEventTable(ctx, history.events)); err != nil {
-				errs = append(errs, goerr.Wrap(err, "failed to write job run events table"))
-			}
-		}
+		errs = append(errs, e.exportJobRunHistory(ctx, wsID, ns, cases)...)
 	}
 
 	// Knowledge / Tag are workspace-level (not Case-scoped), always exported.
 	knowledge, knowledgeErr := e.repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{})
 	if knowledgeErr != nil {
 		errs = append(errs, goerr.Wrap(knowledgeErr, "failed to list knowledge"))
-	} else if err := e.writeTable(ctx, ns, buildKnowledgeTable(knowledge)); err != nil {
+	} else if err := e.writeTable(ctx, ns, "knowledge", knowledgeColumns(), knowledgeRows(knowledge)); err != nil {
 		errs = append(errs, goerr.Wrap(err, "failed to write knowledge table"))
 	}
 
 	tags, tagsErr := e.repo.Tag().List(ctx, wsID)
 	if tagsErr != nil {
 		errs = append(errs, goerr.Wrap(tagsErr, "failed to list tags"))
-	} else if err := e.writeTable(ctx, ns, buildTagTable(tags)); err != nil {
+	} else if err := e.writeTable(ctx, ns, "tags", tagColumns(), tagRows(tags)); err != nil {
 		errs = append(errs, goerr.Wrap(err, "failed to write tags table"))
 	}
 
@@ -250,36 +270,19 @@ func (e *Exporter) collectMemos(ctx context.Context, wsID string, cases []*model
 	return memos, nil
 }
 
-// jobRunHistory is the case-scoped agent run history: the per-(case, job)
-// summaries, the run logs filed under them, and each run's event timeline.
-type jobRunHistory struct {
-	runs   []*model.JobRun
-	logs   []*model.JobRunLog
-	events []*model.JobRunEvent
-
-	// runsComplete / logsComplete / eventsComplete report, per level, whether
-	// the slice above holds every record that exists. Only a complete level may
-	// be written: each write is a full refresh, so publishing a partial slice
-	// would delete rows that are still there. A level is incomplete when its own
-	// read failed or when the level above it failed, since that level bounds
-	// what this one could even look for.
-	runsComplete   bool
-	logsComplete   bool
-	eventsComplete bool
-
-	// errs holds every collection failure for the caller to report.
-	errs []error
-}
-
-// collectJobRuns gathers the run summaries across the given cases, every run log
-// filed under each summary, and every event of each log. Each level is only
-// reachable through the level above it — a JobRunLog needs the summary's
-// JobRunKey, and an event list needs the log's RunID.
+// exportJobRunHistory writes the three case-scoped agent run tables: the
+// per-(case, job) summaries, the run logs filed under them, and each run's event
+// timeline. Each level is only reachable through the level above it — a
+// JobRunLog needs the summary's JobRunKey, and an event list needs the log's
+// RunID — so a level whose parent failed is not attempted at all.
 //
-// The three levels are walked as three separate passes rather than one nested
-// loop so that a failure is attributable to a single level: a broken event query
-// then costs only the job_run_events table instead of taking the summaries and
-// logs down with it.
+// Agent run history is Case-scoped and read per Case, so iterating the kept
+// cases excludes an excluded Case's runs the same way memos are excluded.
+//
+// Each table is published only if its own level was read in full: every write is
+// a full refresh, so publishing a partial read would delete rows that are still
+// there. A read failure therefore returns before Commit, and the destination
+// keeps the previous snapshot.
 //
 // This is the export's most read-heavy step: one subcollection scan per case,
 // one log query per (case, job) pair, and one event query per run. Every
@@ -288,47 +291,83 @@ type jobRunHistory struct {
 // query and one event query per mention turn. The queries run serially; if the
 // volume grows enough for the round trips to dominate, bounded concurrency here
 // is the lever.
-func (e *Exporter) collectJobRuns(ctx context.Context, wsID string, cases []*model.Case) jobRunHistory {
-	var h jobRunHistory
+func (e *Exporter) exportJobRunHistory(ctx context.Context, wsID, ns string, cases []*model.Case) []error {
+	var errs []error
 
+	var runs []*model.JobRun
 	for _, c := range cases {
 		rs, err := e.repo.JobRun().ListByCase(ctx, wsID, c.ID)
 		if err != nil {
-			h.errs = append(h.errs, goerr.Wrap(err, "failed to list job runs",
+			return append(errs, goerr.Wrap(err, "failed to list job runs",
 				goerr.V("case_id", c.ID)))
-			return h
 		}
-		h.runs = append(h.runs, rs...)
+		runs = append(runs, rs...)
 	}
-	h.runsComplete = true
+	if err := e.writeTable(ctx, ns, "job_runs", jobRunColumns(), jobRunRows(runs)); err != nil {
+		errs = append(errs, goerr.Wrap(err, "failed to write job runs table"))
+	}
 
-	for _, r := range h.runs {
+	var logs []*model.JobRunLog
+	for _, r := range runs {
 		// limit 0 means no limit: the export is a full snapshot, so it must not
 		// silently drop a Job's older runs.
 		ls, err := e.repo.JobRunLog().List(ctx, r.Key(), 0)
 		if err != nil {
-			h.errs = append(h.errs, goerr.Wrap(err, "failed to list job run logs",
+			return append(errs, goerr.Wrap(err, "failed to list job run logs",
 				goerr.V("case_id", r.CaseID), goerr.V("job_id", r.JobID)))
-			return h
 		}
-		h.logs = append(h.logs, ls...)
+		logs = append(logs, ls...)
 	}
-	h.logsComplete = true
+	if err := e.writeTable(ctx, ns, "job_run_logs", jobRunLogColumns(), jobRunLogRows(logs)); err != nil {
+		errs = append(errs, goerr.Wrap(err, "failed to write job run logs table"))
+	}
 
-	for _, l := range h.logs {
+	if err := e.exportJobRunEvents(ctx, ns, logs); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
+// exportJobRunEvents streams the job_run_events table: one repository read per
+// run, appended and released before the next run is read.
+//
+// This is the one table read at sub-table granularity, and deliberately so. It
+// is the only one whose volume is unbounded by anything the product limits — a
+// single workspace's timeline reaches gigabytes, two orders of magnitude past
+// every other table here — so it is the only one worth the extra shape. The
+// others stay in memory.
+//
+// A failed read returns without Commit, so the deferred Abort drops the staging
+// data and the destination is left holding the previous snapshot: a partial
+// timeline is never published as a full refresh.
+func (e *Exporter) exportJobRunEvents(ctx context.Context, ns string, logs []*model.JobRunLog) error {
+	w, err := e.sink.BeginTable(ctx, ns, e.tableName("job_run_events"), jobRunEventColumns())
+	if err != nil {
+		return goerr.Wrap(err, "failed to begin job run events table")
+	}
+	defer w.Abort(ctx)
+
+	for _, l := range logs {
 		key := model.JobRunKey{WorkspaceID: l.WorkspaceID, CaseID: l.CaseID, JobID: l.JobID}
 		evs, err := e.repo.JobRunEvent().List(ctx, key, l.RunID)
 		if err != nil {
-			h.errs = append(h.errs, goerr.Wrap(err, "failed to list job run events",
+			return goerr.Wrap(err, "failed to list job run events",
 				goerr.V("case_id", l.CaseID), goerr.V("job_id", l.JobID),
-				goerr.V("run_id", l.RunID)))
-			return h
+				goerr.V("run_id", l.RunID))
 		}
-		h.events = append(h.events, evs...)
+		if len(evs) == 0 {
+			continue
+		}
+		if err := w.AppendRows(ctx, jobRunEventRows(ctx, evs)); err != nil {
+			return goerr.Wrap(err, "failed to append job run event rows",
+				goerr.V("case_id", l.CaseID), goerr.V("job_id", l.JobID),
+				goerr.V("run_id", l.RunID))
+		}
 	}
-	h.eventsComplete = true
-
-	return h
+	if err := w.Commit(ctx); err != nil {
+		return goerr.Wrap(err, "failed to write job run events table")
+	}
+	return nil
 }
 
 // filterNonPrivate returns only the cases that are not private.
