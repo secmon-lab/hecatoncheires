@@ -99,14 +99,14 @@ func bindDraftRuntimeWithoutWorker(
 	procRepo := agentprocmemory.New()
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(), history)
+	models := testAgentModelPolicy(t)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(models.Resolve), history)
 	gt.NoError(t, err).Required()
 	locator, err := agentkernel.NewLocator(procRepo)
 	gt.NoError(t, err).Required()
 
 	d, err := proposal.NewDurable(repo, registry, uc.DurableDraftHost(), locator)
 	gt.NoError(t, err).Required()
-	models := testAgentModelPolicy(t)
 	gt.NoError(t, d.Register(reg, taskAgent, nil,
 		testAgentRootBudget.Limiter(models.Resolve), history)).Required()
 

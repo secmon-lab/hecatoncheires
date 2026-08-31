@@ -453,7 +453,8 @@ func buildTickAgentRuntime(ctx context.Context, d tickAgentDeps) (*tickAgentRunt
 	}
 
 	reg := agentkit.NewRegistry()
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, budgets.Task.Limiter(), archive.ProcessHistory)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, budgets.Task.Limiter(d.models.Resolve),
+		archive.ProcessHistory)
 	if err != nil {
 		cleanup()
 		return nil, noop, goerr.Wrap(err, "register the task sub-agent")

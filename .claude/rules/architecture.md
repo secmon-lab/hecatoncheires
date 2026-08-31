@@ -894,11 +894,43 @@ magnitude, so any token ceiling is right for one of them and wrong for another.
 `MaxSteps` stays, but it is not a spend limit — it stops a run that never
 terminates even while it costs almost nothing.
 
-**The sub-agent tier keeps tokens.** `budget.Config` (steps + input tokens +
-output tokens + notice ratio) is unchanged and now applies to the Task tier only:
-it bounds one investigation's share of a turn, and the money ceiling on the root
-already bounds what the whole tree may cost. Input and output stay separate
-because output tokens cost several times what input tokens do.
+**The sub-agent tier keeps tokens AND takes money.** `budget.Config` (steps +
+input tokens + output tokens + notice ratio) applies to the Task tier, and
+`Config.Limiter` takes the same `LimitResolver` the root tier does, reading the
+same metadata key — so one resolver serves both tiers. Input and output stay
+separate because output tokens cost several times what input tokens do.
+
+**A child's money allowance is currently the ROOT's, inherited unchanged.**
+`spawnChild` copies the parent's metadata, so each child is judged against the
+run's whole budget measured on its OWN metrics: one child cannot exceed the run's
+budget, but a round of up to five together can. This tier therefore bounds one
+child, not a round. Giving each child a share of what is left — allocated by the
+planner when it defines the task — is a separate change; do not describe the
+current state as bounding a round.
+
+**MONEY NEVER STOPS A RUN.** A crossed money ceiling answers `LimitKindNotice`,
+and keeps answering it however far past the budget the run lands. Stop is read at
+the transition boundary and fails the Process WITHOUT calling `Step`, so it is the
+one verdict after which a run can do nothing — not the tool call its turn was for,
+not a word about what it already did. What ends a run out of money is the
+STRATEGY reading that notice and making its two reserve moves.
+
+**A budget bounds what a run may spend before it must conclude; it does not bound
+what the run is charged.** Three things are spent on top of it: the overshoot
+already committed when the notice was first observed (the fold makes that
+routinely large — the run this was written for saw $2.31 of $2.00), the reserve's
+two calls, and — if the model does not do what the reserve asks, which is a prompt
+and not a gate — everything up to the step or token ceiling.
+
+Two things follow:
+
+- **Steps and tokens must stay `LimitKindStop`.** With money answering only
+  notices they are the only thing that can end a run whose strategy does not end
+  itself. Do not "make them consistent" by turning them into notices too.
+- **The unpriced-run Stop is not the same condition.** `LimitStop("this run has
+  no priced budget")` fires when the budget or the rate cannot be resolved at all,
+  and stays a Stop in both tiers: there is no figure for the run to conclude
+  against.
 
 Three properties of the money path a change here must preserve:
 
@@ -927,12 +959,19 @@ its post has done nothing, whatever it managed to say.
 
 Five consequences to keep in mind:
 
-- **A ceiling produces `LimitKindStop`, the notice threshold produces
-  `LimitKindNotice`, and Stop wins when both apply.** Stop is read at the
-  transition boundary and fails the Process WITHOUT calling `Step`
-  (`worker.go`, `driveClaim`), so nothing can run after it — the reserve is the
-  only place a run gets to finish what it started, and it exists before the Stop
-  rather than after it.
+- **A step or token ceiling produces `LimitKindStop`; the money ceiling and every
+  notice threshold produce `LimitKindNotice`; and Stop wins when both apply.**
+  Among the notices, a CROSSED ceiling outranks an approached one, so money
+  exhausted is reported ahead of the step and token thresholds and money
+  approached behind them — the money one is the only ceiling that will never stop
+  the run by itself.
+  Crossing the notice threshold is a hint rather than the last warning: a child
+  folds its whole spend into its parent in one write, so a run can pass from under
+  the fraction to past the budget between two of its own transitions and never be
+  told "nearly". That is why crossing the budget itself is a notice too — it is
+  the same instruction, arriving at the only moment such a run got. Pinned by
+  `TestAnOverspentRunIsNeverStoppedByItsBudget` (budget) and
+  `TestASpentBudgetWrapsTheRunUpInsteadOfFailingIt` (planexec).
 - **A Strategy that observes a notice makes two moves, and the instruction flips
   between them.** The first says "THIS turn is your final tool call, do not write
   your result yet"; the call carrying that tool's result says "call nothing more,
@@ -980,7 +1019,12 @@ Five consequences to keep in mind:
     the ceiling to far past it between two of its own transitions. The
     per-transition `Limit` check (`worker.go`, `driveClaim` → `callLimit`) cannot
     prevent that; it only reports it afterwards. A "step budget exhausted (122/64)"
-    is not a bug in the accounting — it is this fold.
+    is not a bug in the accounting — it is this fold. It is also why the money
+    ceiling answers a notice rather than a Stop: the jump routinely lands past the
+    budget, and a Stop there ends the run with its children's work done and
+    nothing said. A run that reported "cost budget exhausted ($2.31/$2.00)" as a
+    FAILURE, after its sub-agents had already written what it was for, is what
+    produced that rule.
 
   Pinned by `TestAChildsStepsAreChargedToItsParent` and
   `TestAParentIsStoppedByItsChildrensSpend` in

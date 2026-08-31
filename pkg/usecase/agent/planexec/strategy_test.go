@@ -21,6 +21,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // caseDraft is a structured terminal output, standing in for a host that ends its
@@ -170,6 +171,20 @@ func generousBudget() budget.Config {
 	return budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 }
 
+// testSpend is what these runs are judged against in money. A limiter with no
+// resolver stops every run, so one is required even where the test is about a
+// step ceiling; this prices a run far below its allowance so the money arm stays
+// out of the way. A test about the money ceiling passes its own through
+// newRuntimeWithSpend.
+func testSpend() budget.LimitResolver {
+	return func(*agentkit.Process) budget.RunLimit {
+		return budget.RunLimit{
+			Budget: pricing.FromUSD(1000),
+			Rate:   pricing.Rate{Input: 1, Output: 1},
+		}
+	}
+}
+
 // newTextRuntime registers a text-only plan-execute agent plus the task agent its
 // children run as, on a real Kernel.
 func newTextRuntime(t *testing.T, llm gollem.LLMClient, cfg budget.Config,
@@ -184,15 +199,25 @@ func newRuntime[T planexec.Validatable](t *testing.T, llm gollem.LLMClient, cfg 
 	progress planexec.Progress, factory agentkit.ToolFactory, pcfg planexec.Config[T],
 ) *planexecRuntime {
 	t.Helper()
+	return newRuntimeWithSpend(t, llm, cfg, testSpend(), progress, factory, pcfg)
+}
+
+// newRuntimeWithSpend is newRuntime with the money resolver named, for a test
+// about the money ceiling rather than the step one.
+func newRuntimeWithSpend[T planexec.Validatable](t *testing.T, llm gollem.LLMClient,
+	cfg budget.Config, spend budget.LimitResolver,
+	progress planexec.Progress, factory agentkit.ToolFactory, pcfg planexec.Config[T],
+) *planexecRuntime {
+	t.Helper()
 
 	store := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(),
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(spend),
 		agentkit.WithHistoryStore[react.Output](store))
 	gt.NoError(t, err).Required()
 
 	handle, err := planexec.Register(reg, agentkernel.AgentProposal, 1, taskAgent, progress,
-		cfg.Limiter(), pcfg, agentkit.WithHistoryStore[planexec.Output[T]](store))
+		cfg.Limiter(spend), pcfg, agentkit.WithHistoryStore[planexec.Output[T]](store))
 	gt.NoError(t, err).Required()
 
 	opts := []agentkit.KernelOption{}
@@ -651,6 +676,85 @@ func TestBudgetNoticeWrapsTheRunUp(t *testing.T) {
 	gt.Array(t, prompts).Length(3).Required()
 	gt.Bool(t, strings.Contains(prompts[0], "reserve")).False()
 	gt.String(t, prompts[2]).Contains("THIS turn is your final tool call")
+}
+
+// TestASpentBudgetWrapsTheRunUpInsteadOfFailingIt is the regression test for the
+// Job run that ended as FAILED with "cost budget exhausted ($2.31/$2.00)".
+//
+// Its four sub-agents had already created and updated the knowledge entries the
+// Job existed to write; what the run lost was the transition in which it would
+// have said so. That happened because the money ceiling answered LimitStop, which
+// agentkit reads at the transition boundary and acts on WITHOUT calling Step — so
+// the planner never reached stepReplan, never saw a notice, and never produced a
+// terminal output.
+//
+// Here the same thing happens to the money — the budget is spent before the first
+// round even finishes — and the run must still reach its terminal output and
+// succeed. The steps ceiling is far out of reach so that only the money arm can
+// produce the verdict under test.
+func TestASpentBudgetWrapsTheRunUpInsteadOfFailingIt(t *testing.T) {
+	// The write the Job existed for. In production this was knowledge__create_knowledge,
+	// which had already succeeded when the run was killed.
+	writer := &recordingTool{name: "knowledge__create_knowledge"}
+	planner := &toolCallingPlanner{replies: []any{
+		// 1: the parent plans one task.
+		`{"tasks":[{"id":"t1","title":"Record","description":"record it","acceptance_criteria":"the entry exists","tools":["slack_ro"]}]}`,
+		// 2-3: the child performs the write and reports it.
+		&gollem.FunctionCall{ID: "w1", Name: "knowledge__create_knowledge", Arguments: map[string]any{"title": "e"}},
+		`recorded the entry`,
+		// No replan reply is scripted: reaching one would fail the test, which is
+		// how the run is pinned to going straight to the terminal call.
+		// 4: the terminal output.
+		`what the sub-agent recorded`,
+	}}
+	// The arithmetic is what makes this the production shape rather than an
+	// ordinary notice. Every call reports 5 input and 3 output tokens, so each
+	// costs 8 NanoUSD at this rate against a 20-NanoUSD allowance whose notice
+	// threshold is 16:
+	//
+	//   - the parent's own plan call leaves it at 8 — under the threshold, so it
+	//     is never told anything and plans a full round;
+	//   - the child spends 16 of its own, also under the threshold, so it too runs
+	//     to completion and its write lands;
+	//   - the child's 16 is then folded into the parent in ONE write, taking it to
+	//     24 — past the whole budget, having never seen "nearly".
+	//
+	// That jump is what used to answer LimitStop and kill the run with the write
+	// already done and nothing said about it.
+	crossedByTheFold := func(*agentkit.Process) budget.RunLimit {
+		return budget.RunLimit{Budget: 20, Rate: pricing.Rate{Input: 1, Output: 1}}
+	}
+	cfg := budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+	rt := newRuntimeWithSpend(t, planner.client(), cfg, crossedByTheFold, nil,
+		func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
+			return []gollem.Tool{writer}, nil
+		},
+		planexec.Config[planexec.TextResult]{TextOnly: true})
+
+	proc := rt.run(t, textInput(), nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	gt.Value(t, proc.Failure).Nil()
+
+	// The write happened once, and the run got to report it. Losing the second
+	// half while keeping the first is the whole of the production failure.
+	gt.Array(t, writer.calls()).Length(1)
+	out := decodeText(t, proc.Output)
+	gt.Value(t, out.Kind).Equal(planexec.OutputFinal)
+	gt.String(t, out.Text).Contains("what the sub-agent recorded")
+
+	// Four calls: plan, the child's two, the terminal output. No replan — the
+	// reserve diverts stepReplan to the terminal call without generating, so no
+	// further round is started on a budget that is already gone.
+	prompts := planner.systemSeen()
+	gt.Array(t, prompts).Length(4).Required()
+	// Neither the parent's plan call nor either of the child's crossed anything on
+	// its own: only their sum did. This is what distinguishes the fold from an
+	// ordinary notice, and it is observable — a reserve instruction on any of the
+	// first three would mean the run was warned before the fold.
+	gt.Bool(t, strings.Contains(prompts[0], "reserve")).False()
+	gt.Bool(t, strings.Contains(prompts[1], "reserve")).False()
+	gt.Bool(t, strings.Contains(prompts[2], "reserve")).False()
+	gt.String(t, prompts[3]).Contains("THIS turn is your final tool call")
 }
 
 // TestTheReserveAllowsATerminalToolCall pins the two moves the reserve is for on
@@ -1618,7 +1722,7 @@ func TestRenderAnswersLabelsEachAnswer(t *testing.T) {
 func TestRegisterRequiresALimiterAndATaskAgent(t *testing.T) {
 	reg := agentkit.NewRegistry()
 	cfg := generousBudget()
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter())
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend()))
 	gt.NoError(t, err).Required()
 
 	_, err = planexec.Register(reg, agentkernel.AgentProposal, 1, taskAgent, nil, nil,
@@ -1626,7 +1730,7 @@ func TestRegisterRequiresALimiterAndATaskAgent(t *testing.T) {
 	gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
 
 	_, err = planexec.Register(reg, agentkernel.AgentWorkspace, 1,
-		agentkit.Agent[react.Input]{}, nil, cfg.Limiter(),
+		agentkit.Agent[react.Input]{}, nil, cfg.Limiter(testSpend()),
 		planexec.Config[planexec.TextResult]{TextOnly: true})
 	gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
 }

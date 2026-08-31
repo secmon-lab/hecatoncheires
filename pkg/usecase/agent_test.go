@@ -291,7 +291,7 @@ func bindAgentRuntimeWithoutWorker(t *testing.T, d agentRuntimeDeps) *agentkit.K
 	history := agentarchive.NewMemoryHistoryStore()
 	reg := agentkit.NewRegistry()
 	models := testAgentModelPolicy(t)
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(), history)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, testAgentBudget.Limiter(models.Resolve), history)
 	gt.NoError(t, err).Required()
 	gt.NoError(t, d.UC.RegisterAgents(reg, testAgentRootBudget.Limiter(models.Resolve), models,
 		history, procRepo, taskAgent)).Required()

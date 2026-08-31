@@ -538,7 +538,7 @@ func bindDurableJobRuntime(
 	root := budget.Root{MaxSteps: cfg.MaxSteps, NoticeRatio: cfg.NoticeRatio}
 	models := testModelPolicy(t)
 	reg := agentkit.NewRegistry()
-	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(), durable.History)
+	taskAgent, tErr := agentkernel.RegisterTaskAgent(reg, cfg.Limiter(models.Resolve), durable.History)
 	gt.NoError(t, tErr).Required()
 	gt.NoError(t, durable.Register(reg, root.Limiter(models.Resolve), taskAgent)).Required()
 

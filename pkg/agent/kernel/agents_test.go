@@ -95,12 +95,12 @@ func TestRegisterTaskAgentIsRegisteredOnce(t *testing.T) {
 	cfg := budget.Config{MaxSteps: 8, MaxInputTokens: 1000, MaxOutputTokens: 1000, NoticeRatio: 0.8}
 	store := agentarchive.NewMemoryHistoryStore()
 
-	handle, err := kernel.RegisterTaskAgent(reg, cfg.Limiter(), store)
+	handle, err := kernel.RegisterTaskAgent(reg, cfg.Limiter(testSpend()), store)
 	gt.NoError(t, err).Required()
 	gt.Value(t, handle.Name()).Equal(kernel.AgentTask)
 
 	// A second registration under the same name is refused rather than silently
 	// replacing the first.
-	_, err = kernel.RegisterTaskAgent(reg, cfg.Limiter(), store)
+	_, err = kernel.RegisterTaskAgent(reg, cfg.Limiter(testSpend()), store)
 	gt.Error(t, err).Required()
 }

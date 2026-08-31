@@ -1052,7 +1052,7 @@ prompt = "Post a status digest to the case Slack channel."
 | `interactive` | bool     | no       | Defaults to `false`. Set `true` to let the Job pause mid-run and ask the user a question in Slack, resuming when they answer. **Requires `strategy = "planexec"`.** See *Interactive Jobs* below. |
 | `reflection`  | bool     | no       | Defaults to `false`. Set `true` to run a post-execution reflection pass after a successful run. See *Reflection* below. |
 | `llm_model`   | string   | no       | Reference name of an `[[llm_model]]` entry in the global config (its `alias`, or its `model`). Empty uses the deployment's default model. A name no entry defines fails at startup and in `validate`. See *Model definitions* below. |
-| `budget_usd`  | float    | no       | Greatest amount in USD one run of this Job may spend, sub-agents included. Omitted (or `0`) uses the deployment's default budget. See *Model definitions* below. |
+| `budget_usd`  | float    | no       | Amount in USD one run of this Job may spend, sub-agents included, before it is told to conclude. It is **not** a bound on what the run is charged — see [cli.md](./cli.md#agent-runtime-budgets) for the three things spent on top of it. Omitted (or `0`) uses the deployment's default budget. See *Model definitions* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
 
@@ -1639,7 +1639,7 @@ model nobody names costs nothing.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `default_budget_usd` | float | No | What one agent run may spend, sub-agents included, when the Job names no `budget_usd`. Must not be negative |
+| `default_budget_usd` | float | No | What one agent run may spend, sub-agents included, before it is told to conclude, when the Job names no `budget_usd`. Not a hard ceiling — see [cli.md](./cli.md#agent-runtime-budgets). Must not be negative |
 
 The effective budget for a run is resolved in this order, narrowest first:
 

@@ -591,7 +591,7 @@ func cmdServe() *cli.Command {
 				// The per-task sub-agent is registered once and shared: agentkit keys
 				// a Process on the agent name, so a second registration would fail.
 				taskAgent, tErr := agentkernel.RegisterTaskAgent(agentRegistry,
-					budgets.Task.Limiter(), processHistory)
+					budgets.Task.Limiter(modelSetup.Policy.Resolve), processHistory)
 				if tErr != nil {
 					return goerr.Wrap(tErr, "failed to register the task sub-agent")
 				}
