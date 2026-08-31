@@ -224,9 +224,22 @@ bound what you are charged.** Three things land on top of it:
 - everything up to the step or token ceiling, if the model does not do what the
   reserve asks. The instruction is a prompt, not a gate.
 
-Sub-agents are judged against money too, but each one currently inherits the
-run's whole budget and is measured on its own spend: one sub-agent cannot exceed
-the run's budget by itself, while a round of up to five of them together can.
+**Each sub-agent's share is decided by the planner.** When it plans a round, the
+planner is told what the run has left and states an amount for every task; the
+runtime rejects the plan unless each amount is positive, no single amount exceeds
+what is left, and they add up to no more than what is left. Each sub-agent is then
+given exactly its stated share, so the heavy task can have the larger one — which
+an even split could not do.
+
+What this bounds is the round's **allocations**, not its spend. Two things sit
+between the two: the figure is read before the planning call that itself costs
+something, and a sub-agent that crosses its share is told to conclude rather than
+stopped, exactly as the run is. `--agent-max-steps` and `--agent-task-max-*`
+remain the only hard bounds.
+
+A sub-agent that spends its share is told to conclude, exactly as the run is: it
+makes its final tool call and reports. A task given far too little therefore
+returns a thin answer rather than failing.
 
 What still stops a run outright is a **step or token** ceiling
 (`--agent-max-steps`, `--agent-task-max-*`), and a run whose budget or model price

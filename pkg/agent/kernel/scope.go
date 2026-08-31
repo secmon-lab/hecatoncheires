@@ -302,6 +302,28 @@ func WithToolSets(parent map[string]string, toolSets []string) map[string]string
 	return next
 }
 
+// WithBudget returns a copy of the metadata map carrying a different spend
+// ceiling. It is the counterpart of WithToolSets for the other thing a strategy
+// decides about a child it is spawning, and it copies for the same reason:
+// SpawnChild's WithMetadata REPLACES the parent's map.
+//
+// A zero or negative amount REMOVES the key. That reads back as "not specified"
+// and hands the child the deployment default — the same meaning Scope.Metadata
+// gives an unset budget, so the two cannot disagree about what an absent key
+// means.
+func WithBudget(parent map[string]string, amount pricing.NanoUSD) map[string]string {
+	next := maps.Clone(parent)
+	if next == nil {
+		next = map[string]string{}
+	}
+	if amount > 0 {
+		next[metaBudget] = strconv.FormatInt(int64(amount), 10)
+	} else {
+		delete(next, metaBudget)
+	}
+	return next
+}
+
 func joinToolSets(ids []string) string {
 	kept := make([]string, 0, len(ids))
 	for _, id := range ids {

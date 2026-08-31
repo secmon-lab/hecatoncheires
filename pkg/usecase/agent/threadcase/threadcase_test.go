@@ -60,7 +60,7 @@ func newThreadCase() *model.Case {
 // investigatePlan is the round-1 plan that runs one read-only sub-agent.
 // Thread-mode manages no Actions, so the planner is offered no core (action)
 // toolset; the read-only Slack toolset stands in.
-const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1","title":"Review thread","description":"Review the message","acceptance_criteria":"reviewed","tools":["slack_ro"]}]}`
+const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1","title":"Review thread","description":"Review the message","acceptance_criteria":"reviewed","tools":["slack_ro"],"budget_usd":0.01}]}`
 
 // replanDone terminates the loop. Under the explicit-finalize design an empty
 // tasks list no longer signals completion; the planner must emit `finalize`.

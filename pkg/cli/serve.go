@@ -618,7 +618,7 @@ func cmdServe() *cli.Command {
 				// Cloud Storage does not have.
 				if uc.MentionProposal != nil {
 					d, dErr := proposal.NewDurable(repo, registry,
-						uc.MentionProposal.DurableDraftHost(), locator)
+						uc.MentionProposal.DurableDraftHost(), locator, modelSetup.Policy)
 					if dErr != nil {
 						return goerr.Wrap(dErr, "failed to build the case-draft agent")
 					}

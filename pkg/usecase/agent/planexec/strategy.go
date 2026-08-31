@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/toolargs"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // Phases. A transition reads the phase, does one thing, and writes the phase it
@@ -225,6 +226,20 @@ type Config[T Validatable] struct {
 	// TextOnly generates the terminal output as prose instead of JSON and puts it
 	// in Output.Text.
 	TextOnly bool
+	// Remaining reports what this run may still spend and the total it was
+	// allowed, so the planner can size the tasks it plans and each child can be
+	// given a ceiling of its own.
+	//
+	// It is a function rather than a value because a strategy is registered once
+	// at startup and then serves every run: the figures come from the run's own
+	// metadata and metrics, never from anything a registration could close over.
+	// Same reason Finalizers take the run's metadata.
+	//
+	// nil turns the per-task budget off entirely: the planner is shown no budget
+	// line, `budget_usd` leaves the task schema and is not validated, and a child
+	// is spawned with the metadata it would have had otherwise — its parent's, so
+	// it is judged against the ROOT figure on its own metrics.
+	Remaining func(meta map[string]string, metrics agentkit.Metrics) (remaining, total pricing.NanoUSD)
 }
 
 // observationsMaxBytes bounds the checkpointed observation trail.
@@ -398,7 +413,14 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 
 	st = s.note(ctx, st, "🧭 Planning")
 
-	prompt, err := s.plannerPrompt(st)
+	// Read ONCE, before the generate, and used for both the line the planner is
+	// told and the bound its plan is validated against. Re-reading it after the
+	// call would validate against a figure smaller than the one the planner was
+	// given — by the cost of that very call — and reject a plan that did exactly
+	// what it was told.
+	remaining, total, budgeted := s.remainingBudget(sys)
+
+	prompt, err := s.plannerPrompt(st, budgetLine(remaining, total, budgeted))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
@@ -406,6 +428,7 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 	schema := planSchema(schemaOptions{
 		knownToolIDs: st.Input.KnownToolIDs,
 		allowDirect:  st.Input.AllowDirect,
+		withBudget:   budgeted,
 	})
 
 	res, err := sys.Session().Generate(ctx, plannerInput(st),
@@ -426,7 +449,7 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 	}
 
 	plan, perr := parsePlanResult([]byte(strings.Join(res.Texts, "\n")),
-		st.Input.KnownToolIDs, st.Input.AllowDirect)
+		st.Input.KnownToolIDs, st.Input.AllowDirect, budgetBound(remaining, budgeted))
 	if perr != nil {
 		st = s.carryCorrection(ctx, st, perr, "planexec: planner output rejected")
 		return st, agentkit.Continue[Output[T]](), nil
@@ -690,13 +713,18 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 
 	st = s.note(ctx, st, "🧭 Re-planning")
 
-	prompt, err := s.plannerPrompt(st)
+	// See stepPlan: read once, before the generate, and shared by the line the
+	// planner is told and the bound its plan is validated against.
+	remaining, total, budgeted := s.remainingBudget(sys)
+
+	prompt, err := s.plannerPrompt(st, budgetLine(remaining, total, budgeted))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
 	schema := replanSchema(schemaOptions{
 		knownToolIDs:  st.Input.KnownToolIDs,
 		allowQuestion: st.Input.AllowQuestion,
+		withBudget:    budgeted,
 	})
 
 	res, err := sys.Session().Generate(ctx, plannerInput(st),
@@ -714,7 +742,7 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 	}
 
 	rr, perr := parseReplanResult([]byte(strings.Join(res.Texts, "\n")),
-		st.Input.KnownToolIDs, st.Input.AllowQuestion)
+		st.Input.KnownToolIDs, st.Input.AllowQuestion, budgetBound(remaining, budgeted))
 	if perr != nil {
 		st = s.carryCorrection(ctx, st, perr, "planexec: replanner output rejected")
 		return st, agentkit.Continue[Output[T]](), nil
@@ -860,7 +888,9 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 	// prompt, which reaches this call whether or not it sends a user turn — so it
 	// must not be prepended to userPrompt as well, or the same instruction arrives
 	// twice on the calls that do send one.
-	prompt, err := s.plannerPrompt(st)
+	// The terminal call gets the line too: it is the one call that may still ask
+	// for a tool, so it has to know what is left to spend on one.
+	prompt, err := s.plannerPrompt(st, budgetLine(s.remainingBudget(sys)))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
@@ -1027,6 +1057,8 @@ func (s *strategy[T]) launchRound(ctx context.Context, sys agentkit.Syscalls, st
 		tasks = tasks[:maxTasksPerPhase]
 	}
 
+	_, _, budgeted := s.remainingBudget(sys)
+
 	refs := make([]taskRef, 0, len(tasks))
 	ids := make([]agentkit.ProcessID, 0, len(tasks))
 	for _, task := range tasks {
@@ -1039,8 +1071,11 @@ func (s *strategy[T]) launchRound(ctx context.Context, sys agentkit.Syscalls, st
 		if description == "" {
 			description = task.Title
 		}
+		// Validated as positive and as summing to no more than the remaining
+		// allowance, by the parser that produced these tasks.
+		allowance := budgetBound(pricing.FromUSD(task.BudgetUSD), budgeted)
 		pid, err := s.spawnChild(ctx, sys, task.ID,
-			react.Input{SystemPrompt: prompt, Prompt: description}, task.Tools)
+			react.Input{SystemPrompt: prompt, Prompt: description}, task.Tools, allowance)
 		if err != nil {
 			return st, agentkit.Decision[Output[T]]{}, err
 		}
@@ -1080,8 +1115,13 @@ func (s *strategy[T]) launchDirect(ctx context.Context, sys agentkit.Syscalls, s
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(err, "planexec: build the direct prompt")
 	}
+	// The direct path spawns ONE child whose text is the turn's reply, so there is
+	// nothing to divide the remaining allowance between and no planner decision to
+	// respect: it gets all of it.
+	remaining, _, budgeted := s.remainingBudget(sys)
 	pid, err := s.spawnChild(ctx, sys, directTaskID,
-		react.Input{SystemPrompt: prompt, Prompt: st.Input.UserInput}, plan.Tools)
+		react.Input{SystemPrompt: prompt, Prompt: st.Input.UserInput}, plan.Tools,
+		budgetBound(remaining, budgeted))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
@@ -1101,15 +1141,20 @@ func (s *strategy[T]) launchDirect(ctx context.Context, sys agentkit.Syscalls, s
 // user-facing reply one — and a swap between the two would compile, then be
 // visible only in what the model wrote.
 func (s *strategy[T]) spawnChild(ctx context.Context, sys agentkit.Syscalls,
-	label string, input react.Input, tools []string,
+	label string, input react.Input, tools []string, budget *pricing.NanoUSD,
 ) (agentkit.ProcessID, error) {
 	// WithToolSets rebuilds the parent's metadata map with only the toolsets
 	// replaced. SpawnChild's WithMetadata REPLACES the map rather than merging
 	// into it, so building a fresh one here would drop the workspace and case the
 	// child needs to have any tools at all.
-	pid, err := s.taskAgent.SpawnChild(ctx, sys, input,
-		agentkit.WithMetadata(agentkernel.WithToolSets(sys.Metadata(), tools)),
-	)
+	meta := agentkernel.WithToolSets(sys.Metadata(), tools)
+	// A nil budget leaves the parent's own figure in place, which is what a host
+	// that wired no Config.Remaining gets: the child is judged against the run's
+	// budget on its own metrics.
+	if budget != nil {
+		meta = agentkernel.WithBudget(meta, *budget)
+	}
+	pid, err := s.taskAgent.SpawnChild(ctx, sys, input, agentkit.WithMetadata(meta))
 	if err != nil {
 		return "", goerr.Wrap(err, "planexec: spawn the task", goerr.V("task_id", label))
 	}
@@ -1232,8 +1277,66 @@ func roundSummaryLine(round int, results []TaskResult) string {
 	return fmt.Sprintf("⚠️ Round %d: %d done, %d failed", round, done, failed)
 }
 
+// budgetPrefix renders the line that tells the planner what the run may still
+// spend, and out of what.
+//
+// It goes in the SYSTEM prompt, like the reserve instruction and for the same
+// reason: the planning call that follows a tool round sends no user turn, so a
+// figure the planner has to have cannot ride on one.
+//
+// It replaces budget.Config.Prefix, which was declared and never called while
+// prompts/planner.md described the format it would have produced — so the
+// planner was told to plan against a line it never received.
+func budgetPrefix(remaining, total pricing.NanoUSD) string {
+	return fmt.Sprintf("[budget] remaining %s of %s", remaining.USD(), total.USD())
+}
+
+// remainingBudget answers what this run may still spend, and whether the host
+// asked for per-task budgets at all. ok is false when Config.Remaining is nil.
+//
+// It is read at the moment of the call rather than carried on the checkpointed
+// state, because a round's children can spend a great deal between two of the
+// parent's transitions and a stale figure would be divided up as if they had not.
+func (s *strategy[T]) remainingBudget(sys agentkit.Syscalls) (remaining, total pricing.NanoUSD, ok bool) {
+	if s.cfg.Remaining == nil {
+		return 0, 0, false
+	}
+	remaining, total = s.cfg.Remaining(sys.Metadata(), sys.Metrics())
+	// Floored to the cent because this ONE figure is both shown to the planner and
+	// enforced against its plan. A raw amount is shown rounded to the nearest cent
+	// and can therefore read higher than it is, and a plan allocating exactly what
+	// the planner was told it had would then be rejected — costing a planner call
+	// per attempt, paid out of the very allowance being divided.
+	return remaining.FloorCent(), total, true
+}
+
+// budgetLine is what the planner is told about its allowance, or "" when the host
+// wired none.
+func budgetLine(remaining, total pricing.NanoUSD, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return budgetPrefix(remaining, total)
+}
+
+// budgetBound turns remainingBudget's pair into what the parsers take: a pointer
+// that is nil when per-task budgets are off. It exists so the nil is produced in
+// ONE place — a caller writing `&remaining` on the wrong branch would enforce a
+// zero allowance and reject every plan.
+func budgetBound(remaining pricing.NanoUSD, ok bool) *pricing.NanoUSD {
+	if !ok {
+		return nil
+	}
+	return &remaining
+}
+
 // plannerPrompt renders the planner system prompt for the run's input.
-func (s *strategy[T]) plannerPrompt(st state) (string, error) {
+//
+// budgetLine is the allowance line to include, or "" for none. It is passed in
+// rather than read here so this stays a pure function of its arguments: the
+// figure comes from the run's live metrics, and reaching for them inside a
+// renderer would make the renderer untestable without a Kernel.
+func (s *strategy[T]) plannerPrompt(st state, budgetLine string) (string, error) {
 	prompt, err := renderPlannerSystemPrompt(plannerPromptInput{
 		HostPrompt:          st.Input.SystemPrompt,
 		Language:            st.Input.LanguageLabel,
@@ -1242,9 +1345,16 @@ func (s *strategy[T]) plannerPrompt(st state) (string, error) {
 		AllowDirect:         st.Input.AllowDirect,
 		StructuredFinal:     !s.cfg.TextOnly,
 		AllowSubAgentWrites: st.Input.AllowSubAgentWrites,
+		AllocatesBudget:     budgetLine != "",
 	})
 	if err != nil {
 		return "", goerr.Wrap(err, "planexec: render the planner prompt")
+	}
+	// Before the notices below, because it is a fact the planner reasons FROM
+	// rather than an instruction: the reserve instruction that may follow it says
+	// what to do now that the figure is what it is.
+	if budgetLine != "" {
+		prompt += "\n\n" + budgetLine
 	}
 	// The tool allowance is spent: say so here rather than as a user turn. The call
 	// that has to hear it is the one following the tool phase, and that call sends

@@ -278,3 +278,61 @@ func TestWithToolSetsNilParent(t *testing.T) {
 	child := kernel.WithToolSets(nil, []string{"slack_ro"})
 	gt.Array(t, kernel.ScopeFrom(child).ToolSets).Equal([]string{"slack_ro"})
 }
+
+// TestWithBudget pins the same property for the other thing a spawn decides: the
+// child's map carries the parent's scope forward and differs only in the spend
+// ceiling. A rebuilt map would leave the child with no workspace and therefore no
+// tools.
+func TestWithBudget(t *testing.T) {
+	parent := kernel.Scope{
+		WorkspaceID: "ws-1",
+		CaseID:      7,
+		ChannelID:   "C1",
+		ThreadTS:    "1.1",
+		ActorUserID: "U1",
+		LLMModel:    "cheap",
+		ToolSets:    []string{"slack_ro"},
+		Budget:      pricing.FromUSD(2),
+	}.Metadata()
+
+	child := kernel.WithBudget(parent, pricing.FromUSD(0.25))
+	childScope := kernel.ScopeFrom(child)
+
+	gt.Value(t, childScope.Budget).Equal(pricing.FromUSD(0.25))
+	gt.String(t, childScope.WorkspaceID).Equal("ws-1")
+	gt.Value(t, childScope.CaseID).Equal(int64(7))
+	gt.String(t, childScope.ActorUserID).Equal("U1")
+	// The model reference must survive: it is what the child's own spend is priced
+	// at, so losing it would meter the child at the default model's rate.
+	gt.String(t, childScope.LLMModel).Equal("cheap")
+	gt.Array(t, childScope.ToolSets).Equal([]string{"slack_ro"})
+
+	// The parent's own map must not have been rewritten.
+	gt.Value(t, kernel.ScopeFrom(parent).Budget).Equal(pricing.FromUSD(2))
+}
+
+// TestWithBudgetNonPositiveRemovesTheKey pins that a zero or negative amount
+// reads back as "not specified" rather than as a zero allowance. Scope.Metadata
+// omits an unset budget the same way, so the two cannot disagree about what an
+// absent key means — and a stored literal zero would be resolved as a budget of
+// nothing, stopping the child as unpriced.
+func TestWithBudgetNonPositiveRemovesTheKey(t *testing.T) {
+	parent := kernel.Scope{
+		WorkspaceID: "ws-1", ToolSets: []string{"slack_ro"}, Budget: pricing.FromUSD(2),
+	}.Metadata()
+
+	for name, amount := range map[string]pricing.NanoUSD{"zero": 0, "negative": -1} {
+		t.Run(name, func(t *testing.T) {
+			child := kernel.WithBudget(parent, amount)
+			gt.Map(t, child).NotHasKey("budget_nano_usd")
+			gt.Value(t, kernel.ScopeFrom(child).Budget).Equal(pricing.NanoUSD(0))
+			// Everything else is still there.
+			gt.String(t, kernel.ScopeFrom(child).WorkspaceID).Equal("ws-1")
+		})
+	}
+}
+
+func TestWithBudgetNilParent(t *testing.T) {
+	child := kernel.WithBudget(nil, pricing.FromUSD(0.5))
+	gt.Value(t, kernel.ScopeFrom(child).Budget).Equal(pricing.FromUSD(0.5))
+}

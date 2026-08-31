@@ -26,17 +26,32 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
+// testModelPolicy is the one-model policy these turns are priced at: $1 / $5 per
+// MTok against a $100 budget, far above anything they spend. It answers both what
+// a run is judged against and what it may still spend, so the limiter and the
+// planner's allowance cannot disagree.
+func testModelPolicy(t *testing.T) agentkernel.ModelPolicy {
+	t.Helper()
+	p, err := agentkernel.NewModelPolicy(agentkernel.ModelPolicyInput{
+		Defs: []agentkernel.ModelDef{{
+			Ref:      "test",
+			Provider: agentkernel.ProviderClaude,
+			Model:    "test-model",
+			Rate:     pricing.Rate{Input: 1000, Output: 5000},
+		}},
+		DefaultRef:    "test",
+		DefaultBudget: pricing.FromUSD(100),
+	})
+	gt.NoError(t, err).Required()
+	return p
+}
+
 // testSpend is what these runs are judged against in money. A limiter with no
 // resolver stops every run, so one is required even though these tests are about
-// what the workspace agent replies rather than what it costs; the allowance is
-// far above anything they spend.
-func testSpend() budget.LimitResolver {
-	return func(*agentkit.Process) budget.RunLimit {
-		return budget.RunLimit{
-			Budget: pricing.FromUSD(1000),
-			Rate:   pricing.Rate{Input: 1, Output: 1},
-		}
-	}
+// what the workspace agent replies rather than what it costs.
+func testSpend(t *testing.T) budget.LimitResolver {
+	t.Helper()
+	return testModelPolicy(t).Resolve
 }
 
 const (
@@ -211,16 +226,16 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 
 	host := &recordingHost{}
 	progress := &recordingProgress{}
-	wa, err := wsagent.NewDurable(host, locator)
+	wa, err := wsagent.NewDurable(host, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	store := agentarchive.NewMemoryHistoryStore()
 	cfg := budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend()),
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend(t)),
 		agentkit.WithHistoryStore[react.Output](store))
 	gt.NoError(t, err).Required()
-	gt.NoError(t, wa.Register(reg, taskAgent, progress, cfg.Limiter(testSpend()), store)).Required()
+	gt.NoError(t, wa.Register(reg, taskAgent, progress, cfg.Limiter(testSpend(t)), store)).Required()
 
 	k, err := agentkit.New(procRepo, llm, reg,
 		agentkit.WithToolFactory(func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {
@@ -294,7 +309,7 @@ func TestDurableStartTurnPostsTheAnswer(t *testing.T) {
 	ctx := context.Background()
 	h := newDurableHarness(t, durableLLM(
 		// plan: one task
-		`{"tasks":[{"id":"t1","title":"List open cases","description":"list them","acceptance_criteria":"the open cases are listed","tools":["case_multi"]}]}`,
+		`{"tasks":[{"id":"t1","title":"List open cases","description":"list them","acceptance_criteria":"the open cases are listed","tools":["case_multi"],"budget_usd":0.01}]}`,
 		// the child task's answer
 		`case 3 and case 7 are open`,
 		// replan: finalize
@@ -396,7 +411,7 @@ func TestDurableStartTurnRefusesASecondTurnOnTheSameThread(t *testing.T) {
 	// One scripted reply: the first run parks mid-plan (its child never gets an
 	// answer) so the thread stays held while the second turn is attempted.
 	h := newDurableHarness(t, durableLLM(
-		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"],"budget_usd":0.01}]}`,
 	))
 
 	first, err := h.agent.StartTurn(ctx, durableRequest("1700000000.000202"))
@@ -419,7 +434,7 @@ func TestDurableStartTurnRefusesASecondTurnOnTheSameThread(t *testing.T) {
 func TestDurableStartTurnDropsARedeliveredTrigger(t *testing.T) {
 	ctx := context.Background()
 	h := newDurableHarness(t, durableLLM(
-		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"],"budget_usd":0.01}]}`,
 	))
 
 	req := durableRequest("1700000000.000204")
@@ -439,7 +454,7 @@ func TestDurableStartTurnDropsARedeliveredTrigger(t *testing.T) {
 func TestDurableStartTurnRecordsTheActorAndScope(t *testing.T) {
 	ctx := context.Background()
 	h := newDurableHarness(t, durableLLM(
-		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"]}]}`,
+		`{"tasks":[{"id":"t1","title":"Look","description":"look","acceptance_criteria":"looked","tools":["case_multi"],"budget_usd":0.01}]}`,
 	))
 
 	_, err := h.agent.StartTurn(ctx, durableRequest("1700000000.000205"))
@@ -494,7 +509,7 @@ func TestDurableStartTurnRequiresMentionText(t *testing.T) {
 
 // An unbound host must say so rather than panicking on a nil Kernel.
 func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
-	wa, err := wsagent.NewDurable(&recordingHost{}, nil)
+	wa, err := wsagent.NewDurable(&recordingHost{}, nil, agentkernel.ModelPolicy{})
 	gt.NoError(t, err).Required()
 
 	_, err = wa.StartTurn(context.Background(), durableRequest("1700000000.000208"))
@@ -502,6 +517,6 @@ func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
 }
 
 func TestNewDurableRequiresAHost(t *testing.T) {
-	_, err := wsagent.NewDurable(nil, nil)
+	_, err := wsagent.NewDurable(nil, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 }

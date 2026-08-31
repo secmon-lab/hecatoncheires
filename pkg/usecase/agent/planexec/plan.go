@@ -19,6 +19,8 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // Validation limits applied during parsePlanResult / parseReplanResult.
@@ -181,6 +183,9 @@ type QuestionResult struct {
 // Validate enforces TaskPlan invariants. KnownToolIDs is the
 // host-supplied allowlist (RunRequest.KnownToolIDs); every entry in
 // TaskPlan.Tools must be a member.
+// Validate checks one task's own shape. The per-task budget is NOT checked here:
+// its rules are stated against the round's remaining allowance, so they live in
+// validateTaskList where that figure is in hand.
 func (t *TaskPlan) Validate(knownToolIDs []string) error {
 	if t == nil {
 		return goerr.New("task plan is nil")
@@ -328,7 +333,9 @@ func (i *QuestionItem) Validate() error {
 // allowDirect=false (e.g. a host that has not opted in) rejects a direct
 // payload outright; the system prompt / schema should have suppressed the
 // option but the parser double-checks.
-func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool) (*PlanResult, error) {
+func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool,
+	remaining *pricing.NanoUSD,
+) (*PlanResult, error) {
 	body := extractJSONObject(raw)
 	var p PlanResult
 	if err := json.Unmarshal(body, &p); err != nil {
@@ -346,7 +353,7 @@ func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool) (*Plan
 		}
 		return &p, nil
 	}
-	if err := validateTaskList(p.Tasks, knownToolIDs); err != nil {
+	if err := validateTaskList(p.Tasks, knownToolIDs, remaining); err != nil {
 		return nil, err
 	}
 	return &p, nil
@@ -365,7 +372,9 @@ func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool) (*Plan
 //
 // allowQuestion=false (job host) rejects a question payload outright; the
 // system prompt should have suppressed the option but the parser double-checks.
-func parseReplanResult(raw []byte, knownToolIDs []string, allowQuestion bool) (*ReplanResult, error) {
+func parseReplanResult(raw []byte, knownToolIDs []string, allowQuestion bool,
+	remaining *pricing.NanoUSD,
+) (*ReplanResult, error) {
 	body := extractJSONObject(raw)
 	var r ReplanResult
 	if err := json.Unmarshal(body, &r); err != nil {
@@ -404,14 +413,21 @@ func parseReplanResult(raw []byte, knownToolIDs []string, allowQuestion bool) (*
 		return &r, nil
 	}
 	if hasTasks {
-		if err := validateTaskList(r.Tasks, knownToolIDs); err != nil {
+		if err := validateTaskList(r.Tasks, knownToolIDs, remaining); err != nil {
 			return nil, err
 		}
 	}
 	return &r, nil
 }
 
-func validateTaskList(tasks []TaskPlan, knownToolIDs []string) error {
+// validateTaskList checks one round's tasks.
+//
+// remaining is what the run may still spend, or nil when the host wired no
+// Config.Remaining and per-task budgets are therefore not in play. It is a
+// POINTER rather than a zero-means-unchecked figure because zero is a legitimate
+// remaining allowance, and reading it as "do not check" would silently drop the
+// check exactly when it matters most.
+func validateTaskList(tasks []TaskPlan, knownToolIDs []string, remaining *pricing.NanoUSD) error {
 	if n := len(tasks); n < minTasksPerPhase || n > maxTasksPerPhase {
 		return goerr.New("tasks count out of range",
 			goerr.V("got", n),
@@ -419,6 +435,7 @@ func validateTaskList(tasks []TaskPlan, knownToolIDs []string) error {
 			goerr.V("max", maxTasksPerPhase))
 	}
 	seenID := make(map[string]struct{}, len(tasks))
+	var sum pricing.NanoUSD
 	for i := range tasks {
 		task := &tasks[i]
 		if err := task.Validate(knownToolIDs); err != nil {
@@ -430,6 +447,53 @@ func validateTaskList(tasks []TaskPlan, knownToolIDs []string) error {
 				goerr.V("id", task.ID))
 		}
 		seenID[task.ID] = struct{}{}
+		if remaining == nil {
+			continue
+		}
+		if err := checkTaskBudget(task, *remaining); err != nil {
+			return err
+		}
+		sum += pricing.FromUSD(task.BudgetUSD)
+	}
+	// The per-task check bounds one task; this bounds the ROUND. Without it a
+	// planner could hand every one of five tasks the whole remaining allowance.
+	//
+	// The sum cannot overflow: checkTaskBudget has already bounded every term by
+	// the remaining allowance, and there are at most maxTasksPerPhase of them.
+	if remaining != nil && sum > *remaining {
+		return goerr.New("task budgets exceed the remaining allowance",
+			goerr.V("sum", sum.USD()),
+			goerr.V("remaining", remaining.USD()))
+	}
+	return nil
+}
+
+// checkTaskBudget holds the whole per-task budget contract, in the units it is
+// actually enforced in.
+//
+// Both bounds are stated against the CONVERTED amount rather than the float the
+// model emitted, and that is the point of the function. `budget_usd` is a float64
+// from a model, and pricing.FromUSD does not saturate: a figure above roughly
+// 9.2e9 converts outside int64 and lands negative. A positive-float check alone
+// would pass it, the round's sum would go negative and clear the sum check, and
+// WithBudget would then read the non-positive amount as "unset" and hand the
+// child the deployment default — an invalid input granting MORE money than a
+// valid one. Bounding the converted amount above closes that direction and bounds
+// the sum at the same time.
+func checkTaskBudget(task *TaskPlan, remaining pricing.NanoUSD) error {
+	amount := pricing.FromUSD(task.BudgetUSD)
+	if amount <= 0 {
+		// Rejected rather than defaulted: a task with no allowance would inherit the
+		// run's whole budget, which is the state this field exists to end.
+		return goerr.New("task plan budget must be a positive amount in USD",
+			goerr.V("task_id", task.ID),
+			goerr.V("budget_usd", task.BudgetUSD))
+	}
+	if amount > remaining {
+		return goerr.New("task plan budget exceeds the remaining allowance",
+			goerr.V("task_id", task.ID),
+			goerr.V("budget", amount.USD()),
+			goerr.V("remaining", remaining.USD()))
 	}
 	return nil
 }
@@ -505,6 +569,11 @@ type schemaOptions struct {
 	knownToolIDs  []string
 	allowQuestion bool
 	allowDirect   bool
+	// withBudget adds the per-task budget property. It follows Config.Remaining:
+	// a host that supplies no remaining figure is not asking the planner to
+	// allocate anything, and offering the property anyway would invite a number
+	// nothing reads.
+	withBudget bool
 }
 
 // planSchema returns the gollem.Parameter applied to the planner LLM's
@@ -518,7 +587,7 @@ func planSchema(opts schemaOptions) *gollem.Parameter {
 			Type:        gollem.TypeString,
 			Description: rationaleDescription,
 		},
-		"tasks": tasksSchema(opts.knownToolIDs),
+		"tasks": tasksSchema(opts.knownToolIDs, opts.withBudget),
 	}
 	desc := "Initial planner output: parallel investigation tasks for round 1."
 	if opts.allowDirect {
@@ -561,7 +630,7 @@ func replanSchema(opts schemaOptions) *gollem.Parameter {
 			Type:        gollem.TypeString,
 			Description: rationaleDescription,
 		},
-		"tasks":    tasksSchema(opts.knownToolIDs),
+		"tasks":    tasksSchema(opts.knownToolIDs, opts.withBudget),
 		"finalize": finalizeSchema(),
 	}
 	if opts.allowQuestion {
@@ -589,7 +658,7 @@ func finalizeSchema() *gollem.Parameter {
 	}
 }
 
-func tasksSchema(knownToolIDs []string) *gollem.Parameter {
+func tasksSchema(knownToolIDs []string, withBudget bool) *gollem.Parameter {
 	// Every field below is enforced by TaskPlan.Validate; mark them Required so
 	// the model is compelled to emit them. Without this, models that omit (most
 	// commonly) `description` send the planner into a retry loop that burns the
@@ -608,6 +677,19 @@ func tasksSchema(knownToolIDs []string) *gollem.Parameter {
 				Enum: knownToolIDs,
 			},
 		},
+	}
+	if withBudget {
+		// Required for the same reason every field above is: a model that omits it
+		// sends the round into a retry loop, and the retries are themselves paid for
+		// out of the allowance being divided.
+		taskProps["budget_usd"] = &gollem.Parameter{
+			Type: gollem.TypeNumber,
+			Description: "How much of the run's remaining allowance, in USD, this task's " +
+				"sub-agent may spend. Must be greater than 0, and the budgets of all tasks " +
+				"in this round must add up to no more than the remaining allowance stated " +
+				"in your instructions. Give the heavier task the larger share.",
+			Required: true,
+		}
 	}
 	return &gollem.Parameter{
 		Type:        gollem.TypeArray,

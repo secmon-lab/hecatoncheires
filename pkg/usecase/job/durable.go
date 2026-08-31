@@ -249,7 +249,9 @@ func (d *DurableRuntime) Register(reg *agentkit.Registry, limiter agentkit.Limit
 	// thread, not through a milestone message a person is watching.
 	handle, err := planexec.Register(reg, agentkernel.AgentJob, jobPlanexecAgentVersion,
 		taskAgent, nil, limiter,
-		planexec.Config[planexec.TextResult]{TextOnly: true, Asker: jobAsker{runtime: d}},
+		planexec.Config[planexec.TextResult]{
+			TextOnly: true, Asker: jobAsker{runtime: d}, Remaining: d.Models.RemainingFunc(),
+		},
 		agentkit.WithHistoryStore[planexec.Output[planexec.TextResult]](d.History),
 		agentkit.WithOnFinish(d.onPlanexecFinish),
 	)

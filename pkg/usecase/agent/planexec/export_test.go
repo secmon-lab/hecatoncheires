@@ -15,20 +15,22 @@ var ParseReplanResultForTest = parseReplanResult
 var ExtractJSONObjectForTest = extractJSONObject
 
 // PlanSchemaForTest exposes planSchema (the first-round schema).
-func PlanSchemaForTest(knownToolIDs []string, allowQuestion, allowDirect bool) any {
+func PlanSchemaForTest(knownToolIDs []string, allowQuestion, allowDirect, withBudget bool) any {
 	return planSchema(schemaOptions{
 		knownToolIDs:  knownToolIDs,
 		allowQuestion: allowQuestion,
 		allowDirect:   allowDirect,
+		withBudget:    withBudget,
 	})
 }
 
 // ReplanSchemaForTest exposes replanSchema (the subsequent-round
 // schema).
-func ReplanSchemaForTest(knownToolIDs []string, allowQuestion bool) any {
+func ReplanSchemaForTest(knownToolIDs []string, allowQuestion, withBudget bool) any {
 	return replanSchema(schemaOptions{
 		knownToolIDs:  knownToolIDs,
 		allowQuestion: allowQuestion,
+		withBudget:    withBudget,
 	})
 }
 
@@ -67,12 +69,24 @@ var RenderObservationsForFinalForTest = renderObservationsForFinal
 // turn because the turn that would carry it reports tool results, and such a turn
 // may carry nothing else.
 func PlannerSystemPromptForTest(rounds int) (string, error) {
+	return PlannerSystemPromptWithBudgetForTest(rounds, "")
+}
+
+// PlannerSystemPromptWithBudgetForTest is PlannerSystemPromptForTest with the
+// allowance line the host would have supplied, so a test can assert both what the
+// planner is told about its money and that the guidance and the line travel
+// together.
+func PlannerSystemPromptWithBudgetForTest(rounds int, budgetLine string) (string, error) {
 	s := &strategy[TextResult]{cfg: Config[TextResult]{TextOnly: true}}
 	return s.plannerPrompt(state{
 		Input:             Input{SystemPrompt: "host prompt", KnownToolIDs: []string{"core_ro"}},
 		PlannerToolRounds: rounds,
-	})
+	}, budgetLine)
 }
+
+// BudgetPrefixForTest exposes the allowance line's exact wording, which is part
+// of the planner's contract: prompts/planner.md tells the planner to read it.
+var BudgetPrefixForTest = budgetPrefix
 
 // PlannerToolRoundsMaxForTest exposes the tool allowance a planning phase has.
 const PlannerToolRoundsMaxForTest = plannerToolRoundsMax
