@@ -569,6 +569,25 @@ type JobRunEvent struct {
 	Phase      string
 	AgentLabel string
 
+	// ProcessID names the agentkit Process whose claim recorded this event.
+	//
+	// It is what makes a sub-agent's calls distinguishable from the planner's. On
+	// the durable runtime each sub-agent is a separate Process driven by its own
+	// claim, and every claim installs its own Handler — so a run's timeline
+	// interleaves the planner's calls with those of up to five children and,
+	// without this, carries nothing to tell them apart. AgentLabel was meant to
+	// (see the comment above) but no production path ever set it: the label is a
+	// property the handler would have to be told, while the Process id is one the
+	// claim already holds.
+	//
+	// With it, what one sub-agent actually cost is the sum over its events, which
+	// is the figure an operator needs to judge whether a task's budget allocation
+	// was reasonable.
+	//
+	// Empty for an event written before this field existed, and for the
+	// in-process Job executor, which drives no child Processes.
+	ProcessID string
+
 	// Payload (exactly one is non-nil and matches Kind).
 	LLMRequest  *LLMRequestPayload
 	LLMResponse *LLMResponsePayload

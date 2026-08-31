@@ -89,7 +89,7 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 			// owner's RUN_ERROR — therefore append into a single ordered timeline
 			// with nothing shared between them.
 			handler := trace.Handler(recorder)
-			if timeline := runTimeline(d, sc); timeline != nil {
+			if timeline := runTimeline(d, proc, sc); timeline != nil {
 				handler = trace.Multi(recorder, timeline)
 			}
 			ctx = withTraceHandler(ctx, handler)
@@ -122,10 +122,19 @@ func claimMiddleware(d Deps) agentkit.ClaimMiddleware {
 // run, and the repository would reject it on every append. Returning nil instead
 // leaves the archive as the run's only trace, which is the right outcome for a
 // run that was never meant to appear on the case agent page.
-func runTimeline(d Deps, sc Scope) *runtrace.Handler {
+//
+// It takes the Process as well as the Scope because the Scope cannot tell one
+// Process of a run from another: a sub-agent inherits its parent's metadata, so
+// every Process of a run resolves to the SAME Scope. The Process id is what
+// distinguishes them, and it is the only thing here that does.
+func runTimeline(d Deps, proc *agentkit.Process, sc Scope) *runtrace.Handler {
 	if d.Tools.Repo == nil || sc.WorkspaceID == "" || sc.CaseID == 0 ||
 		sc.JobID == "" || sc.JobRunID == "" {
 		return nil
+	}
+	var processID string
+	if proc != nil {
+		processID = string(proc.ID)
 	}
 	return runtrace.NewHandler(d.Tools.Repo.JobRunEvent(), runtrace.Routing{
 		WorkspaceID: sc.WorkspaceID,
@@ -133,6 +142,7 @@ func runTimeline(d Deps, sc Scope) *runtrace.Handler {
 		JobID:       sc.JobID,
 		RunID:       sc.JobRunID,
 		TraceID:     sc.JobRunID,
+		ProcessID:   processID,
 	}, nil)
 }
 

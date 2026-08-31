@@ -247,13 +247,23 @@ deliberately not exported: it is transient state with no scalar representation.
 Three things the timeline does not tell you. None of them is a property of the
 export — each is inherited from how the run was recorded.
 
-**`parent_sequence` and `agent_label` are unreliable while sub-agents run in
-parallel.** A `plan_execute` run drives several sub-agents concurrently through
-one trace handler that keeps a single "most recent response" and a single active
-label. When two sub-agents interleave, a `TOOL_CALL` can be attributed to another
-agent's `LLM_RESPONSE`, and an event can carry a neighbouring agent's
-`agent_label` (or none). Treat both columns as hints on parallel runs; `sequence`
-and `run_id` remain exact.
+**Use `process_id`, not `agent_label`, to tell one sub-agent from another.** On
+the durable runtime each sub-agent is a separate agentkit Process driven by its
+own claim, and every claim records through its own trace handler — so a run's
+timeline interleaves the planner's calls with those of its children.
+`process_id` names the Process each event was recorded by and is exact, including
+on parallel runs: group by it to get one sub-agent's calls, and sum its
+`LLM_RESPONSE` token columns at the run's model rate to get what that sub-agent
+actually cost.
+
+`agent_label` is **always empty** on this path. It was declared for this purpose
+but no production path sets it, because a label is something a handler must be
+told while the Process id is something the claim already holds. `parent_sequence`
+is resolved per handler when a tool starts, so it is exact within a Process; it
+never points across Processes. `sequence` and `run_id` remain exact throughout.
+
+`process_id` is empty for events recorded before the column existed, and for the
+in-process Job executor, which drives no child Processes.
 
 **An empty payload is indistinguishable from an unrecorded one.** Both repository
 backends decode a stored empty array back into a nil slice, so a response that

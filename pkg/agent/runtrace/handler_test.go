@@ -35,6 +35,58 @@ func newHandlerFixture(t *testing.T) (*runtrace.Handler, *memory.Memory) {
 	return h, repo
 }
 
+// TestHandler_EventsCarryTheirOwnProcess pins what makes a sub-agent's calls
+// separable from the planner's.
+//
+// It is the same shape as TestHandler_TwoHandlersShareOneTimeline — several
+// Handlers appending into one run — but here they stand for DIFFERENT Processes,
+// which is what a plan-execute run actually is: the planner and each of its
+// children get their own claim and therefore their own Handler. Without the
+// Process id on each event, the run's timeline interleaves them with nothing to
+// tell them apart, and what one sub-agent cost cannot be recovered from the
+// record at all.
+func TestHandler_EventsCarryTheirOwnProcess(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	base := runtrace.Routing{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+		RunID: "run-attrib", TraceID: "trace-attrib",
+	}
+	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+
+	rootRouting := base
+	rootRouting.ProcessID = "proc-root"
+	childRouting := base
+	childRouting.ProcessID = "proc-child"
+
+	root := runtrace.NewHandler(repo.JobRunEvent(), rootRouting, clock)
+	child := runtrace.NewHandler(repo.JobRunEvent(), childRouting, clock)
+
+	// Interleaved, because that is how the timeline is actually written: the
+	// parent's collect transition can commit between two of a child's calls.
+	for _, h := range []*runtrace.Handler{root, child, child, root} {
+		c := h.StartLLMCall(ctx)
+		h.EndLLMCall(c, &trace.LLMCallData{Model: "claude-opus-4-7"}, nil)
+	}
+
+	events, err := repo.JobRunEvent().List(ctx, model.JobRunKey{
+		WorkspaceID: "ws-1", CaseID: 42, JobID: "job-A",
+	}, "run-attrib")
+	gt.NoError(t, err).Required()
+
+	// One request and one response per call, from four calls.
+	gt.Array(t, events).Length(8).Required()
+
+	byProcess := map[string]int{}
+	for _, ev := range events {
+		byProcess[ev.ProcessID]++
+	}
+	// Two calls each, so four events each. A run whose events all carried the
+	// same id — or none — would put every one of the eight in one bucket.
+	gt.Value(t, byProcess["proc-root"]).Equal(4)
+	gt.Value(t, byProcess["proc-child"]).Equal(4)
+}
+
 // TestHandler_TwoHandlersShareOneTimeline pins the property that replaced the
 // in-process Sequencer: two Handlers on the same run — a resumed turn's, or
 // another instance's claim of the same durable run — append into one ordered
