@@ -413,11 +413,17 @@ func (s *strategy[T]) stepPlan(ctx context.Context, sys agentkit.Syscalls, st st
 
 	st = s.note(ctx, st, "🧭 Planning")
 
-	prompt, err := s.plannerPrompt(st, s.budgetLine(sys))
+	// Read ONCE, before the generate, and used for both the line the planner is
+	// told and the bound its plan is validated against. Re-reading it after the
+	// call would validate against a figure smaller than the one the planner was
+	// given — by the cost of that very call — and reject a plan that did exactly
+	// what it was told.
+	remaining, total, budgeted := s.remainingBudget(sys)
+
+	prompt, err := s.plannerPrompt(st, budgetLine(remaining, total, budgeted))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
-	remaining, _, budgeted := s.remainingBudget(sys)
 	// The opening round may not ask a question: it has nothing to ask about yet.
 	schema := planSchema(schemaOptions{
 		knownToolIDs: st.Input.KnownToolIDs,
@@ -707,11 +713,14 @@ func (s *strategy[T]) stepReplan(ctx context.Context, sys agentkit.Syscalls, st 
 
 	st = s.note(ctx, st, "🧭 Re-planning")
 
-	prompt, err := s.plannerPrompt(st, s.budgetLine(sys))
+	// See stepPlan: read once, before the generate, and shared by the line the
+	// planner is told and the bound its plan is validated against.
+	remaining, total, budgeted := s.remainingBudget(sys)
+
+	prompt, err := s.plannerPrompt(st, budgetLine(remaining, total, budgeted))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
-	remaining, _, budgeted := s.remainingBudget(sys)
 	schema := replanSchema(schemaOptions{
 		knownToolIDs:  st.Input.KnownToolIDs,
 		allowQuestion: st.Input.AllowQuestion,
@@ -879,7 +888,9 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 	// prompt, which reaches this call whether or not it sends a user turn — so it
 	// must not be prepended to userPrompt as well, or the same instruction arrives
 	// twice on the calls that do send one.
-	prompt, err := s.plannerPrompt(st, s.budgetLine(sys))
+	// The terminal call gets the line too: it is the one call that may still ask
+	// for a tool, so it has to know what is left to spend on one.
+	prompt, err := s.plannerPrompt(st, budgetLine(s.remainingBudget(sys)))
 	if err != nil {
 		return st, agentkit.Decision[Output[T]]{}, err
 	}
@@ -1296,8 +1307,7 @@ func (s *strategy[T]) remainingBudget(sys agentkit.Syscalls) (remaining, total p
 
 // budgetLine is what the planner is told about its allowance, or "" when the host
 // wired none.
-func (s *strategy[T]) budgetLine(sys agentkit.Syscalls) string {
-	remaining, total, ok := s.remainingBudget(sys)
+func budgetLine(remaining, total pricing.NanoUSD, ok bool) string {
 	if !ok {
 		return ""
 	}
