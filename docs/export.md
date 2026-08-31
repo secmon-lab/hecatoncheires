@@ -205,7 +205,10 @@ inside the Storage Write API's per-request limit, which no batching can split.
 Reading it costs one Firestore query per run, on top of one subcollection scan
 per case and one log query per (case, job) pair. Mention runs each get their own
 `job_id`, so a busy Case adds one of each per mention turn. The queries run
-serially.
+serially, and each run's events are handed to BigQuery and released before the
+next run is read — this is the only table streamed at that granularity, and it is
+what keeps the process's memory bounded by one run's timeline instead of by the
+workspace's total volume. The other tables are small enough to be held whole.
 
 `pending_interaction` (the question form of a run sitting at `AWAITING_INPUT`) is
 deliberately not exported: it is transient state with no scalar representation.
@@ -268,7 +271,10 @@ Two consequences matter to consumers:
 
 - **The destination is only touched by step 3.** If anything fails before it,
   the destination keeps the previous snapshot; it is never left empty or
-  half-written. The swap itself is a single statement.
+  half-written. The swap itself is a single statement. This is also what makes
+  the streamed `job_run_events` table safe: rows reach the staging table as each
+  run is read, and a read that fails partway abandons the staging table without
+  ever reaching step 3, so a partial timeline is never published.
 - **A run interrupted during step 3 leaves the outcome unknown.** The swap is a
   BigQuery query job: if the process is cancelled or times out while waiting for
   it, the job keeps running server-side. The export asks BigQuery to cancel it

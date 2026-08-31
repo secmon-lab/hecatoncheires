@@ -18,10 +18,14 @@ import (
 // "field_<id>" is always a valid, collision-free column name.
 const customFieldPrefix = "field_"
 
-// buildCaseTable builds the "cases" table: fixed Case columns plus one
+// caseColumns describes the "cases" table: fixed Case columns plus one
 // "field_<id>" column per workspace field definition.
-func buildCaseTable(ctx context.Context, schema *config.FieldSchema, cases []*model.Case) *Table {
-	cols := append(fixedCaseColumns(), customFieldColumns(schema)...)
+func caseColumns(schema *config.FieldSchema) []Column {
+	return append(fixedCaseColumns(), customFieldColumns(schema)...)
+}
+
+// caseRows renders the "cases" table's rows.
+func caseRows(ctx context.Context, schema *config.FieldSchema, cases []*model.Case) []map[string]any {
 	rows := make([]map[string]any, 0, len(cases))
 	for _, c := range cases {
 		row := map[string]any{
@@ -45,12 +49,12 @@ func buildCaseTable(ctx context.Context, schema *config.FieldSchema, cases []*mo
 		addCustomFieldValues(ctx, row, schema, c.FieldValues)
 		rows = append(rows, row)
 	}
-	return &Table{Name: "cases", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildActionTable builds the "actions" table.
-func buildActionTable(actions []*model.Action) *Table {
-	cols := []Column{
+// actionColumns describes the "actions" table.
+func actionColumns() []Column {
+	return []Column{
 		{Name: "id", Type: TypeInt},
 		{Name: "case_id", Type: TypeInt, Nullable: true},
 		{Name: "title", Type: TypeString, Nullable: true},
@@ -63,6 +67,10 @@ func buildActionTable(actions []*model.Action) *Table {
 		{Name: "created_at", Type: TypeTimestamp, Nullable: true},
 		{Name: "updated_at", Type: TypeTimestamp, Nullable: true},
 	}
+}
+
+// actionRows renders the "actions" table's rows.
+func actionRows(actions []*model.Action) []map[string]any {
 	rows := make([]map[string]any, 0, len(actions))
 	for _, a := range actions {
 		rows = append(rows, map[string]any{
@@ -79,17 +87,27 @@ func buildActionTable(actions []*model.Action) *Table {
 			"updated_at":       a.UpdatedAt,
 		})
 	}
-	return &Table{Name: "actions", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildMemoTable builds the "memos" table: fixed Memo columns plus the
-// workspace's memo field schema (nil-safe when memos are disabled).
-func buildMemoTable(ctx context.Context, memoConfig *config.MemoConfig, memos []*model.Memo) *Table {
-	var schema *config.FieldSchema
-	if memoConfig != nil {
-		schema = memoConfig.FieldSchema
+// memoFieldSchema is the workspace's memo field schema, nil-safe when memos are
+// disabled.
+func memoFieldSchema(memoConfig *config.MemoConfig) *config.FieldSchema {
+	if memoConfig == nil {
+		return nil
 	}
-	cols := append(fixedMemoColumns(), customFieldColumns(schema)...)
+	return memoConfig.FieldSchema
+}
+
+// memoColumns describes the "memos" table: fixed Memo columns plus the
+// workspace's memo field schema.
+func memoColumns(memoConfig *config.MemoConfig) []Column {
+	return append(fixedMemoColumns(), customFieldColumns(memoFieldSchema(memoConfig))...)
+}
+
+// memoRows renders the "memos" table's rows.
+func memoRows(ctx context.Context, memoConfig *config.MemoConfig, memos []*model.Memo) []map[string]any {
+	schema := memoFieldSchema(memoConfig)
 	rows := make([]map[string]any, 0, len(memos))
 	for _, m := range memos {
 		row := map[string]any{
@@ -105,14 +123,14 @@ func buildMemoTable(ctx context.Context, memoConfig *config.MemoConfig, memos []
 		addCustomFieldValues(ctx, row, schema, m.FieldValues)
 		rows = append(rows, row)
 	}
-	return &Table{Name: "memos", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildJobRunTable builds the "job_runs" table: the per-(case, job) summary of
+// jobRunColumns describes the "job_runs" table: the per-(case, job) summary of
 // the most recent run, joinable to job_run_logs on
 // (workspace_id, case_id, job_id).
-func buildJobRunTable(runs []*model.JobRun) *Table {
-	cols := []Column{
+func jobRunColumns() []Column {
+	return []Column{
 		{Name: "workspace_id", Type: TypeString},
 		{Name: "case_id", Type: TypeInt},
 		{Name: "job_id", Type: TypeString},
@@ -125,6 +143,10 @@ func buildJobRunTable(runs []*model.JobRun) *Table {
 		{Name: "suspended_run_id", Type: TypeString, Nullable: true},
 		{Name: "suspended_at", Type: TypeTimestamp, Nullable: true},
 	}
+}
+
+// jobRunRows renders the "job_runs" table's rows.
+func jobRunRows(runs []*model.JobRun) []map[string]any {
 	rows := make([]map[string]any, 0, len(runs))
 	for _, r := range runs {
 		rows = append(rows, map[string]any{
@@ -141,18 +163,18 @@ func buildJobRunTable(runs []*model.JobRun) *Table {
 			"suspended_at":     r.SuspendedAt,
 		})
 	}
-	return &Table{Name: "job_runs", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildJobRunLogTable builds the "job_run_logs" table: one row per agent run
+// jobRunLogColumns describes the "job_run_logs" table: one row per agent run
 // against a Case, TOML-configured Jobs and mention-triggered runs alike (the
 // event_type column discriminates them — see model.EventTypeMention).
 //
 // PendingInteraction is deliberately not exported: it is transient state that
 // exists only while a run sits at AWAITING_INPUT, and a Table column carries a
 // scalar, so the nested question form has no faithful representation here.
-func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
-	cols := []Column{
+func jobRunLogColumns() []Column {
+	return []Column{
 		{Name: "workspace_id", Type: TypeString},
 		{Name: "case_id", Type: TypeInt},
 		{Name: "job_id", Type: TypeString},
@@ -178,6 +200,10 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 		{Name: "cost_nano_usd", Type: TypeInt, Nullable: true},
 		{Name: "model", Type: TypeString, Nullable: true},
 	}
+}
+
+// jobRunLogRows renders the "job_run_logs" table's rows.
+func jobRunLogRows(logs []*model.JobRunLog) []map[string]any {
 	rows := make([]map[string]any, 0, len(logs))
 	for _, l := range logs {
 		rows = append(rows, map[string]any{
@@ -205,10 +231,10 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 			"model":                       l.Model,
 		})
 	}
-	return &Table{Name: "job_run_logs", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildJobRunEventTable builds the "job_run_events" table: the per-call timeline
+// jobRunEventColumns describes the "job_run_events" table: the per-call timeline
 // of every exported run, one row per LLM call, tool execution or run error.
 // Joins to job_run_logs on (workspace_id, case_id, job_id, run_id); `sequence`
 // is the authoritative order within a run (doc ids may diverge under clock
@@ -218,8 +244,8 @@ func buildJobRunLogTable(logs []*model.JobRunLog) *Table {
 // The four event kinds share one flat table rather than one table each, so a run
 // reads back as a single ordered scan. Only the columns belonging to a row's
 // `kind` are populated; the rest are NULL.
-func buildJobRunEventTable(ctx context.Context, events []*model.JobRunEvent) *Table {
-	cols := []Column{
+func jobRunEventColumns() []Column {
+	return []Column{
 		{Name: "workspace_id", Type: TypeString},
 		{Name: "case_id", Type: TypeInt},
 		{Name: "job_id", Type: TypeString},
@@ -258,6 +284,12 @@ func buildJobRunEventTable(ctx context.Context, events []*model.JobRunEvent) *Ta
 		{Name: "error_stage", Type: TypeString, Nullable: true},
 		{Name: "error_message", Type: TypeString, Nullable: true},
 	}
+}
+
+// jobRunEventRows renders one repository read's worth of "job_run_events" rows.
+// It is called once per run rather than once per workspace: the caller streams
+// each run's timeline into the sink and releases it before reading the next.
+func jobRunEventRows(ctx context.Context, events []*model.JobRunEvent) []map[string]any {
 	rows := make([]map[string]any, 0, len(events))
 	for _, e := range events {
 		row := map[string]any{
@@ -277,7 +309,7 @@ func buildJobRunEventTable(ctx context.Context, events []*model.JobRunEvent) *Ta
 		addEventPayload(ctx, row, e)
 		rows = append(rows, row)
 	}
-	return &Table{Name: "job_run_events", Columns: cols, Rows: rows}
+	return rows
 }
 
 // addEventPayload fills the kind-specific cells of an event row. Exactly one
@@ -371,10 +403,10 @@ func oversizedJSONPlaceholder(originalBytes int) string {
 	return fmt.Sprintf(`{"oversized":true,"original_bytes":%d}`, originalBytes)
 }
 
-// buildKnowledgeTable builds the "knowledge" table (Embedding is intentionally
+// knowledgeColumns describes the "knowledge" table (Embedding is intentionally
 // excluded — it is never exposed).
-func buildKnowledgeTable(entries []*model.Knowledge) *Table {
-	cols := []Column{
+func knowledgeColumns() []Column {
+	return []Column{
 		{Name: "id", Type: TypeString},
 		{Name: "workspace_id", Type: TypeString, Nullable: true},
 		{Name: "title", Type: TypeString, Nullable: true},
@@ -384,6 +416,10 @@ func buildKnowledgeTable(entries []*model.Knowledge) *Table {
 		{Name: "created_at", Type: TypeTimestamp, Nullable: true},
 		{Name: "updated_at", Type: TypeTimestamp, Nullable: true},
 	}
+}
+
+// knowledgeRows renders the "knowledge" table's rows.
+func knowledgeRows(entries []*model.Knowledge) []map[string]any {
 	rows := make([]map[string]any, 0, len(entries))
 	for _, k := range entries {
 		rows = append(rows, map[string]any{
@@ -397,18 +433,22 @@ func buildKnowledgeTable(entries []*model.Knowledge) *Table {
 			"updated_at":   k.UpdatedAt,
 		})
 	}
-	return &Table{Name: "knowledge", Columns: cols, Rows: rows}
+	return rows
 }
 
-// buildTagTable builds the "tags" table.
-func buildTagTable(tags []*model.Tag) *Table {
-	cols := []Column{
+// tagColumns describes the "tags" table.
+func tagColumns() []Column {
+	return []Column{
 		{Name: "id", Type: TypeString},
 		{Name: "workspace_id", Type: TypeString, Nullable: true},
 		{Name: "name", Type: TypeString, Nullable: true},
 		{Name: "created_at", Type: TypeTimestamp, Nullable: true},
 		{Name: "updated_at", Type: TypeTimestamp, Nullable: true},
 	}
+}
+
+// tagRows renders the "tags" table's rows.
+func tagRows(tags []*model.Tag) []map[string]any {
 	rows := make([]map[string]any, 0, len(tags))
 	for _, t := range tags {
 		rows = append(rows, map[string]any{
@@ -419,7 +459,7 @@ func buildTagTable(tags []*model.Tag) *Table {
 			"updated_at":   t.UpdatedAt,
 		})
 	}
-	return &Table{Name: "tags", Columns: cols, Rows: rows}
+	return rows
 }
 
 // fixedCaseColumns returns the non-custom columns of the cases table. id is the

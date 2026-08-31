@@ -133,49 +133,54 @@ func (s *Sink) Close() error {
 	return errors.Join(errs...)
 }
 
-// WriteTable fully refreshes dataset.table: write every row into a fresh
-// staging table carrying the desired schema, then replace the destination with
-// it. The destination is only touched by the final swap, so a failure anywhere
-// before it leaves the previous snapshot intact.
-func (s *Sink) WriteTable(ctx context.Context, dataset string, t *export.Table) error {
+// BeginTable starts a full refresh of dataset.table: it creates a fresh staging
+// table carrying the desired schema and returns a writer that appends into it.
+// The destination is only touched by the writer's final swap, so a failure
+// anywhere before Commit leaves the previous snapshot intact.
+func (s *Sink) BeginTable(ctx context.Context, dataset, table string, columns []export.Column) (export.TableWriter, error) {
 	if !safeIdentPattern.MatchString(dataset) {
-		return goerr.New("invalid dataset name for export", goerr.V("dataset", dataset))
+		return nil, goerr.New("invalid dataset name for export", goerr.V("dataset", dataset))
 	}
-	if !safeIdentPattern.MatchString(t.Name) {
-		return goerr.New("invalid table name for export", goerr.V("table", t.Name))
+	if !safeIdentPattern.MatchString(table) {
+		return nil, goerr.New("invalid table name for export", goerr.V("table", table))
 	}
 	// Column names reach the swap statement, so they are validated here too.
 	// A table with no columns is rejected rather than sent as invalid DDL.
-	if len(t.Columns) == 0 {
-		return goerr.New("export table has no columns",
-			goerr.V("dataset", dataset), goerr.V("table", t.Name))
+	if len(columns) == 0 {
+		return nil, goerr.New("export table has no columns",
+			goerr.V("dataset", dataset), goerr.V("table", table))
 	}
-	for _, c := range t.Columns {
+	for _, c := range columns {
 		if !safeIdentPattern.MatchString(c.Name) {
-			return goerr.New("invalid column name for export",
-				goerr.V("dataset", dataset), goerr.V("table", t.Name), goerr.V("column", c.Name))
+			return nil, goerr.New("invalid column name for export",
+				goerr.V("dataset", dataset), goerr.V("table", table), goerr.V("column", c.Name))
 		}
 	}
 	location, err := s.ensureDataset(ctx, dataset)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	desired := toBQSchema(t.Columns)
-
-	staging, err := s.createStagingTable(ctx, dataset, t.Name, desired)
+	desired := toBQSchema(columns)
+	msgDesc, dp, err := rowDescriptor(desired)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer s.dropStagingTable(ctx, dataset, staging)
 
-	if len(t.Rows) > 0 {
-		if err := s.appendRows(ctx, dataset, staging, desired, t.Columns, t.Rows); err != nil {
-			return err
-		}
+	staging, err := s.createStagingTable(ctx, dataset, table, desired)
+	if err != nil {
+		return nil, err
 	}
-	// An empty staging table still goes through the swap: a refresh that
-	// produced no rows must leave the destination empty, not stale.
-	return s.swapTable(ctx, dataset, t.Name, staging, location, t.Columns)
+	return &tableWriter{
+		sink:       s,
+		dataset:    dataset,
+		dest:       table,
+		staging:    staging,
+		location:   location,
+		columns:    columns,
+		colTypes:   columnTypeIndex(columns),
+		msgDesc:    msgDesc,
+		descriptor: dp,
+	}, nil
 }
 
 // ddlColumnList renders the destination's column declarations for the swap
@@ -387,50 +392,57 @@ func rowDescriptor(schema bq.Schema) (protoreflect.MessageDescriptor, *descripto
 	return msgDesc, dp, nil
 }
 
-// appendRows performs one full pending-stream write into table: build the
-// descriptor from the schema, append the rows in batches bounded by both row
-// count and encoded size, finalize, and batch-commit.
-func (s *Sink) appendRows(ctx context.Context, dataset, table string, schema bq.Schema, columns []export.Column, rows []map[string]any) error {
-	msgDesc, dp, err := rowDescriptor(schema)
-	if err != nil {
-		return err
+// tableWriter is one table's in-progress full refresh: a pending Storage Write
+// stream into a throwaway staging table, published by swapping that table onto
+// the destination.
+//
+// It holds only what a single batch needs, so the memory it occupies is bounded
+// by appendMaxRequestBytes and maxPendingAppends regardless of how many rows
+// pass through it. That is the whole point of the streaming shape: the caller
+// reads one run's events at a time instead of a workspace's.
+type tableWriter struct {
+	sink       *Sink
+	dataset    string
+	dest       string
+	staging    string
+	location   string
+	columns    []export.Column
+	colTypes   map[string]export.ColumnType
+	msgDesc    protoreflect.MessageDescriptor
+	descriptor *descriptorpb.DescriptorProto
+
+	// stream is opened on the first flush, so a refresh that produced no rows
+	// never creates one — it only swaps the empty staging table onto the
+	// destination.
+	stream *mw.ManagedStream
+
+	batch      [][]byte
+	batchBytes int
+	// pending holds the appends whose result has not been read yet. It is
+	// drained once it reaches maxPendingAppends: an unbounded slice would grow
+	// with the table, which is the shape this writer exists to remove.
+	pending []*mw.AppendResult
+
+	// finished marks the writer as done, so a deferred Abort after a successful
+	// Commit is a no-op and a double Abort does not drop the staging table twice.
+	finished bool
+}
+
+// maxPendingAppends bounds how many in-flight appends the writer tracks before
+// it waits on their results.
+const maxPendingAppends = 4
+
+var _ export.TableWriter = (*tableWriter)(nil)
+
+// AppendRows encodes and stages rows, flushing whenever a batch reaches either
+// the row-count or the encoded-size bound.
+func (w *tableWriter) AppendRows(ctx context.Context, rows []map[string]any) error {
+	if w.finished {
+		return goerr.New("append after the export table writer finished",
+			goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
 	}
-
-	parent := mw.TableParentFromParts(s.project, dataset, table)
-	stream, err := s.mw.NewManagedStream(ctx,
-		mw.WithDestinationTable(parent),
-		mw.WithType(mw.PendingStream),
-		mw.WithSchemaDescriptor(dp))
-	if err != nil {
-		return goerr.Wrap(err, "failed to create managed stream")
-	}
-	// ManagedStream.Close reports io.EOF for a stream that shut down normally,
-	// so reporting it would raise one false error per table written.
-	defer safe.CloseExcept(ctx, stream, io.EOF)
-
-	colTypes := columnTypeIndex(columns)
-	var results []*mw.AppendResult
-	batch := make([][]byte, 0, appendBatchRows)
-	batchBytes := 0
-
-	flush := func() error {
-		if len(batch) == 0 {
-			return nil
-		}
-		res, err := stream.AppendRows(ctx, batch)
-		if err != nil {
-			return goerr.Wrap(err, "failed to append rows",
-				goerr.V("dataset", dataset), goerr.V("table", table),
-				goerr.V("batch_rows", len(batch)), goerr.V("batch_bytes", batchBytes))
-		}
-		results = append(results, res)
-		batch = make([][]byte, 0, appendBatchRows)
-		batchBytes = 0
-		return nil
-	}
-
 	for i, row := range rows {
-		encoded, err := encodeRow(msgDesc, colTypes, row)
+		encoded, err := encodeRow(w.msgDesc, w.colTypes, row)
 		if err != nil {
 			return err
 		}
@@ -440,43 +452,151 @@ func (s *Sink) appendRows(ctx context.Context, dataset, table string, schema bq.
 		// dropping the row.
 		if len(encoded) > appendMaxRequestBytes {
 			return goerr.New("encoded row exceeds max append request size",
-				goerr.V("dataset", dataset), goerr.V("table", table),
+				goerr.V("dataset", w.dataset), goerr.V("table", w.dest),
 				goerr.V("row_index", i), goerr.V("row_bytes", len(encoded)),
 				goerr.V("limit_bytes", appendMaxRequestBytes))
 		}
-		if len(batch) > 0 &&
-			(batchBytes+len(encoded) > appendMaxRequestBytes || len(batch) >= appendBatchRows) {
-			if err := flush(); err != nil {
+		if len(w.batch) > 0 &&
+			(w.batchBytes+len(encoded) > appendMaxRequestBytes || len(w.batch) >= appendBatchRows) {
+			if err := w.flush(ctx); err != nil {
 				return err
 			}
 		}
-		batch = append(batch, encoded)
-		batchBytes += len(encoded)
+		w.batch = append(w.batch, encoded)
+		w.batchBytes += len(encoded)
 	}
-	if err := flush(); err != nil {
+	return nil
+}
+
+// Commit publishes everything appended so far: flush the last batch, confirm
+// every append landed, finalize and commit the stream, then replace the
+// destination with the staging table.
+func (w *tableWriter) Commit(ctx context.Context) error {
+	if w.finished {
+		return goerr.New("commit after the export table writer finished",
+			goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
+	}
+	// The staging table is dropped either way: the swap has read it by then, and
+	// a failed commit has no further use for it.
+	defer w.cleanup(ctx)
+
+	if err := w.flush(ctx); err != nil {
 		return err
 	}
+	if err := w.drain(ctx, 0); err != nil {
+		return err
+	}
+	if w.stream != nil {
+		if _, err := w.stream.Finalize(ctx); err != nil {
+			return goerr.Wrap(err, "failed to finalize stream",
+				goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
+		}
+		resp, err := w.sink.mw.BatchCommitWriteStreams(ctx, &storagepb.BatchCommitWriteStreamsRequest{
+			Parent:       mw.TableParentFromStreamName(w.stream.StreamName()),
+			WriteStreams: []string{w.stream.StreamName()},
+		})
+		if err != nil {
+			return goerr.Wrap(err, "failed to batch-commit write streams",
+				goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
+		}
+		if streamErrs := resp.GetStreamErrors(); len(streamErrs) > 0 {
+			return goerr.New("batch commit reported stream errors",
+				goerr.V("dataset", w.dataset), goerr.V("table", w.dest),
+				goerr.V("stream_error_count", len(streamErrs)))
+		}
+		w.closeStream(ctx)
+	}
+	// An empty staging table still goes through the swap: a refresh that
+	// produced no rows must leave the destination empty, not stale.
+	return w.sink.swapTable(ctx, w.dataset, w.dest, w.staging, w.location, w.columns)
+}
 
-	for _, res := range results {
+// Abort discards the staged rows. The destination is never touched, so it keeps
+// whatever the previous run published.
+func (w *tableWriter) Abort(ctx context.Context) {
+	if w.finished {
+		return
+	}
+	w.cleanup(ctx)
+}
+
+// cleanup closes the stream and drops the staging table, and marks the writer
+// finished so it runs at most once.
+func (w *tableWriter) cleanup(ctx context.Context) {
+	w.finished = true
+	w.batch = nil
+	w.batchBytes = 0
+	w.pending = nil
+	w.closeStream(ctx)
+	w.sink.dropStagingTable(ctx, w.dataset, w.staging)
+}
+
+// closeStream shuts the pending stream down, at most once.
+func (w *tableWriter) closeStream(ctx context.Context) {
+	if w.stream == nil {
+		return
+	}
+	// ManagedStream.Close reports io.EOF for a stream that shut down normally,
+	// so reporting it would raise one false error per table written.
+	safe.CloseExcept(ctx, w.stream, io.EOF)
+	w.stream = nil
+}
+
+// flush sends the staged batch, opening the stream on first use.
+func (w *tableWriter) flush(ctx context.Context) error {
+	if len(w.batch) == 0 {
+		return nil
+	}
+	if err := w.openStream(ctx); err != nil {
+		return err
+	}
+	// Wait for older appends before adding another, so the number of results
+	// held is bounded rather than growing with the table.
+	if err := w.drain(ctx, maxPendingAppends-1); err != nil {
+		return err
+	}
+	res, err := w.stream.AppendRows(ctx, w.batch)
+	if err != nil {
+		return goerr.Wrap(err, "failed to append rows",
+			goerr.V("dataset", w.dataset), goerr.V("table", w.dest),
+			goerr.V("batch_rows", len(w.batch)), goerr.V("batch_bytes", w.batchBytes))
+	}
+	w.pending = append(w.pending, res)
+	w.batch = make([][]byte, 0, appendBatchRows)
+	w.batchBytes = 0
+	return nil
+}
+
+// drain waits on the oldest pending appends until at most keep remain, and
+// releases the results it has confirmed.
+func (w *tableWriter) drain(ctx context.Context, keep int) error {
+	for len(w.pending) > keep {
+		res := w.pending[0]
+		w.pending = w.pending[1:]
 		if _, err := res.GetResult(ctx); err != nil {
 			return goerr.Wrap(err, "append result reported an error",
-				goerr.V("dataset", dataset), goerr.V("table", table))
+				goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
 		}
 	}
-	if _, err := stream.Finalize(ctx); err != nil {
-		return goerr.Wrap(err, "failed to finalize stream")
+	return nil
+}
+
+// openStream creates the pending-stream writer into the staging table on first
+// use.
+func (w *tableWriter) openStream(ctx context.Context) error {
+	if w.stream != nil {
+		return nil
 	}
-	resp, err := s.mw.BatchCommitWriteStreams(ctx, &storagepb.BatchCommitWriteStreamsRequest{
-		Parent:       mw.TableParentFromStreamName(stream.StreamName()),
-		WriteStreams: []string{stream.StreamName()},
-	})
+	parent := mw.TableParentFromParts(w.sink.project, w.dataset, w.staging)
+	stream, err := w.sink.mw.NewManagedStream(ctx,
+		mw.WithDestinationTable(parent),
+		mw.WithType(mw.PendingStream),
+		mw.WithSchemaDescriptor(w.descriptor))
 	if err != nil {
-		return goerr.Wrap(err, "failed to batch-commit write streams")
+		return goerr.Wrap(err, "failed to create managed stream",
+			goerr.V("dataset", w.dataset), goerr.V("table", w.dest))
 	}
-	if streamErrs := resp.GetStreamErrors(); len(streamErrs) > 0 {
-		return goerr.New("batch commit reported stream errors",
-			goerr.V("stream_error_count", len(streamErrs)))
-	}
+	w.stream = stream
 	return nil
 }
 

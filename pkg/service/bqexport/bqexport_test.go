@@ -288,22 +288,17 @@ func TestSink_LiveBigQuery(t *testing.T) {
 		table := newTable(t, "refresh")
 		now := time.Now()
 
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: cols,
-			Rows: []map[string]any{
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, cols,
+			[]map[string]any{
 				{"id": int64(1), "name": "a", "at": now},
 				{"id": int64(2), "name": "b", "at": now},
-			},
-		})).Required()
+			})).Required()
 		rows := readRows(t, ctx, client, dataset, table)
 		gt.Array(t, rows).Length(2)
 
 		// A refresh that produced no rows must empty the table, not leave the
 		// previous snapshot behind.
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name: table, Columns: cols,
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, cols, nil)).Required()
 		gt.Array(t, readRows(t, ctx, client, dataset, table)).Length(0)
 
 		schema := tableSchema(t, ctx, client, dataset, table)
@@ -315,20 +310,16 @@ func TestSink_LiveBigQuery(t *testing.T) {
 	t.Run("a column whose type changed is replaced, not rejected", func(t *testing.T) {
 		table := newTable(t, "retype")
 
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: []export.Column{{Name: "id", Type: export.TypeString, Nullable: true}},
-			Rows:    []map[string]any{{"id": "one"}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table,
+			[]export.Column{{Name: "id", Type: export.TypeString, Nullable: true}},
+			[]map[string]any{{"id": "one"}})).Required()
 		gt.Value(t, tableSchema(t, ctx, client, dataset, table)["id"].Type).Equal(bq.StringFieldType)
 
 		// Same column, incompatible type. This is the production failure:
 		// previously it errored with "schema conflict; manual migration required".
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: []export.Column{{Name: "id", Type: export.TypeInt, Nullable: true}},
-			Rows:    []map[string]any{{"id": int64(1)}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table,
+			[]export.Column{{Name: "id", Type: export.TypeInt, Nullable: true}},
+			[]map[string]any{{"id": int64(1)}})).Required()
 
 		schema := tableSchema(t, ctx, client, dataset, table)
 		gt.Value(t, schema["id"].Type).Equal(bq.IntegerFieldType)
@@ -338,27 +329,23 @@ func TestSink_LiveBigQuery(t *testing.T) {
 	})
 
 	t.Run("a NULLABLE column that became REPEATED is replaced", func(t *testing.T) {
-		// The exact shape of the ws_product_mgmt outage: a workspace field
+		// The exact shape of the reported outage: a workspace field definition
 		// changed from a single-value type to a multi-select one.
 		table := newTable(t, "repeat")
 
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: []export.Column{{Name: "field_user_type", Type: export.TypeString, Nullable: true}},
-			Rows:    []map[string]any{{"field_user_type": "doctor"}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table,
+			[]export.Column{{Name: "field_user_type", Type: export.TypeString, Nullable: true}},
+			[]map[string]any{{"field_user_type": "alpha"}})).Required()
 		gt.Bool(t, tableSchema(t, ctx, client, dataset, table)["field_user_type"].Repeated).False()
 
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: []export.Column{{Name: "field_user_type", Type: export.TypeString, Repeated: true}},
-			Rows:    []map[string]any{{"field_user_type": []string{"doctor", "nurse"}}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table,
+			[]export.Column{{Name: "field_user_type", Type: export.TypeString, Repeated: true}},
+			[]map[string]any{{"field_user_type": []string{"alpha", "beta"}}})).Required()
 
 		gt.Bool(t, tableSchema(t, ctx, client, dataset, table)["field_user_type"].Repeated).True()
 		rows := readRows(t, ctx, client, dataset, table)
 		gt.Array(t, rows).Length(1).Required()
-		gt.Value(t, rows[0]["field_user_type"]).Equal([]bq.Value{"doctor", "nurse"})
+		gt.Value(t, rows[0]["field_user_type"]).Equal([]bq.Value{"alpha", "beta"})
 	})
 
 	t.Run("a column no longer produced disappears", func(t *testing.T) {
@@ -366,18 +353,12 @@ func TestSink_LiveBigQuery(t *testing.T) {
 
 		withExtra := append(append([]export.Column{}, cols...),
 			export.Column{Name: "extra", Type: export.TypeString, Nullable: true})
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: withExtra,
-			Rows:    []map[string]any{{"id": int64(1), "extra": "legacy"}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, withExtra,
+			[]map[string]any{{"id": int64(1), "extra": "legacy"}})).Required()
 		gt.Map(t, tableSchema(t, ctx, client, dataset, table)).HasKey("extra")
 
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name:    table,
-			Columns: cols,
-			Rows:    []map[string]any{{"id": int64(1)}},
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, cols,
+			[]map[string]any{{"id": int64(1)}})).Required()
 
 		schema := tableSchema(t, ctx, client, dataset, table)
 		gt.Map(t, schema).HasKey("id")
@@ -386,9 +367,45 @@ func TestSink_LiveBigQuery(t *testing.T) {
 
 	t.Run("no staging table survives the write", func(t *testing.T) {
 		table := newTable(t, "staging")
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name: table, Columns: cols, Rows: []map[string]any{{"id": int64(1)}},
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, cols,
+			[]map[string]any{{"id": int64(1)}})).Required()
+		gt.Array(t, tableIDsWithPrefix(t, ctx, client, dataset, table+"_stg_")).Length(0)
+	})
+
+	t.Run("rows appended over several calls land in one refresh", func(t *testing.T) {
+		// The shape the exporter uses for job_run_events: one AppendRows per
+		// repository read, then a single Commit publishing all of them.
+		table := newTable(t, "stream")
+
+		w, err := sink.BeginTable(ctx, dataset, table, cols)
+		gt.NoError(t, err).Required()
+		for i := range 5 {
+			gt.NoError(t, w.AppendRows(ctx, []map[string]any{
+				{"id": int64(i), "name": fmt.Sprintf("n%d", i)},
+			})).Required()
+		}
+		gt.NoError(t, w.Commit(ctx)).Required()
+		gt.Array(t, readRows(t, ctx, client, dataset, table)).Length(5)
+		gt.Array(t, tableIDsWithPrefix(t, ctx, client, dataset, table+"_stg_")).Length(0)
+	})
+
+	t.Run("an aborted refresh leaves the destination untouched", func(t *testing.T) {
+		// This is the failure granularity the exporter depends on: a repository
+		// read that fails mid-table must not publish the rows read so far.
+		table := newTable(t, "abort")
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, cols,
+			[]map[string]any{{"id": int64(1), "name": "kept"}})).Required()
+
+		w, err := sink.BeginTable(ctx, dataset, table, cols)
+		gt.NoError(t, err).Required()
+		gt.NoError(t, w.AppendRows(ctx, []map[string]any{
+			{"id": int64(2), "name": "discarded"},
 		})).Required()
+		w.Abort(ctx)
+
+		rows := readRows(t, ctx, client, dataset, table)
+		gt.Array(t, rows).Length(1).Required()
+		gt.Value(t, rows[0]["name"]).Equal("kept")
 		gt.Array(t, tableIDsWithPrefix(t, ctx, client, dataset, table+"_stg_")).Length(0)
 	})
 
@@ -412,9 +429,7 @@ func TestSink_LiveBigQuery(t *testing.T) {
 				"blob": strings.Repeat(string(rune('a'+i)), rowPayloadBytes),
 			})
 		}
-		gt.NoError(t, sink.WriteTable(ctx, dataset, &export.Table{
-			Name: table, Columns: bigCols, Rows: rows,
-		})).Required()
+		gt.NoError(t, export.WriteTable(ctx, sink, dataset, table, bigCols, rows)).Required()
 
 		got := readRows(t, ctx, client, dataset, table)
 		gt.Array(t, got).Length(rowCount).Required()
