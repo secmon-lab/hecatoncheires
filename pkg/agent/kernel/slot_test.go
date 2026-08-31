@@ -148,7 +148,7 @@ func newSlotRuntime(t *testing.T, gate kernel.SlotGate) *slotRuntime {
 
 	cfg := budget.Config{MaxSteps: 16, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	handle, err := react.Register(reg, kernel.AgentCaseChannel, 1, cfg.Limiter(),
+	handle, err := react.Register(reg, kernel.AgentCaseChannel, 1, cfg.Limiter(testSpend()),
 		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
 	gt.NoError(t, err).Required()
 

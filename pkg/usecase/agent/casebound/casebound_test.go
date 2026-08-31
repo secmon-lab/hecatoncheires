@@ -152,7 +152,7 @@ func newHarness(t *testing.T, llm gollem.LLMClient, tools ...gollem.Tool) *harne
 	reg := agentkit.NewRegistry()
 	limiter := budget.Config{
 		MaxSteps: 32, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
-	}.Limiter()
+	}.Limiter(testModelPolicy(t).Resolve)
 	gt.NoError(t, uc.Register(reg, limiter, agentarchive.NewMemoryHistoryStore())).Required()
 
 	k, err := agentkit.New(procRepo, llm, reg,

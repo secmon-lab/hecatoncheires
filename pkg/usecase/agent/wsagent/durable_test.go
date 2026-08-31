@@ -23,7 +23,21 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/wsagent"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
+
+// testSpend is what these runs are judged against in money. A limiter with no
+// resolver stops every run, so one is required even though these tests are about
+// what the workspace agent replies rather than what it costs; the allowance is
+// far above anything they spend.
+func testSpend() budget.LimitResolver {
+	return func(*agentkit.Process) budget.RunLimit {
+		return budget.RunLimit{
+			Budget: pricing.FromUSD(1000),
+			Rate:   pricing.Rate{Input: 1, Output: 1},
+		}
+	}
+}
 
 const (
 	durableChannelID = "C-WS"
@@ -203,10 +217,10 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	store := agentarchive.NewMemoryHistoryStore()
 	cfg := budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(),
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend()),
 		agentkit.WithHistoryStore[react.Output](store))
 	gt.NoError(t, err).Required()
-	gt.NoError(t, wa.Register(reg, taskAgent, progress, cfg.Limiter(), store)).Required()
+	gt.NoError(t, wa.Register(reg, taskAgent, progress, cfg.Limiter(testSpend()), store)).Required()
 
 	k, err := agentkit.New(procRepo, llm, reg,
 		agentkit.WithToolFactory(func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {

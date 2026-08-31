@@ -201,10 +201,10 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	store := agentarchive.NewMemoryHistoryStore()
 	cfg := budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
 	reg := agentkit.NewRegistry()
-	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(),
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testModelPolicy(t).Resolve),
 		agentkit.WithHistoryStore[react.Output](store))
 	gt.NoError(t, err).Required()
-	gt.NoError(t, tc.Register(reg, taskAgent, nil, cfg.Limiter(), store)).Required()
+	gt.NoError(t, tc.Register(reg, taskAgent, nil, cfg.Limiter(testModelPolicy(t).Resolve), store)).Required()
 
 	k, err := agentkit.New(procRepo, llm, reg,
 		agentkit.WithToolFactory(func(context.Context, *agentkit.Process) ([]gollem.Tool, error) {

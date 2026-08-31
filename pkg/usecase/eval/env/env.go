@@ -232,7 +232,7 @@ func startAgentRuntime(repo interfaces.Repository, registry *model.WorkspaceRegi
 	}
 
 	reg := agentkit.NewRegistry()
-	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalTaskBudget.Limiter(), history)
+	taskAgent, err := agentkernel.RegisterTaskAgent(reg, evalTaskBudget.Limiter(models.Resolve), history)
 	if err != nil {
 		return nil, goerr.Wrap(err, "env: register the task sub-agent")
 	}

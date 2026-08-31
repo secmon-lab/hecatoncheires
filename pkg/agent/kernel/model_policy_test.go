@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -364,7 +365,7 @@ func (budgetPingTool) Run(context.Context, map[string]any) (map[string]any, erro
 // loopingLLM answers every Generate with the same tool call and the same token
 // counts, so it never produces an answer: a run it drives ends only when
 // something stops it. The counter is therefore how far the run got before the
-// ceiling closed, which is what the budget is supposed to decide.
+// ceiling closed.
 func loopingLLM(inputTokens, outputTokens int) (gollem.LLMClient, *atomic.Int32) {
 	var calls atomic.Int32
 	client := &mock.LLMClientMock{
@@ -379,6 +380,40 @@ func loopingLLM(inputTokens, outputTokens int) (gollem.LLMClient, *atomic.Int32)
 						InputToken:  inputTokens,
 						OutputToken: outputTokens,
 					}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+	return client, &calls
+}
+
+// budgetAwareLLM is loopingLLM for a model that HEEDS the reserve: it keeps
+// calling the tool until the system prompt tells it the reserve is spent, and
+// then answers. That is the behaviour the reserve asks for, so a run it drives
+// ends by concluding rather than by being stopped — which is what the money
+// ceiling now produces.
+func budgetAwareLLM(inputTokens, outputTokens int) (gollem.LLMClient, *atomic.Int32) {
+	var calls atomic.Int32
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, and agentkit builds a
+			// session per call, so it is read here and applies to this call.
+			cfg := gollem.NewSessionConfig(opts...)
+			return &mock.SessionMock{
+				GenerateFunc: func(context.Context, []gollem.Input, ...gollem.GenerateOption) (*gollem.Response, error) {
+					calls.Add(1)
+					res := &gollem.Response{InputToken: inputTokens, OutputToken: outputTokens}
+					if strings.Contains(cfg.SystemPrompt(), "The budget reserve is spent") {
+						res.Texts = []string{"here is what I found"}
+						return res, nil
+					}
+					res.FunctionCalls = []*gollem.FunctionCall{
+						{ID: "c", Name: "budget__ping", Arguments: map[string]any{}},
+					}
+					return res, nil
 				},
 				HistoryFunc: func() (*gollem.History, error) {
 					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
@@ -448,16 +483,25 @@ func runWithLimiter(t *testing.T, llm gollem.LLMClient, limiter agentkit.Limiter
 	}
 }
 
-// TestAConfiguredBudgetStopsTheRun is the end of the money path: the amount an
-// operator configured is what a real run is actually stopped at.
+// TestAConfiguredBudgetBoundsTheRun is the end of the money path: the amount an
+// operator configured is what decides how far a real run gets.
 //
 // Every piece leading up to it is pinned above — a Scope carries the run's model
 // and budget, Resolve turns them into a RunLimit, and budget.Root.Limiter turns a
-// RunLimit plus metrics into a decision — and none of that says a run stops. The
-// token-counted sub-agent ceiling has had such a test since it existed
-// (react.TestTokenBudgetsStopTheRun); the money ceiling every root run is bounded
-// by did not.
-func TestAConfiguredBudgetStopsTheRun(t *testing.T) {
+// RunLimit plus metrics into a decision — and none of that says a run is bounded
+// at all.
+//
+// What the budget produces is a NOTICE, not a Stop, so the run ends by
+// concluding: the model is told to make its final tool call and then to write its
+// result, and the process SUCCEEDS.
+//
+// The property this test exists for is that the WORKING calls — the ones before
+// the notice — are proportional to the budget and inversely proportional to the
+// model's price. The totals asserted below are those plus the reserve's two
+// moves, which is a constant: 4 + 2 against $0.10, 16 + 2 against $0.40. Four
+// times the budget therefore buys four times the work but not four times the
+// total, and comparing the totals directly is a misreading.
+func TestAConfiguredBudgetBoundsTheRun(t *testing.T) {
 	// The prices are round so the arithmetic is readable off the test: "main"
 	// costs $1 per MTok of input and $5 per MTok of output, "cheap" a quarter of
 	// each. Every Generate below reports 5,000 input and 3,000 output tokens, so
@@ -481,58 +525,102 @@ func TestAConfiguredBudgetStopsTheRun(t *testing.T) {
 		return p
 	}
 
+	// The reserve's two moves: the final tool call, then the result written from
+	// it. They are a constant on top of whatever the budget bought.
+	const reserveMoves = int32(2)
+
 	// MaxSteps is far above the transitions the longest case below runs, so the
-	// step ceiling cannot be what ends these runs. The asserted message says
-	// which ceiling did.
+	// step ceiling — the one thing here that IS a Stop — cannot be what ends these
+	// runs. Each run must end by concluding instead.
+	//
+	// The notice fires at 80% of the budget, measured against what previous calls
+	// committed: with a $0.10 budget and $0.02 per call, four committed calls make
+	// $0.08 and the FIFTH call is the reserve's first move. The sixth writes the
+	// result, so a $0.10 budget buys six calls.
 	root := budget.Root{MaxSteps: 1000, NoticeRatio: 0.8}
 
 	testCases := map[string]struct {
 		defaultBudget pricing.NanoUSD
 		scope         kernel.Scope
-		wantCalls     int32
-		wantMessage   string
+		// wantWorkingCalls is the calls made before the notice; wantCalls is that
+		// plus the reserve's two moves, which is what the run actually makes.
+		wantWorkingCalls int32
+		wantCalls        int32
 	}{
 		"a run naming no budget is bounded by the deployment default": {
-			defaultBudget: pricing.FromUSD(0.10), // $0.10 at $0.02 per call
-			scope:         kernel.Scope{},
-			wantCalls:     5,
-			wantMessage:   "cost budget exhausted ($0.10/$0.10)",
+			defaultBudget:    pricing.FromUSD(0.10), // $0.10 at $0.02 per call
+			scope:            kernel.Scope{},
+			wantWorkingCalls: 4,
+			wantCalls:        6,
 		},
 		"the run's own budget bounds it below the deployment default": {
-			defaultBudget: pricing.FromUSD(0.40),
-			scope:         kernel.Scope{Budget: pricing.FromUSD(0.10)},
-			wantCalls:     5,
-			wantMessage:   "cost budget exhausted ($0.10/$0.10)",
+			defaultBudget:    pricing.FromUSD(0.40),
+			scope:            kernel.Scope{Budget: pricing.FromUSD(0.10)},
+			wantWorkingCalls: 4,
+			wantCalls:        6,
 		},
-		"a larger budget buys proportionally more of the same work": {
-			defaultBudget: pricing.FromUSD(0.40), // $0.40 at $0.02 per call
-			scope:         kernel.Scope{},
-			wantCalls:     20,
-			wantMessage:   "cost budget exhausted ($0.40/$0.40)",
+		"four times the budget buys four times the working calls": {
+			// $0.40 at $0.02 per call: 16 committed calls make the $0.32 threshold,
+			// so the 17th is the reserve's first move and the 18th writes the result.
+			defaultBudget:    pricing.FromUSD(0.40),
+			scope:            kernel.Scope{},
+			wantWorkingCalls: 16,
+			wantCalls:        18,
 		},
 		// The reason the ceiling is money rather than tokens: the same budget and
 		// the same token counts reach four times as far on a model priced at a
 		// quarter of the other.
-		"the same budget goes further on a cheaper model": {
-			defaultBudget: pricing.FromUSD(0.10), // $0.10 at $0.005 per call
-			scope:         kernel.Scope{LLMModel: "cheap"},
-			wantCalls:     20,
-			wantMessage:   "cost budget exhausted ($0.10/$0.10)",
+		"the same budget goes four times further on a model priced at a quarter": {
+			defaultBudget:    pricing.FromUSD(0.10), // $0.10 at $0.005 per call
+			scope:            kernel.Scope{LLMModel: "cheap"},
+			wantWorkingCalls: 16,
+			wantCalls:        18,
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			llm, calls := loopingLLM(5000, 3000)
+			llm, calls := budgetAwareLLM(5000, 3000)
 			proc := runUntilStopped(t, llm, root, newPolicy(t, tc.defaultBudget), tc.scope)
 
-			gt.Value(t, proc.Status).Equal(agentkit.ProcessFailed)
-			gt.Value(t, proc.Failure).NotNil().Required()
-			gt.Value(t, proc.Failure.Code).Equal(agentkit.FailureLimitExceeded)
-			gt.String(t, proc.Failure.Message).Contains(tc.wantMessage)
+			// Out of money is not a failure: the run was told to conclude and did.
+			gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+			gt.Value(t, proc.Failure).Nil()
 			gt.Value(t, calls.Load()).Equal(tc.wantCalls)
+			// Stated separately so the proportional figure is the one a reader
+			// compares between cases, not the total it is buried in.
+			gt.Value(t, calls.Load()-reserveMoves).Equal(tc.wantWorkingCalls)
 		})
 	}
+}
+
+// TestASpentBudgetNeverFailsARun is the other half of the sentence above: a model
+// that IGNORES the reserve is not rescued by the money ceiling, because the money
+// ceiling no longer stops anything. What ends such a run is the step ceiling.
+//
+// It matters because a Stop is read before Step and leaves the strategy no
+// transition in which to record what it already did. Whatever ends a run out of
+// money, it must not be the budget.
+func TestASpentBudgetNeverFailsARun(t *testing.T) {
+	policy, err := kernel.NewModelPolicy(kernel.ModelPolicyInput{
+		Defs:          []kernel.ModelDef{modelDef("main", "main-model", pricing.Rate{Input: 1000, Output: 5000})},
+		DefaultRef:    "main",
+		DefaultBudget: pricing.FromUSD(0.10), // $0.10 at $0.02 per call: spent by the fifth call
+	})
+	gt.NoError(t, err).Required()
+
+	// 16 steps is 8 generate/tool rounds, so the run is far past its budget by the
+	// time the step ceiling closes.
+	root := budget.Root{MaxSteps: 16, NoticeRatio: 0.8}
+	llm, calls := loopingLLM(5000, 3000)
+	proc := runUntilStopped(t, llm, root, policy, kernel.Scope{})
+
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessFailed)
+	gt.Value(t, proc.Failure).NotNil().Required()
+	gt.Value(t, proc.Failure.Code).Equal(agentkit.FailureLimitExceeded)
+	// The step ceiling, not the budget — even though the budget was spent first.
+	gt.String(t, proc.Failure.Message).Contains("step budget exhausted")
+	gt.Number(t, calls.Load()).GreaterOrEqual(6)
 }
 
 // TestAnUnpricedRunIsStoppedBeforeItSpends pins the fail-closed half through a

@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 )
 
 // recordingTool records every call so a test can assert what the model actually
@@ -160,9 +161,18 @@ type runtime struct {
 
 func newRuntime(t *testing.T, llm gollem.LLMClient, cfg budget.Config, tools ...gollem.Tool) *runtime {
 	t.Helper()
+	return newRuntimeWithSpend(t, llm, cfg, testSpend(), tools...)
+}
+
+// newRuntimeWithSpend is newRuntime with the money resolver named, for a test
+// about the money ceiling rather than the step or token ones.
+func newRuntimeWithSpend(t *testing.T, llm gollem.LLMClient, cfg budget.Config,
+	spend budget.LimitResolver, tools ...gollem.Tool,
+) *runtime {
+	t.Helper()
 
 	reg := agentkit.NewRegistry()
-	handle, err := react.Register(reg, "react-test", 1, cfg.Limiter(),
+	handle, err := react.Register(reg, "react-test", 1, cfg.Limiter(spend),
 		agentkit.WithHistoryStore[react.Output](agentarchive.NewMemoryHistoryStore()))
 	gt.NoError(t, err).Required()
 
@@ -214,6 +224,20 @@ func callResponse(calls ...*gollem.FunctionCall) *gollem.Response {
 
 func generousBudget() budget.Config {
 	return budget.Config{MaxSteps: 64, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8}
+}
+
+// testSpend is what these runs are judged against in money. A limiter with no
+// resolver stops every run, so one is required even where the test is about a
+// step or token ceiling; this prices a run far below its allowance so the money
+// arm stays out of the way. TestABudgetNoticeFromTheMoneyCeiling supplies its
+// own instead.
+func testSpend() budget.LimitResolver {
+	return func(*agentkit.Process) budget.RunLimit {
+		return budget.RunLimit{
+			Budget: pricing.FromUSD(1000),
+			Rate:   pricing.Rate{Input: 1, Output: 1},
+		}
+	}
 }
 
 // TestAnswerWithoutTools pins the shortest run: one LLM call, no tools, done.
@@ -654,6 +678,50 @@ func TestTheReserveAllowsOneFinalToolCall(t *testing.T) {
 	gt.Value(t, seen[2].answered).Equal([]string{"c2"})
 	gt.String(t, seen[2].text).Equal("")
 	// Both rounds actually ran; the reserve's instruction is not a dry run.
+	gt.Array(t, tool.Calls()).Length(2)
+}
+
+// TestABudgetNoticeFromTheMoneyCeilingStillReachesTheReserve pins that a
+// sub-agent out of MONEY gets the same two moves a sub-agent out of steps gets.
+//
+// It matters because money is the one ceiling that never stops a run: it answers
+// LimitNotice however far past the allowance the run is, so if react did not act
+// on that notice a spent child would simply keep generating until a token or
+// step ceiling killed it — with the call its task was for still unmade. Nothing
+// in react changed for this; the test fixes the behaviour so a later change to
+// the notice wording or ordering cannot quietly drop it.
+func TestABudgetNoticeFromTheMoneyCeilingStillReachesTheReserve(t *testing.T) {
+	tool := &recordingTool{name: "knowledge__create_knowledge"}
+	call := func(id string) *gollem.Response {
+		return callResponse(&gollem.FunctionCall{
+			ID: id, Name: "knowledge__create_knowledge", Arguments: map[string]any{},
+		})
+	}
+	llm, inputs := inputRecordingLLM(t, call("c1"), call("c2"), textResponse("recorded"))
+
+	// callResponse reports 5 input and 3 output tokens, so one round costs 8
+	// NanoUSD at this rate: the opening Generate is clean and every later one is
+	// past the allowance. The step and token ceilings are far out of reach, so
+	// nothing but the money arm can produce a verdict here.
+	spentAfterOneRound := func(*agentkit.Process) budget.RunLimit {
+		return budget.RunLimit{Budget: 6, Rate: pricing.Rate{Input: 1, Output: 1}}
+	}
+	rt := newRuntimeWithSpend(t, llm, budget.Config{
+		MaxSteps: 100, MaxInputTokens: 100_000, MaxOutputTokens: 100_000, NoticeRatio: 0.8,
+	}, spentAfterOneRound, tool)
+
+	proc := rt.run(t, react.Input{SystemPrompt: "be helpful", Prompt: "record what you found"})
+	// Out of money is not a failure. The run concludes itself.
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := inputs()
+	gt.Array(t, seen).Length(3).Required()
+	// The limiter's own message rides in front of the instruction, so the model is
+	// told which ceiling it crossed as well as what to do about it.
+	gt.String(t, seen[1].systemPrompt).Contains("cost budget exhausted")
+	gt.String(t, seen[1].systemPrompt).Contains("THIS turn is your final tool call")
+	gt.String(t, seen[2].systemPrompt).Contains("The budget reserve is spent")
+	// The write the task existed for actually happened, on both rounds.
 	gt.Array(t, tool.Calls()).Length(2)
 }
 

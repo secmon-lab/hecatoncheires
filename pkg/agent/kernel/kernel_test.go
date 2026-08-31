@@ -25,6 +25,12 @@ func rootOf(cfg budget.Config) budget.Root {
 	return budget.Root{MaxSteps: cfg.MaxSteps, NoticeRatio: cfg.NoticeRatio}
 }
 
+// testSpend is what a limiter in this package judges money against. Both tiers
+// need one — a Limiter with no resolver stops every run — and the policy it
+// comes from prices a test far below its $10 budget, so the money arm never
+// fires and each test exercises the ceiling it actually names.
+func testSpend() budget.LimitResolver { return kernel.ModelPolicyForTest().Resolve }
+
 func validBudgets() kernel.Budgets {
 	return kernel.Budgets{
 		Root: budget.Root{MaxSteps: 64, NoticeRatio: 0.8},
