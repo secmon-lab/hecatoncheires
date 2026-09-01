@@ -425,13 +425,15 @@ func TestConcurrencyLimiter_KeyIsValidated(t *testing.T) {
 // heartbeat. Every method is safe for concurrent use because the renew loop
 // runs in its own goroutine.
 type fakeSlotRepo struct {
-	mu         sync.Mutex
-	slots      map[int]model.JobSlot
-	listErr    error
-	acquireErr error
-	renewErr   error
-	renewCalls []renewCall
-	renewed    chan struct{}
+	mu           sync.Mutex
+	slots        map[int]model.JobSlot
+	listErr      error
+	acquireErr   error
+	renewErr     error
+	renewCalls   []renewCall
+	renewed      chan struct{}
+	renewStarted chan struct{}
+	renewProceed chan struct{}
 }
 
 type renewCall struct {
@@ -475,6 +477,10 @@ func (f *fakeSlotRepo) TryAcquire(_ context.Context, slot *model.JobSlot, now ti
 }
 
 func (f *fakeSlotRepo) Renew(_ context.Context, index int, holderID string, expiresAt time.Time) error {
+	if f.renewStarted != nil {
+		f.renewStarted <- struct{}{}
+		<-f.renewProceed
+	}
 	f.mu.Lock()
 	f.renewCalls = append(f.renewCalls, renewCall{index: index, holderID: holderID, expiresAt: expiresAt})
 	err := f.renewErr
@@ -673,7 +679,7 @@ func TestConcurrencyLimiter_HeartbeatStopsAfterMaxHold(t *testing.T) {
 }
 
 func TestConcurrencyLimiter_HeartbeatStopsWhenSlotTakenOver(t *testing.T) {
-	ctx := context.Background()
+	ctx, out := jsonLogContext(context.Background())
 	repo := newFakeSlotRepo()
 	repo.renewErr = goerr.Wrap(interfaces.ErrJobSlotNotHeld, "taken over")
 	clock := newTestClock()
@@ -687,8 +693,58 @@ func TestConcurrencyLimiter_HeartbeatStopsWhenSlotTakenOver(t *testing.T) {
 	async.Wait()
 	calls := repo.renewSnapshot()
 	gt.Array(t, calls).Length(1)
+	rec, ok := findLogRecord(out.lines(), "job: renew concurrency slot")
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, rec["level"]).Equal("ERROR")
 
 	job.ReleaseSlotForTest(ctx, hold)
+}
+
+func TestConcurrencyLimiter_HeartbeatDoesNotReportSlotLossAfterRelease(t *testing.T) {
+	ctx, out := jsonLogContext(context.Background())
+	repo := newFakeSlotRepo()
+	repo.renewStarted = make(chan struct{}, 1)
+	repo.renewProceed = make(chan struct{})
+	clock := newTestClock()
+	limiter := newFastLimiter(t, repo, 1, clock, testSlotMaxHold)
+
+	hold, err := job.AcquireSlotForTest(ctx, limiter, slotKey(0))
+	gt.NoError(t, err).Required()
+	gt.Value(t, hold).NotNil().Required()
+	<-repo.renewStarted
+
+	// Release deletes the record while the heartbeat's renewal is in flight.
+	// The resulting ErrJobSlotNotHeld belongs to normal shutdown, not takeover.
+	job.ReleaseSlotForTest(ctx, hold)
+	close(repo.renewProceed)
+	async.Wait()
+
+	_, reported := findLogRecord(out.lines(), "job: renew concurrency slot")
+	gt.Bool(t, reported).False()
+}
+
+func TestConcurrencyLimiter_HeartbeatDoesNotReportSlotLossAfterContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx, out := jsonLogContext(ctx)
+	repo := newFakeSlotRepo()
+	repo.renewErr = goerr.Wrap(interfaces.ErrJobSlotNotHeld, "taken over")
+	repo.renewStarted = make(chan struct{}, 1)
+	repo.renewProceed = make(chan struct{})
+	clock := newTestClock()
+	limiter := newFastLimiter(t, repo, 1, clock, testSlotMaxHold)
+
+	hold, err := job.AcquireSlotForTest(ctx, limiter, slotKey(0))
+	gt.NoError(t, err).Required()
+	gt.Value(t, hold).NotNil().Required()
+	<-repo.renewStarted
+
+	cancel()
+	close(repo.renewProceed)
+	async.Wait()
+
+	_, reported := findLogRecord(out.lines(), "job: renew concurrency slot")
+	gt.Bool(t, reported).False()
+	job.ReleaseSlotForTest(context.Background(), hold)
 }
 
 func TestConcurrencyLimiter_HeartbeatSurvivesTransientRenewFailure(t *testing.T) {
