@@ -308,6 +308,16 @@ func (l *ConcurrencyLimiter) startRenew(ctx context.Context, hold *slotHold, acq
 					continue
 				}
 				if errors.Is(err, interfaces.ErrJobSlotNotHeld) {
+					// Release and cancellation may happen while Renew is already in
+					// flight. In that case the repository can report the record as
+					// missing after the hold has begun its normal shutdown.
+					select {
+					case <-ctx.Done():
+						return nil
+					case <-hold.stop:
+						return nil
+					default:
+					}
 					// The slot expired and another run took it over. Killing
 					// this in-flight LLM run would waste the work already
 					// spent, so report and stop renewing while it continues.
