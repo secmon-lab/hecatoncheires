@@ -29,6 +29,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
+const eventPersistenceTimeout = 5 * time.Second
+
 // Routing carries the immutable identifiers stamped on every JobRunEvent
 // emitted by a Handler instance. Captured at construction time so individual
 // hook calls do not need to thread them through.
@@ -574,7 +576,7 @@ func (h *Handler) EmitRunError(ctx context.Context, stage, message string) error
 		Stage:   stage,
 		Message: Truncate(message, model.MaxInlineBytes),
 	}
-	if err := h.eventRepo.AppendNext(ctx, ev); err != nil {
+	if err := h.appendNext(ctx, ev); err != nil {
 		return goerr.Wrap(err, "append run_error event",
 			goerr.V("run_id", h.routing.RunID))
 	}
@@ -616,7 +618,7 @@ func (h *Handler) append(ctx context.Context, ev *model.JobRunEvent) {
 	// the same run — a durable run reclaimed by another instance, or the run
 	// owner's RUN_ERROR racing a per-call event — would otherwise pick the same
 	// number and List would order the timeline arbitrarily between them.
-	if err := h.eventRepo.AppendNext(ctx, ev); err != nil {
+	if err := h.appendNext(ctx, ev); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "append job run event",
 			goerr.V("run_id", h.routing.RunID),
 			goerr.V("sequence", ev.Sequence),
@@ -643,6 +645,15 @@ func (h *Handler) append(ctx context.Context, ev *model.JobRunEvent) {
 		}
 		logger.Debug("appended job run event", attrs...)
 	}
+}
+
+func (h *Handler) appendNext(ctx context.Context, ev *model.JobRunEvent) error {
+	// A claim cancellation must stop agent work, but it must not discard the
+	// event that describes how that work ended. The timeout keeps this detached
+	// Firestore write from delaying shutdown indefinitely.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), eventPersistenceTimeout)
+	defer cancel()
+	return h.eventRepo.AppendNext(persistCtx, ev)
 }
 
 func spanFromContext(ctx context.Context) *handlerSpan {

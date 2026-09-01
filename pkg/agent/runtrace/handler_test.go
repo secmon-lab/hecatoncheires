@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
@@ -33,6 +34,100 @@ func newHandlerFixture(t *testing.T) (*runtrace.Handler, *memory.Memory) {
 	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
 	h := runtrace.NewHandler(repo.JobRunEvent(), routing, clock)
 	return h, repo
+}
+
+type appendObservation struct {
+	ctxErr      error
+	deadline    time.Time
+	hasDeadline bool
+	kind        model.JobRunEventKind
+}
+
+type observingEventRepository struct {
+	interfaces.JobRunEventRepository
+	mu           sync.Mutex
+	next         int64
+	appendErr    error
+	observations []appendObservation
+}
+
+func (r *observingEventRepository) AppendNext(ctx context.Context, ev *model.JobRunEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deadline, hasDeadline := ctx.Deadline()
+	r.observations = append(r.observations, appendObservation{
+		ctxErr:      ctx.Err(),
+		deadline:    deadline,
+		hasDeadline: hasDeadline,
+		kind:        ev.Kind,
+	})
+	if r.appendErr != nil {
+		return r.appendErr
+	}
+	r.next++
+	ev.Sequence = r.next
+	return nil
+}
+
+func (r *observingEventRepository) snapshot() []appendObservation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]appendObservation(nil), r.observations...)
+}
+
+func assertFiveSecondPersistenceContext(t *testing.T, startedAt time.Time, obs appendObservation) {
+	t.Helper()
+	gt.NoError(t, obs.ctxErr)
+	gt.Bool(t, obs.hasDeadline).True()
+	gt.Bool(t, obs.deadline.After(startedAt.Add(4*time.Second))).True()
+	gt.Bool(t, obs.deadline.Before(startedAt.Add(6*time.Second))).True()
+}
+
+func TestHandler_PersistsLLMEventsAfterClaimCancellation(t *testing.T) {
+	repo := &observingEventRepository{}
+	h := runtrace.NewHandler(repo, runtrace.Routing{
+		WorkspaceID: "ws1", CaseID: 42, JobID: "job-A", RunID: "run-1", TraceID: "trace-1",
+	}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	startedAt := time.Now()
+	h.EndLLMCall(h.StartLLMCall(ctx), &trace.LLMCallData{Model: "model"}, nil)
+
+	observations := repo.snapshot()
+	gt.Array(t, observations).Length(2).Required()
+	gt.Value(t, observations[0].kind).Equal(model.JobRunEventKindLLMRequest)
+	gt.Value(t, observations[1].kind).Equal(model.JobRunEventKindLLMResponse)
+	for _, obs := range observations {
+		assertFiveSecondPersistenceContext(t, startedAt, obs)
+	}
+}
+
+func TestHandler_PersistsRunErrorAfterClaimCancellation(t *testing.T) {
+	repo := &observingEventRepository{}
+	h := runtrace.NewHandler(repo, runtrace.Routing{
+		WorkspaceID: "ws1", CaseID: 42, JobID: "job-A", RunID: "run-1", TraceID: "trace-1",
+	}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	startedAt := time.Now()
+	gt.NoError(t, h.EmitRunError(ctx, "execute", "claim stopped")).Required()
+
+	observations := repo.snapshot()
+	gt.Array(t, observations).Length(1).Required()
+	gt.Value(t, observations[0].kind).Equal(model.JobRunEventKindRunError)
+	assertFiveSecondPersistenceContext(t, startedAt, observations[0])
+}
+
+func TestHandler_EmitRunErrorReturnsPersistenceError(t *testing.T) {
+	persistErr := errors.New("persistence failed")
+	repo := &observingEventRepository{appendErr: persistErr}
+	h := runtrace.NewHandler(repo, runtrace.Routing{
+		WorkspaceID: "ws1", CaseID: 42, JobID: "job-A", RunID: "run-1", TraceID: "trace-1",
+	}, nil)
+
+	gt.Error(t, h.EmitRunError(context.Background(), "execute", "failed")).Is(persistErr)
 }
 
 // TestHandler_EventsCarryTheirOwnProcess pins what makes a sub-agent's calls
