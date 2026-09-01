@@ -16,7 +16,7 @@ import (
 // frontend prioritises display, so a reporter whose SlackUser is missing from
 // the repository (an unsynced thread-mode poster, a deleted account, ...)
 // resolves to null WITHOUT a field-level GraphQL error that would fail the
-// whole `cases` query (Sentry ARGUS-7S). Ops visibility is preserved by the
+// whole `cases` query, as it did in production. Ops visibility is preserved by the
 // SlackUser dataloader, which reports missing IDs via errutil.Handle.
 func TestCaseResolver_Reporter(t *testing.T) {
 	repo := memory.New()

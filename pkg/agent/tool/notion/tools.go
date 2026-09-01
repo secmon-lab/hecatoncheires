@@ -114,7 +114,7 @@ func (t *searchTool) Run(ctx context.Context, args map[string]any) (map[string]a
 
 // readToolFor names the tool that reads a search hit of the given type. It is
 // carried on every item because the type alone did not stop the agent from
-// sending a database id to notion__get_page (ARGUS-91): the routing is stated
+// sending a database id to notion__get_page: the routing is stated
 // as data the model can follow, not only as prose in the tool descriptions.
 // An unrecognised type gets no name rather than a guess.
 func readToolFor(itemType string) string {
@@ -174,7 +174,7 @@ func (t *getPageTool) Run(ctx context.Context, args map[string]any) (map[string]
 // It exists because notion__search reports databases as well as pages while
 // notion__get_page reads pages only. With no tool for the database half, the
 // agent fed each database id it had found to notion__get_page and Notion
-// answered "is a database, not a page" once per hit (ARGUS-91).
+// answered "is a database, not a page" once per hit.
 type getDatabaseTool struct {
 	client Client
 }

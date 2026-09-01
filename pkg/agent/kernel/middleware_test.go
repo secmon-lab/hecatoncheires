@@ -1076,7 +1076,7 @@ func failedToolResponse(t *testing.T, messages []gollem.Message) string {
 // goerr renders a chain as "message: message: message" and keeps everything
 // attached with goerr.V out of that string, so the model was told "Jira API
 // returned non-2xx" while the parser error naming the broken character sat in a
-// value it never saw (ARGUS-96). A model that cannot see why its query was
+// value it never saw. A model that cannot see why its query was
 // refused re-emits the same query.
 func TestAFailedToolCallTellsTheModelWhyItFailed(t *testing.T) {
 	ctx := context.Background()

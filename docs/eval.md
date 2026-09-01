@@ -284,7 +284,7 @@ and tool usage.
 `notion__search` reports databases as well as pages, and only `notion__get_database`
 can read one — passing a database id to `notion__get_page` fails with
 `400 validation_error: … is a database, not a page`. That is what a production
-agent did (ARGUS-91), so it is worth a check.
+agent did, so it is worth a check.
 
 Describe a database in the tool background. The simulator asks its LLM for typed
 hits, so a background naming a database produces a hit typed `database`:
