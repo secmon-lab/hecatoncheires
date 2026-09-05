@@ -1140,3 +1140,124 @@ describe('CaseList updated column and date filter', () => {
     expect(screen.getByText('Touched later')).toBeInTheDocument()
   })
 })
+
+describe('CaseList status and assignee filters', () => {
+  const user = (id: string, name: string) => ({
+    __typename: 'SlackUser',
+    id,
+    name,
+    realName: name,
+    imageUrl: null,
+  })
+
+  const ALICE = user('U-ALICE', 'Alice')
+  const BOB = user('U-BOB', 'Bob')
+
+  // One row per combination the filters have to tell apart: a status with an
+  // assignee, the same assignee in another status, a different assignee, and
+  // one nobody has picked up.
+  const rows = (): CaseRowMock[] => [
+    { ...caseRow(21, 'Triage Alice', 'OPEN'), boardStatus: 'triage', assigneeIDs: [ALICE.id], assignees: [ALICE] },
+    { ...caseRow(22, 'Review Alice', 'OPEN'), boardStatus: 'in_review', assigneeIDs: [ALICE.id], assignees: [ALICE] },
+    { ...caseRow(23, 'Review Bob', 'OPEN'), boardStatus: 'in_review', assigneeIDs: [BOB.id], assignees: [BOB] },
+    { ...caseRow(24, 'Triage nobody', 'OPEN'), boardStatus: 'triage' },
+  ]
+
+  const renderThreadList = (openRows = rows()) =>
+    renderAt('/ws/risk/cases', openRows, undefined, THREAD_STATUS_CONFIG)
+
+  const pick = (testId: string, optionId: string) => {
+    fireEvent.click(screen.getByTestId(`${testId}-button`))
+    fireEvent.click(screen.getByTestId(`${testId}-option-${optionId}`))
+  }
+
+  it('narrows to the selected board status', async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    pick('status-filter', 'in_review')
+
+    expect(screen.getByText('Review Alice')).toBeInTheDocument()
+    expect(screen.getByText('Review Bob')).toBeInTheDocument()
+    expect(screen.queryByText('Triage Alice')).not.toBeInTheDocument()
+    expect(screen.queryByText('Triage nobody')).not.toBeInTheDocument()
+  })
+
+  it("treats two selections within one filter as 'either'", async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    pick('status-filter', 'in_review')
+    fireEvent.click(screen.getByTestId('status-filter-option-triage'))
+
+    // Every row is in one status or the other, so nothing is dropped.
+    expect(screen.getByText('Triage Alice')).toBeInTheDocument()
+    expect(screen.getByText('Review Bob')).toBeInTheDocument()
+    expect(screen.getByText('Triage nobody')).toBeInTheDocument()
+  })
+
+  it('narrows to the selected assignee', async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    pick('assignee-filter', ALICE.id)
+
+    expect(screen.getByText('Triage Alice')).toBeInTheDocument()
+    expect(screen.getByText('Review Alice')).toBeInTheDocument()
+    expect(screen.queryByText('Review Bob')).not.toBeInTheDocument()
+    expect(screen.queryByText('Triage nobody')).not.toBeInTheDocument()
+  })
+
+  it('offers Unassigned, and it selects the rows nobody holds', async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage nobody')).toBeInTheDocument()
+
+    pick('assignee-filter', '__unassigned__')
+
+    expect(screen.getByText('Triage nobody')).toBeInTheDocument()
+    expect(screen.queryByText('Triage Alice')).not.toBeInTheDocument()
+  })
+
+  it('omits Unassigned when every row has somebody', async () => {
+    renderThreadList(rows().filter((r) => r.assignees.length > 0))
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('assignee-filter-button'))
+    expect(screen.queryByTestId('assignee-filter-option- unassigned')).not.toBeInTheDocument()
+    expect(screen.getByTestId(`assignee-filter-option-${ALICE.id}`)).toBeInTheDocument()
+  })
+
+  it('ANDs the two filters together', async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    pick('status-filter', 'in_review')
+    pick('assignee-filter', ALICE.id)
+
+    // In review AND held by Alice — only one row satisfies both.
+    expect(screen.getByText('Review Alice')).toBeInTheDocument()
+    expect(screen.queryByText('Review Bob')).not.toBeInTheDocument()
+    expect(screen.queryByText('Triage Alice')).not.toBeInTheDocument()
+  })
+
+  it('restores every row when a filter is cleared', async () => {
+    renderThreadList()
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    pick('status-filter', 'in_review')
+    expect(screen.queryByText('Triage Alice')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('status-filter-clear'))
+    expect(screen.getByText('Triage Alice')).toBeInTheDocument()
+    expect(screen.getByText('Review Bob')).toBeInTheDocument()
+  })
+
+  it('hides the status filter in a channel-mode workspace', async () => {
+    // No board statuses exist there, so the control would offer nothing.
+    renderAt('/ws/risk/cases', rows())
+    expect(await screen.findByText('Triage Alice')).toBeInTheDocument()
+
+    expect(screen.queryByTestId('status-filter-button')).not.toBeInTheDocument()
+    expect(screen.getByTestId('assignee-filter-button')).toBeInTheDocument()
+  })
+})
