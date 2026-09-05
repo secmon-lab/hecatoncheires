@@ -163,7 +163,7 @@ function CaseRow({ row, now, t, wsVisual }: { row: MyOpenCase; now: Date; t: TFu
       onKeyDown={activateOnEnterOrSpace(activate)}
       data-testid="home-case-row"
     >
-      <Link to={caseHref} className={styles.caseTitleLink} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+      <Link to={caseHref} className={styles.caseTitleLink} title={row.case.title} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         {row.case.title}
       </Link>
       <span className={styles.statusCell}>

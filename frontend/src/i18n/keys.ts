@@ -184,6 +184,8 @@ export const msgKeys = {
   headerStatus: 'headerStatus',
   headerDueDate: 'headerDueDate',
   headerCreated: 'headerCreated',
+  headerUpdated: 'headerUpdated',
+  filterUpdatedOn: 'filterUpdatedOn',
   emptyActionsTitle: 'emptyActionsTitle',
   emptyActionsDesc: 'emptyActionsDesc',
   btnAddAction: 'btnAddAction',

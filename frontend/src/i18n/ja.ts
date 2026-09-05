@@ -186,6 +186,8 @@ export const ja: Messages = {
   headerStatus: 'ステータス',
   headerDueDate: '期限',
   headerCreated: '作成日',
+  headerUpdated: '更新日',
+  filterUpdatedOn: '更新日で絞り込み',
   emptyActionsTitle: 'アクションはまだありません',
   emptyActionsDesc: 'このケースの最初のアクションを作成してください',
   btnAddAction: 'アクションを追加',
