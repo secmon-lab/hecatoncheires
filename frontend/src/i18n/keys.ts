@@ -186,6 +186,8 @@ export const msgKeys = {
   headerCreated: 'headerCreated',
   headerUpdated: 'headerUpdated',
   filterUpdatedOn: 'filterUpdatedOn',
+  filterClear: 'filterClear',
+  filterNone: 'filterNone',
   emptyActionsTitle: 'emptyActionsTitle',
   emptyActionsDesc: 'emptyActionsDesc',
   btnAddAction: 'btnAddAction',
