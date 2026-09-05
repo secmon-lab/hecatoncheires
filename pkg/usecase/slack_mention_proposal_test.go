@@ -1553,3 +1553,11 @@ func TestMentionDraftUseCase_HandleAppMention_AttachmentOnlyMentionText(t *testi
 	}
 	gt.Bool(t, sawMentionBody).True()
 }
+
+func (m *collectorOnlyMockSlack) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (m *collectorOnlyMockSlack) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

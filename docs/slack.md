@@ -93,6 +93,7 @@ Then start the server:
      - `groups:read` (to read private channel information and receive membership events)
      - `groups:write` (to create private channels for private cases)
      - `reactions:read` (optional — required only when a thread-mode workspace sets `[slack] reaction`; lets the bot receive `reaction_added` events for messages it can see)
+     - `reactions:write` (optional — required only when a thread-mode workspace sets `[slack.reactions]`; lets the bot mark a Case's root message as assigned or closed)
      - `team:read` (to list workspaces for org-level Slack app support)
      - `usergroups:read` (to list user groups and their members for auto-invite)
      - `users:read` (to fetch user profile information including avatar images)

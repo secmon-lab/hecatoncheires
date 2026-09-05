@@ -93,6 +93,16 @@ type Service interface {
 	// wholesale, so callers must pass the complete desired set each time.
 	UpdateMessageWithAttachments(ctx context.Context, channelID string, timestamp string, text string, attachments []slack.Attachment) error
 
+	// AddReaction adds an emoji reaction (a name without surrounding colons)
+	// to the message at channelID/timestamp. Adding one that is already there
+	// is not an error: callers announce state, and the same state may be
+	// announced twice by a retry or a concurrent write.
+	AddReaction(ctx context.Context, channelID string, timestamp string, name string) error
+
+	// RemoveReaction removes this bot's emoji reaction from the message.
+	// Removing one that is not there is not an error, for the same reason.
+	RemoveReaction(ctx context.Context, channelID string, timestamp string, name string) error
+
 	// GetConversationReplies retrieves messages from a thread.
 	GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error)
 

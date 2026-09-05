@@ -659,3 +659,11 @@ func TestSlackUserRefreshWorker_WSLevelNoTeamIDs(t *testing.T) {
 	// Should have 2 users from default (non-team-scoped) call
 	gt.Number(t, len(users)).Equal(2)
 }
+
+func (m *mockSlackService) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (m *mockSlackService) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

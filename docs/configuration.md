@@ -519,6 +519,36 @@ channel_prefix = "risk"
 | `reaction` | string | No | — | Thread mode only. Emoji name (with or without surrounding colons, e.g. `incident` or `:incident:`) that starts a Case when added to a message. Must be **unique across workspaces**. Setting it in channel mode is a config error. Requires the `reactions:read` scope and the `reaction_added` event subscription; the bot must be a member of any channel where the emoji is used. See [Reaction-triggered case creation](slack.md#reaction-triggered-case-creation). |
 | `workspace_channel` | string | No | — | **Channel mode only.** A workspace-level shared channel ID (e.g. `C0123456789`) where the cross-case **workspace agent** runs. Parallels `channel` (the thread-mode monitored channel) but is a distinct role. Must be **unique across workspaces** (and must not collide with any workspace's monitored `channel`). Setting it in thread mode is a config error — there the monitored channel already hosts the agent. The bot must be a member. See [Workspace agent](#workspace-agent). |
 
+#### `[slack.reactions]` — status reactions (thread mode)
+
+Emoji the bot puts on a Case's **root message**, so a reader can tell from the
+channel list which requests are being handled and which are finished without
+opening a thread. Both are optional and independent; an omitted subsection
+leaves every reaction off.
+
+| Key | Added when | Removed when |
+|-----|------------|--------------|
+| `assigned` | the Case gains its first assignee | its last assignee is removed |
+| `closed` | the Case moves into a closed status | the Case reopens |
+
+```toml
+[slack.reactions]
+assigned = "eyes"
+closed = "white_check_mark"
+```
+
+These are Slack emoji **names** (`white_check_mark`), which is what
+`reactions.add` takes — *not* the glyph. They deliberately do not reuse the
+`emoji` on [`[[case.status]]`](#case-status-thread-mode), which is a display
+glyph for the web UI; a glyph here is rejected at config load rather than
+failing later at Slack.
+
+Requires the **`reactions:write`** scope. Thread mode only — a channel-mode
+Case has no root message to react to, so setting these in channel mode is a
+config error. Adding a reaction that is already present (or removing one that
+is not) is treated as success, so a retry or an operator who reacted by hand
+first does not produce an error.
+
 When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 
 If `channel_prefix` is not specified, the workspace ID is used as the default prefix.

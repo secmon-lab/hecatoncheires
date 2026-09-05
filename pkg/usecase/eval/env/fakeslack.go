@@ -74,6 +74,14 @@ func (f *fakeSlack) UpdateMessage(_ context.Context, _ string, _ string, _ []gos
 	return nil
 }
 
+func (f *fakeSlack) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (f *fakeSlack) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
 func (f *fakeSlack) GetBotUserID(_ context.Context) (string, error) { return botUserID, nil }
 
 func (f *fakeSlack) GetUserInfo(_ context.Context, userID string) (*slacksvc.User, error) {

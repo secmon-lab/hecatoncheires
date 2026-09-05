@@ -1699,6 +1699,84 @@ type = "text"
 		gt.Bool(t, errors.Is(err, config.ErrInvalidReactionEmoji)).True()
 	})
 
+	threadWithStatusReactions := func(body string) string {
+		return `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+
+  [slack.reactions]
+` + body + `
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+  color = "active"
+
+  [[case.status]]
+  id = "DONE"
+  name = "Done"
+  color = "success"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+	}
+
+	t.Run("status reactions are parsed and normalized", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithStatusReactions(`  assigned = ":eyes:"
+  closed = "white_check_mark"`))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].AssignedReactionEmoji).Equal("eyes")
+		gt.Value(t, configs[0].ClosedReactionEmoji).Equal("white_check_mark")
+	})
+
+	t.Run("an emoji glyph is rejected where a name is required", func(t *testing.T) {
+		// The glyph is what [[case.status]] takes; reactions.add takes the
+		// name, and accepting a glyph here would fail at Slack instead.
+		_, err := writeAndLoad(t, threadWithStatusReactions(`  closed = "✅"`))
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidReactionEmoji)).True()
+	})
+
+	t.Run("status reactions on channel mode are rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "channel"
+
+  [slack.reactions]
+  closed = "white_check_mark"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrReactionRequiresThreadMode)).True()
+	})
+
+	t.Run("omitting the subsection leaves both reactions off", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithReaction("incident"))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].AssignedReactionEmoji).Equal("")
+		gt.Value(t, configs[0].ClosedReactionEmoji).Equal("")
+	})
+
 	t.Run("duplicate reaction across workspaces is rejected", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		one := `

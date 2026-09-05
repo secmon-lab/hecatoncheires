@@ -1163,6 +1163,13 @@ func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id in
 		}
 		uc.postThreadContextLine(ctx, updated,
 			i18n.T(ctx, i18n.MsgCaseChangeAssigneeAssigned, actor, strings.Join(mentions, ", ")))
+
+		// The reaction says "somebody has this", not who: a second assignee
+		// changes nothing a reader of the channel list can see, and re-adding
+		// a reaction that is already there is a no-op on the Slack side.
+		uc.applyCaseReaction(ctx, updated,
+			uc.caseReactionEmoji(workspaceID, func(e *model.WorkspaceEntry) string { return e.AssignedReactionEmoji }),
+			true)
 	}
 
 	return updated, nil
@@ -1215,6 +1222,14 @@ func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id 
 		}
 		uc.postThreadContextLine(ctx, updated,
 			i18n.T(ctx, i18n.MsgCaseChangeAssigneeUnassigned, actor, strings.Join(mentions, ", ")))
+
+		// Only the last assignee leaving clears the mark: while anyone is still
+		// on the case, "somebody has this" is still true.
+		if len(updated.AssigneeIDs) == 0 {
+			uc.applyCaseReaction(ctx, updated,
+				uc.caseReactionEmoji(workspaceID, func(e *model.WorkspaceEntry) string { return e.AssignedReactionEmoji }),
+				false)
+		}
 	}
 
 	return updated, nil
@@ -1924,6 +1939,44 @@ func (uc *CaseUseCase) caseStatusSetForWorkspace(workspaceID string) *model.Acti
 	return entry.CaseStatusSet
 }
 
+// caseReactionEmoji returns the workspace's configured emoji name for one
+// status reaction, or "" when the workspace leaves it unset (which disables it).
+func (uc *CaseUseCase) caseReactionEmoji(workspaceID string, pick func(*model.WorkspaceEntry) string) string {
+	if uc.workspaceRegistry == nil {
+		return ""
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return pick(entry)
+}
+
+// applyCaseReaction puts one of the workspace's status reactions on the case's
+// root Slack message, or takes it off. It mirrors postThreadContextLine: the
+// same thread-bound guard (a channel-mode case has no root message to react
+// to), and the same treatment of failure — a reaction is an annotation on
+// state, never the state itself, so a Slack error is reported and swallowed
+// rather than failing the operation that just succeeded.
+func (uc *CaseUseCase) applyCaseReaction(ctx context.Context, c *model.Case, emoji string, add bool) {
+	if uc.slackService == nil || c == nil || emoji == "" {
+		return
+	}
+	if !c.IsThreadBound() || c.SlackChannelID == "" {
+		return
+	}
+
+	var err error
+	if add {
+		err = uc.slackService.AddReaction(ctx, c.SlackChannelID, c.SlackThreadTS, emoji)
+	} else {
+		err = uc.slackService.RemoveReaction(ctx, c.SlackChannelID, c.SlackThreadTS, emoji)
+	}
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to apply case status reaction")
+	}
+}
+
 // workspaceIsThreadMode reports whether the workspace binds cases to Slack
 // threads (thread mode) rather than dedicated channels (channel mode).
 //
@@ -2073,8 +2126,18 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 		return nil, goerr.Wrap(err, "failed to update case status", goerr.V(CaseIDKey, id))
 	}
 
-	if !wasClosed && updated.Status.Normalize() == types.CaseStatusClosed {
+	nowClosed := updated.Status.Normalize() == types.CaseStatusClosed
+	if !wasClosed && nowClosed {
 		uc.publishLifecycle(ctx, workspaceID, updated, model.CaseLifecycleClosed)
+	}
+
+	// The reaction follows the closed edge in both directions: a case that
+	// reopens loses the mark that said it was finished, so the channel list
+	// never shows a done case that is not.
+	if wasClosed != nowClosed {
+		uc.applyCaseReaction(ctx, updated,
+			uc.caseReactionEmoji(workspaceID, func(e *model.WorkspaceEntry) string { return e.ClosedReactionEmoji }),
+			nowClosed)
 	}
 
 	if beforeStatus != updated.BoardStatus {

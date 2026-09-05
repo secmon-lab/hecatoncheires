@@ -553,6 +553,41 @@ func (c *client) UpdateMessageWithAttachment(ctx context.Context, channelID stri
 	return nil
 }
 
+// reactionAlreadyInState reports whether the error is Slack saying the
+// reaction is already in the state the caller asked for — `already_reacted`
+// on add, `no_reaction` on remove. A reaction announces case state, and the
+// same state can be announced twice (a retry, a concurrent write, an operator
+// who reacted by hand first), so treating those as failures would turn a
+// successful outcome into logged noise.
+func reactionAlreadyInState(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "already_reacted") || strings.Contains(msg, "no_reaction")
+}
+
+// AddReaction adds an emoji reaction to a message.
+func (c *client) AddReaction(ctx context.Context, channelID string, timestamp string, name string) error {
+	err := c.api.AddReactionContext(ctx, name, slack.ItemRef{Channel: channelID, Timestamp: timestamp})
+	if err == nil || reactionAlreadyInState(err) {
+		return nil
+	}
+	return goerr.Wrap(err, "failed to add Slack reaction",
+		goerr.V("channel_id", channelID),
+		goerr.V("timestamp", timestamp),
+		goerr.V("reaction", name))
+}
+
+// RemoveReaction removes this bot's emoji reaction from a message.
+func (c *client) RemoveReaction(ctx context.Context, channelID string, timestamp string, name string) error {
+	err := c.api.RemoveReactionContext(ctx, name, slack.ItemRef{Channel: channelID, Timestamp: timestamp})
+	if err == nil || reactionAlreadyInState(err) {
+		return nil
+	}
+	return goerr.Wrap(err, "failed to remove Slack reaction",
+		goerr.V("channel_id", channelID),
+		goerr.V("timestamp", timestamp),
+		goerr.V("reaction", name))
+}
+
 // GetConversationReplies retrieves messages from a thread
 func (c *client) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error) {
 	params := &slack.GetConversationRepliesParameters{

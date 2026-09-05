@@ -5553,3 +5553,11 @@ func TestCaseUseCase_ThreadChangeNotification(t *testing.T) {
 		gt.Array(t, slackMock.threadCalls).Length(0)
 	})
 }
+
+func (r *jobLifecycleSlackPostRecorder) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (r *jobLifecycleSlackPostRecorder) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

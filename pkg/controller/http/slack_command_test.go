@@ -199,3 +199,11 @@ func TestSlackCommandHandler(t *testing.T) {
 		gt.String(t, rec.Body.String()).Contains("Failed to open case creation dialog")
 	})
 }
+
+func (m *mockSlackServiceForCommand) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (m *mockSlackServiceForCommand) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

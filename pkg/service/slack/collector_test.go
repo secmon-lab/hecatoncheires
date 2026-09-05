@@ -261,3 +261,11 @@ func TestIncludesBotMessages(t *testing.T) {
 	gt.Array(t, got).Length(3)
 	gt.Value(t, got[1].Text).Equal("automated alert")
 }
+
+func (f *fakeSlackService) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (f *fakeSlackService) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

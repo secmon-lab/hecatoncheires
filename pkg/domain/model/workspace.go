@@ -67,6 +67,14 @@ type WorkspaceEntry struct {
 	// reaction trigger is disabled. Only meaningful in thread mode, and unique
 	// across workspaces (enforced at config load).
 	ReactionEmoji string
+	// AssignedReactionEmoji and ClosedReactionEmoji are the Slack reactions
+	// (emoji names, without surrounding colons) the bot puts on a case's root
+	// message so its state reads from the channel list: the first is added
+	// while somebody is assigned, the second once the case is closed. Empty
+	// disables that reaction. Thread mode only — a channel-mode case has no
+	// root message to react to.
+	AssignedReactionEmoji string
+	ClosedReactionEmoji   string
 	// SlackWorkspaceChannelID is the workspace-level shared channel where the
 	// cross-case workspace agent runs (and future notifications flow). Channel
 	// mode only; empty when unset. Unique across workspaces / monitor channels

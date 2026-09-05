@@ -1568,3 +1568,11 @@ func (s *sourceTestGitHubService) ValidateRepository(ctx context.Context, owner,
 	}
 	return &github.RepositoryValidation{Valid: true, Owner: owner, Repo: repo, FullName: owner + "/" + repo}, nil
 }
+
+func (m *mockSlackService) AddReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
+func (m *mockSlackService) RemoveReaction(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}

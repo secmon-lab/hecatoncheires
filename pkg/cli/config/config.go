@@ -140,6 +140,27 @@ type SlackSection struct {
 	// the agent runs in WorkspaceChannel (which must then be set), in thread
 	// mode it runs on a channel-root mention in the monitored Channel.
 	WorkspaceAgent *WorkspaceAgentSection `toml:"workspace_agent"`
+	// Reactions configures the emoji the bot puts on a thread-mode case's root
+	// message ([slack.reactions]). nil when the subsection is omitted, which
+	// leaves every status reaction off.
+	Reactions *SlackReactionsSection `toml:"reactions"`
+}
+
+// SlackReactionsSection represents the [slack.reactions] subsection: emoji the
+// bot adds to a thread-mode case's root message so the case's state is legible
+// from the channel list, without opening the thread.
+//
+// These are Slack emoji *names* (`white_check_mark`), which is what
+// reactions.add takes — not the glyph. That is why they cannot reuse the
+// `emoji` on [[case.status]], which is a display glyph for the web UI. Each is
+// independent and each is off until set.
+type SlackReactionsSection struct {
+	// Assigned is added when a case gains its first assignee and removed when
+	// it loses its last — "somebody has this".
+	Assigned string `toml:"assigned"`
+	// Closed is added when a case enters a closed status and removed if it
+	// reopens — "this one is done".
+	Closed string `toml:"closed"`
 }
 
 // WorkspaceAgentSection represents the [slack.workspace_agent] subsection: the
@@ -293,6 +314,11 @@ type WorkspaceConfig struct {
 	// ReactionEmoji is the normalized (colon-stripped) reaction trigger emoji,
 	// empty when disabled.
 	ReactionEmoji string
+	// AssignedReactionEmoji / ClosedReactionEmoji are the normalized emoji
+	// names the bot puts on a case's root message as it gains an assignee or
+	// closes ([slack.reactions]). Empty when that reaction is disabled.
+	AssignedReactionEmoji string
+	ClosedReactionEmoji   string
 	// WorkspaceChannelID is the workspace-level shared channel ID (channel mode
 	// only), empty when unset.
 	WorkspaceChannelID string
@@ -559,6 +585,28 @@ func (a *AppConfig) validateCaseMode() error {
 		if norm := normalizeReactionEmoji(a.Slack.Reaction); norm == "" || !reactionEmojiPattern.MatchString(norm) {
 			return goerr.Wrap(ErrInvalidReactionEmoji, "[slack] reaction must be a Slack emoji name (e.g. \"incident\" or \":incident:\")",
 				goerr.V("reaction", a.Slack.Reaction))
+		}
+	}
+
+	// Status reactions land on a case's root message, which only thread mode
+	// has — the same reason the reaction trigger above is thread-only. Rejecting
+	// them in channel mode keeps a silently-inert setting from looking configured.
+	if r := a.Slack.Reactions; r != nil {
+		for _, entry := range []struct{ key, value string }{
+			{"assigned", r.Assigned},
+			{"closed", r.Closed},
+		} {
+			if entry.value == "" {
+				continue
+			}
+			if !mode.IsThread() {
+				return goerr.Wrap(ErrReactionRequiresThreadMode, "[slack.reactions] requires mode = \"thread\"",
+					goerr.V("key", entry.key), goerr.V("reaction", entry.value))
+			}
+			if norm := normalizeReactionEmoji(entry.value); norm == "" || !reactionEmojiPattern.MatchString(norm) {
+				return goerr.Wrap(ErrInvalidReactionEmoji, "[slack.reactions] values must be Slack emoji names (e.g. \"white_check_mark\", not \"✅\")",
+					goerr.V("key", entry.key), goerr.V("reaction", entry.value))
+			}
 		}
 	}
 
@@ -950,9 +998,23 @@ func parseWorkspaceConfig(src WorkspaceConfigSource) (*WorkspaceConfig, error) {
 		AcceptBot:            appCfg.Slack.AcceptBot,
 		CaseStatusSet:        caseStatusSet,
 		ReactionEmoji:        normalizeReactionEmoji(appCfg.Slack.Reaction),
-		WorkspaceChannelID:   appCfg.Slack.WorkspaceChannel,
-		WorkspaceAgentPrompt: workspaceAgentPrompt,
+		// Normalized here, once, so every consumer downstream holds a value
+		// reactions.add accepts verbatim.
+		AssignedReactionEmoji: normalizeReactionEmoji(reactionsSection(appCfg.Slack.Reactions).Assigned),
+		ClosedReactionEmoji:   normalizeReactionEmoji(reactionsSection(appCfg.Slack.Reactions).Closed),
+		WorkspaceChannelID:    appCfg.Slack.WorkspaceChannel,
+		WorkspaceAgentPrompt:  workspaceAgentPrompt,
 	}, nil
+}
+
+// reactionsSection returns the [slack.reactions] values, or the zero section
+// when the subsection is absent — so callers read fields off it without a nil
+// check and an omitted subsection means "every reaction off".
+func reactionsSection(s *SlackReactionsSection) SlackReactionsSection {
+	if s == nil {
+		return SlackReactionsSection{}
+	}
+	return *s
 }
 
 // Flags returns CLI flags for workspace configuration.
@@ -1035,6 +1097,8 @@ func BuildWorkspaceRegistry(workspaceConfigs []*WorkspaceConfig) *model.Workspac
 			AcceptBot:               wc.AcceptBot,
 			CaseStatusSet:           wc.CaseStatusSet,
 			ReactionEmoji:           wc.ReactionEmoji,
+			AssignedReactionEmoji:   wc.AssignedReactionEmoji,
+			ClosedReactionEmoji:     wc.ClosedReactionEmoji,
 			SlackWorkspaceChannelID: wc.WorkspaceChannelID,
 			WorkspaceAgentPrompt:    wc.WorkspaceAgentPrompt,
 		})
