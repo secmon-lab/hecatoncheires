@@ -1054,3 +1054,89 @@ describe('CaseList archive tab and bulk actions', () => {
     expect(deniedBox.checked).toBe(false)
   })
 })
+
+describe('CaseList updated column and date filter', () => {
+  // Both the column and the filter work in the viewer's own calendar day, so
+  // the expectations derive their values the same way instead of hard-coding
+  // them — otherwise the suite would only pass in the timezone it was written
+  // in. Noon UTC keeps each fixture on its nominal day either side of that.
+  const localDateKey = (iso: string) => {
+    const d = new Date(iso)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${mm}-${dd}`
+  }
+
+  const EARLIER = '2026-05-01T12:00:00Z'
+  const LATER = '2026-05-02T12:00:00Z'
+
+  const rows = (): CaseRowMock[] => [
+    { ...caseRow(11, 'Touched later', 'OPEN'), updatedAt: LATER },
+    { ...caseRow(12, 'Touched earlier', 'OPEN'), updatedAt: EARLIER },
+  ]
+
+  const setDate = (value: string) =>
+    fireEvent.change(screen.getByTestId('updated-on-filter'), { target: { value } })
+
+  it('renders the updated date in its own column', async () => {
+    renderAt('/ws/risk/cases', rows())
+
+    expect(await screen.findByText('Touched later')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Updated' })).toBeInTheDocument()
+    expect(
+      screen.getByText(localDateKey(LATER).replace(/-/g, '/')),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps only the rows updated on the chosen day', async () => {
+    renderAt('/ws/risk/cases', rows())
+    expect(await screen.findByText('Touched later')).toBeInTheDocument()
+
+    setDate(localDateKey(LATER))
+
+    expect(screen.getByText('Touched later')).toBeInTheDocument()
+    expect(screen.queryByText('Touched earlier')).not.toBeInTheDocument()
+  })
+
+  it('restores every row once the date is cleared', async () => {
+    renderAt('/ws/risk/cases', rows())
+    expect(await screen.findByText('Touched later')).toBeInTheDocument()
+
+    setDate(localDateKey(EARLIER))
+    expect(screen.queryByText('Touched later')).not.toBeInTheDocument()
+
+    setDate('')
+    expect(screen.getByText('Touched later')).toBeInTheDocument()
+    expect(screen.getByText('Touched earlier')).toBeInTheDocument()
+  })
+
+  it('can be hidden and restored from the column selector', async () => {
+    renderAt('/ws/risk/cases', rows())
+    expect(await screen.findByText('Touched later')).toBeInTheDocument()
+
+    const header = () => screen.queryByRole('columnheader', { name: 'Updated' })
+    expect(header()).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('column-selector-button'))
+    fireEvent.click(screen.getByTestId('column-toggle-updated'))
+    expect(header()).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('column-toggle-updated'))
+    expect(header()).toBeInTheDocument()
+  })
+
+  it('narrows by title and date together', async () => {
+    const extra: CaseRowMock = { ...caseRow(13, 'Other later', 'OPEN'), updatedAt: LATER }
+    renderAt('/ws/risk/cases', [...rows(), extra])
+    expect(await screen.findByText('Touched later')).toBeInTheDocument()
+
+    setDate(localDateKey(LATER))
+    fireEvent.change(screen.getByTestId('search-filter'), { target: { value: 'touched' } })
+
+    // Same day, wrong title.
+    expect(screen.queryByText('Other later')).not.toBeInTheDocument()
+    // Right title, wrong day.
+    expect(screen.queryByText('Touched earlier')).not.toBeInTheDocument()
+    expect(screen.getByText('Touched later')).toBeInTheDocument()
+  })
+})

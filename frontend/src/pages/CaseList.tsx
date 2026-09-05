@@ -136,6 +136,7 @@ interface CaseRow {
   // wire; a row is archived when this is non-null.
   archivedAt?: string | null
   createdAt: string
+  updatedAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
 
@@ -144,19 +145,29 @@ const BUILTIN_COLUMNS = [
   { key: 'assignees', labelKey: 'headerAssignees' as const, width: 140 },
   { key: 'reporter', labelKey: 'labelReporter' as const, width: 140 },
   { key: 'created', labelKey: 'headerCreated' as const, width: 110 },
+  { key: 'updated', labelKey: 'headerUpdated' as const, width: 110 },
   { key: 'slack', labelKey: 'headerSlack' as const, width: 110 },
 ] as const
 
-const DEFAULT_VISIBLE = ['status', 'assignees', 'reporter', 'created', 'slack']
+const DEFAULT_VISIBLE = ['status', 'assignees', 'reporter', 'created', 'updated', 'slack']
 
-function formatDate(iso: string) {
-  if (!iso) return '—'
+// The calendar day an RFC3339 timestamp falls on in the viewer's own timezone,
+// as `YYYY-MM-DD` — the format <input type="date"> exchanges. Rendering and
+// filtering share it so a row displaying "today" always matches today's filter
+// value, which a UTC-based comparison would break either side of midnight.
+function toLocalDateKey(iso: string) {
+  if (!iso) return ''
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
+  if (Number.isNaN(d.getTime())) return ''
   const yyyy = d.getFullYear()
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}/${mm}/${dd}`
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function formatDate(iso: string) {
+  const key = toLocalDateKey(iso)
+  return key ? key.replace(/-/g, '/') : '—'
 }
 
 // The Slack destination for a row. A thread-mode Case's channel is the
@@ -274,6 +285,8 @@ export default function CaseList() {
   )
 
   const [searchText, setSearchText] = useState('')
+  // `YYYY-MM-DD` (the <input type="date"> value), or '' for no date filter.
+  const [updatedOn, setUpdatedOn] = useState('')
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsBtnRef = useRef<HTMLDivElement>(null)
@@ -414,10 +427,17 @@ export default function CaseList() {
 
   const filtered = useMemo(() => {
     const visible = pendingIds.size === 0 ? cases : cases.filter((c) => !pendingIds.has(c.id))
-    if (!searchText.trim()) return visible
-    const q = searchText.toLowerCase()
-    return visible.filter((c) => !c.accessDenied && c.title.toLowerCase().includes(q))
-  }, [cases, searchText, pendingIds])
+    const q = searchText.trim().toLowerCase()
+    if (!q && !updatedOn) return visible
+    return visible.filter((c) => {
+      // A restricted row carries no readable title, so the title search drops
+      // it rather than matching against the redacted value. The date filter
+      // has no such problem and leaves those rows to stand on their timestamp.
+      if (q && (c.accessDenied || !c.title.toLowerCase().includes(q))) return false
+      if (updatedOn && toLocalDateKey(c.updatedAt) !== updatedOn) return false
+      return true
+    })
+  }, [cases, searchText, updatedOn, pendingIds])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   // The URL can name a page that does not exist right now — the page size was
@@ -576,6 +596,8 @@ export default function CaseList() {
           return <span className="soft">—</span>
         case 'created':
           return <span className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</span>
+        case 'updated':
+          return <span className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.updatedAt)}</span>
         case 'slack': {
           const href = slackCaseLink(c)
           return href
@@ -935,6 +957,21 @@ export default function CaseList() {
           />
         )}
         <span className="spacer" />
+        <div className="h-search" style={{ width: 160, marginLeft: 0 }}>
+          <input
+            type="date"
+            value={updatedOn}
+            onChange={(e) => { setUpdatedOn(e.target.value); setPageIndex(0) }}
+            aria-label={t('filterUpdatedOn')}
+            title={t('filterUpdatedOn')}
+            data-testid="updated-on-filter"
+            style={{
+              flex: 1, border: 'none', background: 'transparent', outline: 'none',
+              fontFamily: 'inherit', fontSize: 12.5,
+              color: updatedOn ? 'var(--fg)' : 'var(--fg-soft)',
+            }}
+          />
+        </div>
         <div className="h-search" style={{ width: 260, marginLeft: 0 }}>
           <IconSearch size={13} />
           <input
@@ -1024,7 +1061,10 @@ export default function CaseList() {
                       {t('badgePrivate')}
                     </span>
                   ) : (
-                    <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
+                    /* title= so the truncated tail stays readable on hover: the
+                       cap is what forces the ellipsis, and no width the table
+                       can afford fits every case title. */
+                    <span className="title truncate" title={c.title} style={{ maxWidth: 420 }}>{c.title}</span>
                   )}
                   {!c.accessDenied && c.isTest && (
                     <span data-testid="test-badge"><TestBadge label={t('badgeTest')} /></span>

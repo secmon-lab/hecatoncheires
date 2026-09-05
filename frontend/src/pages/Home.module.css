@@ -122,10 +122,16 @@
 }
 
 /* ─── Section B: Open Cases ─── */
+/* The title identifies the row, so the fixed columns beside it are sized to
+   what they actually hold rather than to a comfortable share of the width:
+   every rem they give back is a rem of case title that stops being truncated.
+   Assignees fits three 1.5rem chips overlapping by 0.375rem plus the "+N"
+   label; Updated holds one relative day count ("3d ago" / "3日前"); Workspace
+   ellipsizes its name already, so it loses the slack it was not using. */
 .caseHeaderRow,
 .caseRow {
   display: grid;
-  grid-template-columns: minmax(15rem, 1fr) 6.75rem 8rem 7.25rem 10.5rem 6rem;
+  grid-template-columns: minmax(18rem, 1fr) 6.75rem 7.5rem 5.5rem 8.5rem 6rem;
   gap: var(--sp-4);
   min-width: 53.75rem;
 }
