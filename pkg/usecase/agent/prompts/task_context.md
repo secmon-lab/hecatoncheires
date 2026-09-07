@@ -11,6 +11,15 @@ The run you are part of is pinned to:
 {{- if .SlackThreadTS }}
 - slack_thread_ts: {{ .SlackThreadTS }}
 {{- end }}
+{{- if .CurrentTime }}
+- current_time: {{ .CurrentTime }} (UTC)
+{{- end }}
+{{- if .CurrentTime }}
+
+Resolve every relative date or period in your task against `current_time`
+("today", "by tomorrow", "last week", "end of the month"), and report dates in
+absolute form.
+{{- end }}
 {{- if .SlackThreadTS }}
 
 `slack_thread_ts` is the thread this subject's conversation lives in: pass it as a

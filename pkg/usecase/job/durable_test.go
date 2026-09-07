@@ -258,7 +258,8 @@ func TestCaseTaskContext_CarriesTheCaseThreadNotTheSessionThread(t *testing.T) {
 		SlackThreadTS:  "1700000000.000100",
 	}
 
-	got := job.CaseTaskContextForTest(key, c)
+	now := time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC)
+	got := job.CaseTaskContextForTest(key, c, now)
 	gt.Value(t, got.WorkspaceID).Equal("ws-1")
 	gt.Value(t, got.CaseID).Equal(int64(7))
 	gt.Value(t, got.SlackChannelID).Equal("C-CASE")
@@ -267,6 +268,9 @@ func TestCaseTaskContext_CarriesTheCaseThreadNotTheSessionThread(t *testing.T) {
 	rendered, err := got.Render()
 	gt.NoError(t, err).Required()
 	gt.String(t, rendered).Contains("- slack_thread_ts: 1700000000.000100")
+	// The run's start time reaches the sub-agents too, so they resolve a relative
+	// date the same way the planner's own system prompt does.
+	gt.String(t, rendered).Contains("- current_time: 2026-09-07T03:35:19Z (UTC)")
 }
 
 // A run whose case could not be loaded still names the workspace and case it is
@@ -274,7 +278,7 @@ func TestCaseTaskContext_CarriesTheCaseThreadNotTheSessionThread(t *testing.T) {
 func TestCaseTaskContext_WithoutACaseCarriesOnlyTheKey(t *testing.T) {
 	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "triage"}
 
-	got := job.CaseTaskContextForTest(key, nil)
+	got := job.CaseTaskContextForTest(key, nil, time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC))
 	gt.Value(t, got.WorkspaceID).Equal("ws-1")
 	gt.Value(t, got.CaseID).Equal(int64(7))
 	gt.Value(t, got.SlackChannelID).Equal("")

@@ -192,8 +192,68 @@ func TestDecision_Validate(t *testing.T) {
 }
 
 func TestBuildUserInput_FallsBackWhenEmpty(t *testing.T) {
-	got := threadcase.BuildUserInputForTest(nil, nil, threadcase.ConversationMessage{})
+	got, err := threadcase.BuildUserInputForTest(time.Time{}, nil, nil, threadcase.ConversationMessage{})
+	gt.NoError(t, err).Required()
 	gt.String(t, got).NotEqual("")
+}
+
+// The turn's absolute instant. Without it the planner resolves "today" against
+// whatever date its training suggests — the create turn that produced this test
+// was told "by today" and wrote a due date a month in the past.
+//
+// It goes in the USER message, not the system prompt, because a thread-mode turn
+// continues the previous turn's conversation and the system prompt is not part of
+// that history: a resumed turn would otherwise carry the earlier messages with
+// nothing saying when they were written.
+func TestBuildUserInput_StatesTheCurrentTime(t *testing.T) {
+	now := time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC)
+
+	t.Run("LeadsTheMessageWithTheInstant", func(t *testing.T) {
+		got, err := threadcase.BuildUserInputForTest(now, nil, nil,
+			threadcase.ConversationMessage{Text: "<@bot> due today"})
+		gt.NoError(t, err).Required()
+		gt.String(t, got).Contains("2026-09-07T03:35:19Z")
+		gt.String(t, got).Contains("(UTC)")
+		// Before the conversation it dates.
+		gt.Bool(t, strings.Index(got, "# Current time") < strings.Index(got, "# Current mention")).True()
+	})
+
+	// A resumed turn inherits the previous turn's messages, each carrying its own
+	// current time. The section must say which one is now.
+	t.Run("SaysTheLatestSectionIsNow", func(t *testing.T) {
+		got, err := threadcase.BuildUserInputForTest(now, nil, nil,
+			threadcase.ConversationMessage{Text: "<@bot> due today"})
+		gt.NoError(t, err).Required()
+		gt.String(t, got).Contains("the latest one is now")
+	})
+
+	// A non-UTC instant is still rendered in UTC, so the stated zone and the value
+	// can never disagree.
+	t.Run("RendersInUTCWhateverZoneItIsGiven", func(t *testing.T) {
+		jst := time.FixedZone("JST", 9*60*60)
+		got, err := threadcase.BuildUserInputForTest(
+			time.Date(2026, 9, 7, 12, 35, 19, 0, jst), nil, nil,
+			threadcase.ConversationMessage{Text: "<@bot> due today"})
+		gt.NoError(t, err).Required()
+		gt.String(t, got).Contains("2026-09-07T03:35:19Z")
+	})
+
+	// The fallback instruction is what a materialize turn with no messages is
+	// given; the time section must not stand in for it.
+	t.Run("KeepsTheFallbackInstructionWhenThereIsNoConversation", func(t *testing.T) {
+		got, err := threadcase.BuildUserInputForTest(now, nil, nil, threadcase.ConversationMessage{})
+		gt.NoError(t, err).Required()
+		gt.String(t, got).Contains("2026-09-07T03:35:19Z")
+		gt.String(t, got).Contains("Investigate this case and decide the next action.")
+	})
+
+	t.Run("ZeroTimeOmitsTheSection", func(t *testing.T) {
+		got, err := threadcase.BuildUserInputForTest(time.Time{}, nil, nil,
+			threadcase.ConversationMessage{Text: "<@bot> due today"})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, strings.Contains(got, "# Current time")).False()
+		gt.Bool(t, strings.Contains(got, "0001-01-01")).False()
+	})
 }
 
 // The mention-mode system prompt tells the agent to resolve a named person to a
@@ -207,7 +267,8 @@ func TestBuildUserInput_RendersSpeakerIDs(t *testing.T) {
 		{Timestamp: "1700000000.000300", UserName: "Webhook", Text: "alert fired"},
 	}
 
-	got := threadcase.BuildUserInputForTest(msgs, nil, threadcase.ConversationMessage{})
+	got, err := threadcase.BuildUserInputForTest(time.Time{}, msgs, nil, threadcase.ConversationMessage{})
+	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("[1700000000.000100] Alice (U-ALICE): the DB is down")
 	// Name unknown: the ID alone still reaches the model.
 	gt.String(t, got).Contains("[1700000000.000200] U-BOB: looking into it")
@@ -225,13 +286,16 @@ func TestBuildUserInput_RendersMentionAuthor(t *testing.T) {
 		Text:      "<@bot> assign me",
 	}
 
-	got := threadcase.BuildUserInputForTest(nil, nil, mention)
+	got, err := threadcase.BuildUserInputForTest(time.Time{}, nil, nil, mention)
+	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("# Current mention")
 	gt.String(t, got).Contains("From: Caller (U-CALLER)")
 	gt.String(t, got).Contains("<@bot> assign me")
 
 	// An unattributed mention still renders its text, with no dangling "From:".
-	anon := threadcase.BuildUserInputForTest(nil, nil, threadcase.ConversationMessage{Text: "<@bot> hello"})
+	anon, err := threadcase.BuildUserInputForTest(time.Time{}, nil, nil,
+		threadcase.ConversationMessage{Text: "<@bot> hello"})
+	gt.NoError(t, err).Required()
 	gt.String(t, anon).Contains("<@bot> hello")
 	gt.Bool(t, strings.Contains(anon, "From:")).False()
 }
@@ -249,7 +313,8 @@ func TestBuildUserInput_SkipsTheMentionInTheTranscript(t *testing.T) {
 		mention,
 	}
 
-	got := threadcase.BuildUserInputForTest(msgs, nil, mention)
+	got, err := threadcase.BuildUserInputForTest(time.Time{}, msgs, nil, mention)
+	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("earlier note")
 	gt.Number(t, strings.Count(got, "<@bot> assign me")).Equal(1)
 }

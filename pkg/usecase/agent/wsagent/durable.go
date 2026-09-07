@@ -3,6 +3,7 @@ package wsagent
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
@@ -122,7 +123,11 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return nil, goerr.New("MentionText is required (it is the planner's first user message)")
 	}
 
-	systemPrompt, err := buildSystemPrompt(req.Workspace)
+	// One instant serves the whole turn: the system prompt states it and every
+	// sub-agent reads it from the task context, so the two cannot disagree about
+	// what "today" means inside one turn.
+	now := time.Now().UTC()
+	systemPrompt, err := buildSystemPrompt(req.Workspace, now)
 	if err != nil {
 		return nil, goerr.Wrap(err, "build workspace-agent system prompt",
 			goerr.V("workspace_id", req.Workspace.Workspace.ID))
@@ -159,6 +164,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		WorkspaceID:    req.Workspace.Workspace.ID,
 		SlackChannelID: req.Session.ChannelID,
 		SlackThreadTS:  req.Session.ThreadTS,
+		Now:            now,
 	}.Render()
 	if err != nil {
 		return nil, err

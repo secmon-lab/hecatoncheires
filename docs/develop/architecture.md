@@ -456,6 +456,45 @@ cache; Claude only) and `CacheReadInputToken` (tokens served from it).
 existing token-budget accounting stays correct whether or not a cache hit
 occurred.
 
+## Current time in agent prompts
+
+An agent has no clock. Unless a run is told the date, it resolves "today", "by
+tomorrow" and "last week" against whatever its training suggests — a case created
+from a Slack thread was told the due date was "today" and recorded one a month in
+the past. Every agent host therefore states the turn's start time, as an RFC3339
+UTC string, and instructs the model to resolve relative dates against it.
+
+**Where it is stated depends on whether the host's turns inherit a conversation.**
+
+| host | inherits history | where the time is stated |
+| --- | --- | --- |
+| `threadcase` (thread-mode create / materialize / mention) | yes | first user message |
+| `proposal` (case draft) | yes | first user message |
+| `job` (Agent Job) | one-shot in practice | system prompt (`PromptInputs.Now`) |
+| `wsagent` (workspace-channel mention) | no | system prompt |
+| `casebound` (channel-mode case mention) | no | system prompt |
+| planexec sub-agents (every planexec host) | no | task context (`agent.TaskContext.Now`) |
+
+A host that passes `agentkit.WithInheritedHistory` starts its next turn from the
+previous turn's messages. The system prompt is **not** part of that history — it
+is handed to each Generate call as a session option and rebuilt for every turn —
+so a system-prompt-only time leaves the inherited messages with nothing saying
+when they were written. Those hosts put the section at the top of each turn's first user message instead
+(`agent.PlannerMessage`), and the section says that the latest such block is the
+current one. A host with no inherited history has no earlier message
+to date, so it states the time in its system prompt, where the value is constant
+for the turn and stays out of the per-call cache prefix.
+
+Sub-agents never receive the host's system prompt or user input
+(`buildSubAgentSystemPrompt` builds them from the task text plus the task
+context), so they are told through `agent.TaskContext`. Each host passes the same
+instant to both places, so a planner and its sub-agents cannot disagree about
+what "today" means inside one turn.
+
+**Everything is UTC.** The codebase has no timezone configuration (cron schedules
+are UTC too), so a conversation in a zone ahead of UTC can have the agent resolve
+"today" to the previous date during that zone's early hours.
+
 ## Assignee ranking cache
 
 The WebUI assignee pickers order their candidates by how often each user is

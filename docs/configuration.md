@@ -486,8 +486,9 @@ description = "Link to the primary source (log, dashboard, PR)."
     string, which agents do in place of omitting it — leaves that side unbounded;
     any other value that is not RFC3339 is rejected. The same empty-string
     tolerance applies to `limit` and `offset`. The agent combines the bounds with
-    the current time given in its system prompt to ask for e.g. the memos of the
-    last 7 days.
+    the current time its run was given to ask for e.g. the memos of the last 7
+    days (see `docs/develop/architecture.md` § Current time in agent prompts for
+    where each host states it).
   - The page size is deliberately small: a tool response stays in the agent's
     message history for the rest of the run and is re-sent on every later model
     call, so a full dump is paid for repeatedly.

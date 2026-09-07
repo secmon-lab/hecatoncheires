@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 
@@ -25,6 +26,9 @@ type systemPromptInput struct {
 	// WorkspaceName is the workspace display name, falling back to its ID.
 	// Empty when neither is known; the template then omits the name.
 	WorkspaceName string
+	// CurrentTime is the turn's start time as an RFC3339 UTC string. Empty for a
+	// zero time; the template then omits the paragraph.
+	CurrentTime string
 	// ThreadMode selects the thread-mode paragraph: cases are Slack threads,
 	// no Actions exist, and finishing a case means a board-status move.
 	ThreadMode bool
@@ -37,9 +41,16 @@ type systemPromptInput struct {
 }
 
 // buildSystemPrompt composes the system prompt for one workspace-agent turn:
-// a role line, the fixed safety rule (highest priority), the thread-mode
-// paragraph when applicable, then the optional operator-supplied prompt.
-func buildSystemPrompt(ws *model.WorkspaceEntry) (string, error) {
+// a role line, the current time, the fixed safety rule (highest priority), the
+// thread-mode paragraph when applicable, then the optional operator-supplied
+// prompt.
+//
+// The time is stated in the SYSTEM prompt rather than in the user message
+// because this host's turns never continue a previous turn's conversation (it
+// passes no agentkit.WithInheritedHistory), so there is no earlier message to
+// date. The value is the turn's start and is constant for every call of the
+// turn. See agent.PlannerMessage for the hosts that do inherit.
+func buildSystemPrompt(ws *model.WorkspaceEntry, now time.Time) (string, error) {
 	systemPromptOnce.Do(func() {
 		systemPromptTmpl, systemPromptErr = template.New("system").Parse(systemPromptTmplSrc)
 	})
@@ -48,6 +59,9 @@ func buildSystemPrompt(ws *model.WorkspaceEntry) (string, error) {
 	}
 
 	input := systemPromptInput{}
+	if !now.IsZero() {
+		input.CurrentTime = now.UTC().Format(time.RFC3339)
+	}
 	if ws != nil {
 		input.WorkspaceName = ws.Workspace.Name
 		if input.WorkspaceName == "" {

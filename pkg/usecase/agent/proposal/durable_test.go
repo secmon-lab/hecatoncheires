@@ -2,6 +2,7 @@ package proposal_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -287,6 +288,68 @@ const (
 	draftPlan     = `{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"read","tools":["slack_ro"],"budget_usd":0.01}]}`
 	draftFinalize = `{"finalize":{"reason":"enough is known"}}`
 )
+
+// The planner's first user message carries the turn's absolute instant, so a
+// request phrased "by today" resolves against the real date rather than against
+// whatever the model's training suggests.
+//
+// It rides in the USER message rather than the system prompt because this host's
+// turns continue the previous turn's conversation
+// (agentkit.WithInheritedHistory), which the system prompt is not part of. This
+// asserts on the input the model was actually handed: the composition itself is
+// covered by agent.PlannerMessage's own tests, and what can regress here is
+// the wiring.
+func TestDurableStatesTheCurrentTimeToThePlanner(t *testing.T) {
+	ctx := context.Background()
+
+	var mu sync.Mutex
+	var firstInput string
+	var n atomic.Int32
+	replies := []string{
+		draftPlan,
+		"the deploy failed at 14:00",
+		draftFinalize,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","custom_field_values":{"severity":"high"}}`,
+	}
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, inputs []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					mu.Lock()
+					if firstInput == "" && len(inputs) > 0 {
+						if txt, ok := inputs[0].(gollem.Text); ok {
+							firstInput = string(txt)
+						}
+					}
+					mu.Unlock()
+					i := int(n.Add(1)) - 1
+					if i >= len(replies) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return &gollem.Response{Texts: []string{replies[i]}, InputToken: 5, OutputToken: 3}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+
+	h := newDurableHarness(t, llm)
+	ssn := h.session(t, ctx)
+	h.run(t, h.request(ssn, "1700000000.000200"))
+
+	mu.Lock()
+	got := firstInput
+	mu.Unlock()
+
+	gt.String(t, got).Contains("# Current time")
+	gt.String(t, got).Contains("(UTC)")
+	// The request itself is still there, after the section that dates it.
+	gt.String(t, got).Contains("@bot draft a case for the failed deploy")
+	gt.Bool(t, strings.Index(got, "# Current time") <
+		strings.Index(got, "@bot draft a case for the failed deploy")).True()
+}
 
 // A finished turn must hand the draft to the host — from the completion handler,
 // since StartTurn returned long before the model answered — carrying the
