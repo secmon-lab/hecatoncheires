@@ -3,6 +3,7 @@ package agent_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
 
@@ -25,6 +26,42 @@ func TestTaskContext_RendersEveryIdentifier(t *testing.T) {
 	// The thread is the one identifier a sub-agent cannot derive from anything
 	// else, so the block must say what to do with it.
 	gt.String(t, got).Contains("slack__get_messages")
+}
+
+// A sub-agent is built from the planner's task text alone, so without an
+// absolute instant a task saying "last week" or "by today" has nothing to
+// resolve against and the model falls back on its training's idea of the date.
+func TestTaskContext_RendersTheCurrentTime(t *testing.T) {
+	got, err := agent.TaskContext{
+		WorkspaceID: "ws-security",
+		Now:         time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC),
+	}.Render()
+	gt.NoError(t, err).Required()
+
+	gt.String(t, got).Contains("- current_time: 2026-09-07T03:35:19Z (UTC)")
+	gt.String(t, got).Contains("absolute form")
+}
+
+// A non-UTC instant is still rendered in UTC, so the block's stated zone and its
+// value can never disagree.
+func TestTaskContext_RendersTheCurrentTimeInUTC(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	got, err := agent.TaskContext{
+		WorkspaceID: "ws-security",
+		Now:         time.Date(2026, 9, 7, 12, 35, 19, 0, jst),
+	}.Render()
+	gt.NoError(t, err).Required()
+
+	gt.String(t, got).Contains("- current_time: 2026-09-07T03:35:19Z (UTC)")
+}
+
+// A zero time omits the line rather than rendering Go's zero date, which the
+// model would take at face value.
+func TestTaskContext_OmitsAnUnsetCurrentTime(t *testing.T) {
+	got, err := agent.TaskContext{WorkspaceID: "ws-security"}.Render()
+	gt.NoError(t, err).Required()
+
+	gt.Bool(t, containsAny(got, "current_time", "0001-01-01")).False()
 }
 
 // A run with no case must not emit a case_id line at all: "case_id: 0" is a
@@ -52,9 +89,11 @@ func TestTaskContext_WorkspaceOnly(t *testing.T) {
 }
 
 // A zero context renders nothing, so the host can pass the result through
-// unconditionally and the sub-agent prompt simply omits the section.
+// unconditionally and the sub-agent prompt simply omits the section. A context
+// carrying only the time is NOT zero: the instant is worth telling on its own.
 func TestTaskContext_ZeroRendersNothing(t *testing.T) {
 	gt.Bool(t, agent.TaskContext{}.IsZero()).True()
+	gt.Bool(t, agent.TaskContext{Now: time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC)}.IsZero()).False()
 
 	got, err := agent.TaskContext{}.Render()
 	gt.NoError(t, err).Required()

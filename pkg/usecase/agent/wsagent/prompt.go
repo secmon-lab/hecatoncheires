@@ -39,6 +39,12 @@ type systemPromptInput struct {
 // buildSystemPrompt composes the system prompt for one workspace-agent turn:
 // a role line, the fixed safety rule (highest priority), the thread-mode
 // paragraph when applicable, then the optional operator-supplied prompt.
+//
+// It deliberately carries NO current time. The turn's instant rides in the first
+// user message (agent.PlannerMessage, applied in Durable.StartTurn) so that this
+// prompt and the tool definitions stay byte-identical from one turn to the next
+// and remain a prompt-cache hit. A value that changes every turn would put the
+// whole system block back on the bill each time.
 func buildSystemPrompt(ws *model.WorkspaceEntry) (string, error) {
 	systemPromptOnce.Do(func() {
 		systemPromptTmpl, systemPromptErr = template.New("system").Parse(systemPromptTmplSrc)

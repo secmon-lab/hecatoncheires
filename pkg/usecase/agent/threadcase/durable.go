@@ -290,10 +290,16 @@ func (d *Durable) input(ctx context.Context, req TurnRequest, scope agentkernel.
 	// which is the case thread for an existing case and the triggering thread on a
 	// create turn (no case exists yet). Without these ids a task holding the Slack
 	// read tools has to invent them.
+	//
+	// One instant serves the whole turn: the planner reads it from the user
+	// message and every sub-agent from the task context, so the two cannot
+	// disagree about what "today" means inside one turn.
+	now := time.Now().UTC()
 	taskCtx := agent.TaskContext{
 		WorkspaceID:    req.Workspace.Workspace.ID,
 		SlackChannelID: req.ChannelID,
 		SlackThreadTS:  req.ThreadTS,
+		Now:            now,
 	}
 	if req.Case != nil {
 		taskCtx.CaseID = req.Case.ID
@@ -302,14 +308,18 @@ func (d *Durable) input(ctx context.Context, req TurnRequest, scope agentkernel.
 	if tcErr != nil {
 		return planexec.Input{}, tcErr
 	}
+	userInput, uiErr := buildUserInput(now, req.SystemMessages, req.DeltaMessages, ConversationMessage{
+		Timestamp: req.MentionTS,
+		UserID:    req.MentionUserID,
+		UserName:  req.MentionUserName,
+		Text:      req.MentionText,
+	})
+	if uiErr != nil {
+		return planexec.Input{}, uiErr
+	}
 	return planexec.Input{
 		SystemPrompt: buildSystemPrompt(req.Case, req.Workspace, req.Mode, req.CreateInstruction),
-		UserInput: buildUserInput(req.SystemMessages, req.DeltaMessages, ConversationMessage{
-			Timestamp: req.MentionTS,
-			UserID:    req.MentionUserID,
-			UserName:  req.MentionUserName,
-			Text:      req.MentionText,
-		}),
+		UserInput:    userInput,
 		// Without this the run has no language directive at all: the planner, the
 		// terminal output and the direct reply are each left to infer the language
 		// from the thread, and a turn whose prompts are English (which they all are)
