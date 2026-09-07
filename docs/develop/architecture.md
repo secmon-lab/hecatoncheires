@@ -464,32 +464,45 @@ from a Slack thread was told the due date was "today" and recorded one a month i
 the past. Every agent host therefore states the turn's start time, as an RFC3339
 UTC string, and instructs the model to resolve relative dates against it.
 
-**Where it is stated depends on whether the host's turns inherit a conversation.**
+**The first user message is where it belongs**, and two things push it there.
 
-| host | inherits history | where the time is stated |
-| --- | --- | --- |
-| `threadcase` (thread-mode create / materialize / mention) | yes | first user message |
-| `proposal` (case draft) | yes | first user message |
-| `job` (Agent Job) | one-shot in practice | system prompt (`PromptInputs.Now`) |
-| `wsagent` (workspace-channel mention) | no | system prompt |
-| `casebound` (channel-mode case mention) | no | system prompt |
-| planexec sub-agents (every planexec host) | no | task context (`agent.TaskContext.Now`) |
+| host | where the time is stated |
+| --- | --- |
+| `threadcase` (thread-mode create / materialize / mention) | first user message (`agent.PlannerMessage`) |
+| `proposal` (case draft) | first user message (`agent.PlannerMessage`) |
+| `wsagent` (workspace-channel mention) | first user message (`agent.PlannerMessage`) |
+| `casebound` (channel-mode case mention) | system prompt |
+| `job` (Agent Job) | system prompt (`PromptInputs.Now`) |
+| `assist` | system prompt (`prompts/assist_system.md`) |
+| planexec sub-agents (every planexec host) | task context (`agent.TaskContext.Now`) |
 
-A host that passes `agentkit.WithInheritedHistory` starts its next turn from the
-previous turn's messages. The system prompt is **not** part of that history — it
-is handed to each Generate call as a session option and rebuilt for every turn —
-so a system-prompt-only time leaves the inherited messages with nothing saying
-when they were written. Those hosts put the section at the top of each turn's first user message instead
-(`agent.PlannerMessage`), and the section says that the latest such block is the
-current one. A host with no inherited history has no earlier message
-to date, so it states the time in its system prompt, where the value is constant
-for the turn and stays out of the per-call cache prefix.
+The first reason is a requirement, and it applies to `threadcase` and
+`proposal`. A host that passes `agentkit.WithInheritedHistory` starts its next
+turn from the previous turn's messages, and the system prompt is **not** part of
+that history — it is handed to each Generate call as a session option and rebuilt
+for every turn. A system-prompt-only time would leave the inherited messages with
+nothing saying when they were written. The section is therefore put at the top of
+each turn's first user message, and it states that the latest such block is the
+current one.
+
+The second is a preference, and it is why `wsagent` does the same although it
+inherits nothing. The system prompt and the tool definitions are the prefix
+Claude's prompt cache matches on (see § LLM prompt caching), so a value that
+changes every turn puts the whole system block back on the bill each time.
+Keeping the time out of it leaves that prefix byte-identical from one turn to the
+next.
+
+`casebound`, `job` and `assist` predate this and still state it in their system
+prompt. They inherit no history, so this is a cache cost rather than a
+correctness problem; a new host should follow the three above.
 
 Sub-agents never receive the host's system prompt or user input
 (`buildSubAgentSystemPrompt` builds them from the task text plus the task
-context), so they are told through `agent.TaskContext`. Each host passes the same
-instant to both places, so a planner and its sub-agents cannot disagree about
-what "today" means inside one turn.
+context), so they are told through `agent.TaskContext`. planexec's direct child
+gets both (`Input.UserInput` plus the task context), and the terminal call reads
+the planner's own conversation. Each host passes the same instant everywhere, so
+a planner and its sub-agents cannot disagree about what "today" means inside one
+turn — pinned per host by the `...TellsThePlannerAndItsSubAgentsOneTime` tests.
 
 **Everything is UTC.** The codebase has no timezone configuration (cron schedules
 are UTC too), so a conversation in a zone ahead of UTC can have the agent resolve

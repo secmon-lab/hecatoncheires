@@ -2,6 +2,7 @@ package job_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -147,6 +148,71 @@ func TestDurableRuntime_SpawnCarriesTheJobsModelAndBudget(t *testing.T) {
 	plain := scopeOf(withoutModel)
 	gt.String(t, plain.LLMModel).Equal("")
 	gt.Value(t, plain.Budget).Equal(pricing.NanoUSD(0))
+}
+
+// The run's start time must reach the sub-agents, not only the planner's system
+// prompt. Without it a task whose text says "last week" or "by today" has no
+// instant to resolve against and the model falls back on whatever date its
+// training suggests.
+//
+// It asserts the instant the RunnerDeps.Clock produced, so a wiring that dropped
+// the value or reached for a second clock is caught. caseTaskContext's own
+// rendering is covered by TestCaseTaskContext_CarriesTheCaseThreadNotTheSessionThread;
+// what this pins is JobRunner.Run passing the run's own instant into it.
+func TestDurableRuntime_SpawnCarriesTheRunsStartTimeToSubAgents(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+
+	// Planexec: the task context exists only on that path — the simple strategy
+	// runs one ReAct loop and spawns no sub-agent to tell.
+	j := &model.Job{
+		ID:       "triage",
+		Prompt:   "summarise the case",
+		Strategy: model.JobStrategyPlanexec,
+		Events:   model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+	}
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{j},
+	})
+
+	startedAt := time.Date(2026, 9, 7, 3, 35, 19, 0, time.UTC)
+	llm := singleReplyLLM("the case looks fine", 120, 34)
+	durable := &job.DurableRuntime{History: agentarchive.NewMemoryHistoryStore()}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: llm, Durable: durable,
+		Clock: func() time.Time { return startedAt },
+	})
+	// No worker: the run stays where Run left it, so the state it was spawned with
+	// can be read with nothing racing to advance it.
+	k := bindDurableJobRuntime(t, runner, durable, repo, registry, llm)
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain: model.JobEventDomainScheduled, WorkspaceID: "ws", CaseID: c.ID,
+		Timestamp: startedAt,
+	})).Required()
+
+	busy, err := durable.Locator.Busy(ctx, agentkernel.JobRunSubject("ws", c.ID, j.ID))
+	gt.NoError(t, err).Required()
+	gt.Value(t, busy).NotNil().Required()
+
+	proc, err := k.GetProcess(ctx, busy.ProcessID)
+	gt.NoError(t, err).Required()
+
+	// The task context is the only channel a sub-agent has: it receives neither
+	// the host's system prompt nor its user prompt.
+	var spawned struct {
+		Input struct {
+			TaskContext  string `json:"task_context"`
+			SystemPrompt string `json:"system_prompt"`
+		} `json:"input"`
+	}
+	gt.NoError(t, json.Unmarshal(proc.State, &spawned)).Required()
+	gt.String(t, spawned.Input.TaskContext).Contains("- current_time: 2026-09-07T03:35:19Z (UTC)")
+	// The planner is told the same instant through its own system prompt, so the
+	// two cannot disagree about what "today" means inside one run.
+	gt.String(t, spawned.Input.SystemPrompt).Contains("2026-09-07T03:35:19Z")
 }
 
 // TestDurableRuntime_RecordsWhatTheRunCost pins the record a finished run leaves:

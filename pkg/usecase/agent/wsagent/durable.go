@@ -123,11 +123,11 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return nil, goerr.New("MentionText is required (it is the planner's first user message)")
 	}
 
-	// One instant serves the whole turn: the system prompt states it and every
-	// sub-agent reads it from the task context, so the two cannot disagree about
-	// what "today" means inside one turn.
+	// One instant serves the whole turn: the planner reads it from the first user
+	// message and every sub-agent from the task context, so the two cannot
+	// disagree about what "today" means inside one turn.
 	now := time.Now().UTC()
-	systemPrompt, err := buildSystemPrompt(req.Workspace, now)
+	systemPrompt, err := buildSystemPrompt(req.Workspace)
 	if err != nil {
 		return nil, goerr.Wrap(err, "build workspace-agent system prompt",
 			goerr.V("workspace_id", req.Workspace.Workspace.ID))
@@ -176,9 +176,18 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 			goerr.V("session_id", req.Session.ID))
 	}
 
+	// The time rides in the user message rather than in the system prompt, even
+	// though this host inherits no conversation: the system prompt and the tool
+	// definitions are then byte-identical from one turn to the next and stay a
+	// prompt-cache hit, which a per-turn value in the system block would break.
+	userInput, err := agent.PlannerMessage{Now: now, Body: req.MentionText}.Render()
+	if err != nil {
+		return nil, err
+	}
+
 	_, err = d.agent.Spawn(ctx, d.kernel, planexec.Input{
 		SystemPrompt: systemPrompt,
-		UserInput:    req.MentionText,
+		UserInput:    userInput,
 		// Without this the run has no language directive at all: the planner, the
 		// terminal output and the direct reply are each left to infer the language
 		// from the thread, and a turn whose prompts are English (which they all are)

@@ -2,6 +2,7 @@ package wsagent_test
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,6 +60,9 @@ const (
 	durableThreadTS  = "1700000000.000100"
 	durableSessionID = "s-ws-1"
 	durableActorID   = "U-HUMAN"
+	// durableMentionText is the request every durableRequest carries. It is a
+	// constant so a test can assert the host passed it through unaltered.
+	durableMentionText = "<@bot> which cases are still open?"
 )
 
 // hostCall records one Slack-facing call a finished turn made.
@@ -150,23 +154,36 @@ func durableLLM(replies ...string) gollem.LLMClient {
 	return client
 }
 
-// recordingDurableLLM is durableLLM plus the system prompt each call was made
-// under, in call order. The prompt is where the host's per-run decisions actually
-// land — the language directive above all — so it is the observable a test asserting
-// on them has to read.
-func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) {
+// generateCall is one Generate as the model saw it: the system prompt its
+// session was opened with, and the text of the user input it was sent.
+type generateCall struct {
+	SystemPrompt string
+	Input        string
+}
+
+// recordingDurableLLM is durableLLM plus what each call was made with, in call
+// order. This is where the host's per-run decisions actually land — the language
+// directive and the turn's current time above all — so it is the observable a
+// test asserting on them has to read.
+func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []generateCall) {
 	var n atomic.Int32
 	var mu sync.Mutex
-	var prompts []string
+	var calls []generateCall
 	client := &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
 			// The system prompt is a session-level setting, so it is read here and
 			// attributed to the calls this session makes.
 			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					var b strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
+						}
+					}
 					mu.Lock()
-					prompts = append(prompts, cfg.SystemPrompt())
+					calls = append(calls, generateCall{SystemPrompt: cfg.SystemPrompt(), Input: b.String()})
 					mu.Unlock()
 					i := int(n.Add(1)) - 1
 					if i >= len(replies) {
@@ -180,11 +197,11 @@ func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) 
 			}, nil
 		},
 	}
-	return client, func() []string {
+	return client, func() []generateCall {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make([]string, len(prompts))
-		copy(out, prompts)
+		out := make([]generateCall, len(calls))
+		copy(out, calls)
 		return out
 	}
 }
@@ -258,7 +275,7 @@ func durableRequest(triggerTS string) wsagent.TurnRequest {
 		},
 		Workspace:   &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1", Name: "WS"}},
 		ActorID:     durableActorID,
-		MentionText: "<@bot> which cases are still open?",
+		MentionText: durableMentionText,
 		TriggerTS:   triggerTS,
 	}
 }
@@ -359,7 +376,7 @@ func TestDurableStartTurnPostsTheAnswer(t *testing.T) {
 // There is no other symptom: the run succeeds and nothing logs.
 func TestDurableStartTurnTellsTheRunWhichLanguageToAnswerIn(t *testing.T) {
 	ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
-	llm, prompts := recordingDurableLLM(
+	llm, calls := recordingDurableLLM(
 		`{"direct":{"tools":[]}}`,
 		// The reply's own wording is not the contract here — the directive handed to
 		// the model is — so the fixture stays English.
@@ -376,10 +393,72 @@ func TestDurableStartTurnTellsTheRunWhichLanguageToAnswerIn(t *testing.T) {
 
 	// The planner call and the direct-reply child: both carry the directive, and the
 	// second is the one whose text the user actually reads.
-	seen := prompts()
+	seen := calls()
 	gt.Array(t, seen).Length(2).Required()
-	gt.String(t, seen[0]).Contains("**Japanese**")
-	gt.String(t, seen[1]).Contains("**Japanese**")
+	gt.String(t, seen[0].SystemPrompt).Contains("**Japanese**")
+	gt.String(t, seen[1].SystemPrompt).Contains("**Japanese**")
+}
+
+// The turn's current time. Without it the agent resolves "today" and "by
+// tomorrow" against whatever date its training suggests.
+//
+// It rides in the FIRST USER MESSAGE rather than in the system prompt even
+// though this host inherits no conversation: the system prompt and the tool
+// definitions then stay byte-identical from one turn to the next and remain a
+// prompt-cache hit, which a per-turn value in the system block would break.
+//
+// The planner and its sub-agents must be told the SAME instant — the sub-agent
+// reads it from agent.TaskContext, which is built separately — or a task
+// dispatched mid-turn resolves a relative date differently from the planner that
+// wrote it. Asserting equality is what pins the two together: each side's own
+// rendering is already covered by agent.PlannerMessage and agent.TaskContext.
+func TestDurableStartTurnTellsThePlannerAndItsSubAgentsOneTime(t *testing.T) {
+	ctx := context.Background()
+	llm, calls := recordingDurableLLM(
+		`{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"read","tools":["slack_ro"],"budget_usd":0.01}]}`,
+		`the thread says the deploy failed`,
+		`{"finalize":{"reason":"enough is known"}}`,
+		`The deploy failed at 14:00.`,
+	)
+	h := newDurableHarness(t, llm)
+
+	_, err := h.agent.StartTurn(ctx, durableRequest("1700000000.000220"))
+	gt.NoError(t, err).Required()
+
+	key := agentkernel.TriggerKey(durableChannelID, durableThreadTS, "1700000000.000220")
+	proc := h.awaitTerminal(t, h.spawned(t, key))
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	seen := calls()
+	gt.Array(t, seen).Length(4).Required()
+
+	// Call 1 is the plan: the time is in its user message, and NOT in the system
+	// prompt, which must stay identical across turns.
+	planner := seen[0]
+	gt.String(t, planner.Input).Contains("# Current time")
+	gt.Bool(t, strings.Contains(planner.SystemPrompt, "# Current time")).False()
+	// The mention itself is still there, after the section that dates it.
+	gt.String(t, planner.Input).Contains(durableMentionText)
+
+	// Call 2 is the sub-agent, prompted from the task context.
+	child := seen[1]
+	gt.String(t, child.SystemPrompt).Contains("- current_time: ")
+
+	plannerTime := rfc3339In(t, planner.Input)
+	childTime := rfc3339In(t, child.SystemPrompt)
+	gt.String(t, childTime).Equal(plannerTime)
+}
+
+// rfc3339Pattern matches the RFC3339 UTC instant the prompts render.
+var rfc3339Pattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
+
+// rfc3339In returns the single RFC3339 instant in s, failing the test when there
+// is none — an assertion comparing two absent values would otherwise pass.
+func rfc3339In(t *testing.T, s string) string {
+	t.Helper()
+	found := rfc3339Pattern.FindString(s)
+	gt.String(t, found).NotEqual("")
+	return found
 }
 
 // A run the model never answers must tell the user the turn ended, rather than

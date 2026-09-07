@@ -19,18 +19,24 @@ var currentTimeTemplate = template.Must(template.New("agent_current_time").Parse
 // the turn's current time, followed by the body the host assembled (the thread
 // transcript and the mention, or the request text).
 //
-// The time is stated here rather than in the system prompt for the hosts whose
-// turns continue the previous turn's conversation
-// (agentkit.WithInheritedHistory: threadcase, proposal). The system prompt is not
-// part of that history — it is handed to each Generate call as a session option
-// and rebuilt for every turn — so a resumed turn would carry the earlier turns'
-// messages with nothing saying when they were written. A dated user message makes
-// the history self-dating, and each turn's own section states the instant that is
-// current now.
+// Two things put the time here rather than in the system prompt.
 //
-// A host whose turns never inherit a conversation (casebound, wsagent, job) has
-// no earlier message to date and states the time in its system prompt instead,
-// where the value is constant for the turn.
+// For a host whose turns continue the previous turn's conversation
+// (agentkit.WithInheritedHistory: threadcase, proposal) it is a requirement. The
+// system prompt is not part of that history — it is handed to each Generate call
+// as a session option and rebuilt for every turn — so a resumed turn would carry
+// the earlier turns' messages with nothing saying when they were written. A dated
+// user message makes the history self-dating, and each turn's own section states
+// the instant that is current now.
+//
+// For a host that inherits nothing (wsagent) it is a preference: the system
+// prompt and the tool definitions are the prefix Claude's prompt cache matches
+// on, so keeping a per-turn value out of them leaves that prefix byte-identical
+// from one turn to the next.
+//
+// casebound, job and assist predate this and still state the time in their own
+// system prompt. They inherit no history, so that is a cache cost rather than a
+// correctness problem.
 //
 // Sub-agents receive neither: they are told through TaskContext.Now.
 type PlannerMessage struct {
