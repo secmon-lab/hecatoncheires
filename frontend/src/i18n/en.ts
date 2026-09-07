@@ -188,6 +188,8 @@ export const en: Messages = {
   headerCreated: 'Created',
   headerUpdated: 'Updated',
   filterUpdatedOn: 'Filter by updated date',
+  filterClear: 'Clear',
+  filterNone: 'None available',
   emptyActionsTitle: 'No actions yet',
   emptyActionsDesc: 'Create the first action for this case',
   btnAddAction: 'Add Action',

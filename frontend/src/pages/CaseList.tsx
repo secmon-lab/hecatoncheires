@@ -229,6 +229,111 @@ function renderFieldValue(value: any, def: FieldDef): React.ReactNode {
   }
 }
 
+// The assignee filter's stand-in for "nobody is on this". A Slack user id can
+// never collide with it, and "unassigned" is the state a triage view is most
+// often looking for, so it belongs in the same list as the people.
+const UNASSIGNED_FILTER_ID = '__unassigned__'
+
+interface FilterOption {
+  id: string
+  label: string
+  // Rendered before the label — a status dot, an avatar — so the row reads the
+  // same way the column it filters does.
+  swatch?: React.ReactNode
+}
+
+// MultiSelectFilter is one toolbar filter: a button that opens a checkbox list.
+// Empty selection means "no filter", which is why the button shows a count only
+// once something is picked — an unfiltered list should not look filtered.
+function MultiSelectFilter({
+  label, options, selected, onChange, testId,
+}: {
+  label: string
+  options: FilterOption[]
+  selected: string[]
+  onChange: (next: string[]) => void
+  testId: string
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <Button
+        variant={selected.length > 0 ? 'primary' : 'secondary'}
+        onClick={() => setOpen((v) => !v)}
+        data-testid={`${testId}-button`}
+      >
+        {selected.length > 0 ? `${label} · ${selected.length}` : label}
+      </Button>
+      {open && (
+        <div
+          data-testid={`${testId}-popover`}
+          style={{
+            position: 'absolute', left: 0, top: 'calc(100% + 6px)',
+            zIndex: 50, minWidth: 200, maxHeight: 320, overflowY: 'auto',
+            background: 'var(--bg-elev)', border: '1px solid var(--line)',
+            borderRadius: 6, boxShadow: 'var(--shadow-md)', padding: 6,
+          }}
+        >
+          {options.length === 0 ? (
+            <div className="soft" style={{ fontSize: 12, padding: '6px 8px' }}>{t('filterNone')}</div>
+          ) : (
+            <>
+              {options.map((o) => (
+                <label
+                  key={o.id}
+                  data-testid={`${testId}-option-${o.id}`}
+                  className="row"
+                  style={{ gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: 12.5, borderRadius: 4 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-sunken)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(o.id)}
+                    onChange={() => toggle(o.id)}
+                  />
+                  {o.swatch}
+                  <span className="truncate">{o.label}</span>
+                </label>
+              ))}
+              {selected.length > 0 && (
+                <button
+                  type="button"
+                  data-testid={`${testId}-clear`}
+                  onClick={() => onChange([])}
+                  style={{
+                    width: '100%', marginTop: 4, padding: '6px 8px', fontSize: 12,
+                    background: 'transparent', border: 'none', borderTop: '1px solid var(--line)',
+                    color: 'var(--fg-muted)', cursor: 'pointer', textAlign: 'left',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {t('filterClear')}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CaseList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
@@ -287,6 +392,10 @@ export default function CaseList() {
   const [searchText, setSearchText] = useState('')
   // `YYYY-MM-DD` (the <input type="date"> value), or '' for no date filter.
   const [updatedOn, setUpdatedOn] = useState('')
+  // Board status ids and assignee ids to keep. Empty means "no filter" for
+  // both — a selection narrows, it never excludes on its own.
+  const [boardStatusFilter, setBoardStatusFilter] = useState<string[]>([])
+  const [assigneeFilter, setAssigneeFilter] = useState<string[]>([])
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsBtnRef = useRef<HTMLDivElement>(null)
@@ -425,19 +534,63 @@ export default function CaseList() {
     )
   }, [statusFilter, openData, closedData, draftData, archivedData])
 
+  // Board statuses come from the workspace configuration rather than from the
+  // rows, so a status nobody is currently in is still offered — "show me what
+  // is waiting on us" must be answerable with zero as the answer. Channel-mode
+  // workspaces have no board statuses and get no filter (the array is empty,
+  // and the toolbar drops the control).
+  const statusOptions: FilterOption[] = useMemo(
+    () => (caseStatuses.config?.statuses ?? []).map((s) => ({ id: s.id, label: s.name })),
+    [caseStatuses.config],
+  )
+
+  // The people to offer in the assignee filter: exactly those who appear on the
+  // rows in view. Offering the whole workspace would list names that can only
+  // ever return an empty page.
+  const assigneeOptions = useMemo(() => {
+    const seen = new Map<string, CaseUser>()
+    for (const c of cases) {
+      for (const a of c.assignees) if (!seen.has(a.id)) seen.set(a.id, a)
+    }
+    const people = [...seen.values()].sort((a, b) => displayName(a).localeCompare(displayName(b)))
+    const anyUnassigned = cases.some((c) => c.assignees.length === 0)
+    const options: FilterOption[] = people.map((u) => ({
+      id: u.id,
+      label: displayName(u),
+      swatch: <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />,
+    }))
+    // Offered only when some row is actually unassigned, for the same reason.
+    return anyUnassigned
+      ? [{ id: UNASSIGNED_FILTER_ID, label: t('filterUnassigned') }, ...options]
+      : options
+  }, [cases, t])
+
   const filtered = useMemo(() => {
     const visible = pendingIds.size === 0 ? cases : cases.filter((c) => !pendingIds.has(c.id))
     const q = searchText.trim().toLowerCase()
-    if (!q && !updatedOn) return visible
+    const byStatus = boardStatusFilter.length > 0
+    const byAssignee = assigneeFilter.length > 0
+    if (!q && !updatedOn && !byStatus && !byAssignee) return visible
     return visible.filter((c) => {
       // A restricted row carries no readable title, so the title search drops
-      // it rather than matching against the redacted value. The date filter
-      // has no such problem and leaves those rows to stand on their timestamp.
+      // it rather than matching against the redacted value. The other filters
+      // have no such problem and leave those rows to stand on their own values.
       if (q && (c.accessDenied || !c.title.toLowerCase().includes(q))) return false
       if (updatedOn && toLocalDateKey(c.updatedAt) !== updatedOn) return false
+      if (byStatus && !boardStatusFilter.includes(c.boardStatus ?? '')) return false
+      if (byAssignee) {
+        // Within a filter the selections are OR'd — picking two people means
+        // "either of them" — while the filters themselves AND together.
+        const hit = assigneeFilter.some((id) =>
+          id === UNASSIGNED_FILTER_ID
+            ? c.assignees.length === 0
+            : c.assignees.some((a) => a.id === id),
+        )
+        if (!hit) return false
+      }
       return true
     })
-  }, [cases, searchText, updatedOn, pendingIds])
+  }, [cases, searchText, updatedOn, boardStatusFilter, assigneeFilter, pendingIds])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   // The URL can name a page that does not exist right now — the page size was
@@ -957,6 +1110,22 @@ export default function CaseList() {
           />
         )}
         <span className="spacer" />
+        {statusOptions.length > 0 && (
+          <MultiSelectFilter
+            label={t('filterStatus')}
+            options={statusOptions}
+            selected={boardStatusFilter}
+            onChange={(next) => { setBoardStatusFilter(next); setPageIndex(0) }}
+            testId="status-filter"
+          />
+        )}
+        <MultiSelectFilter
+          label={t('filterAssignee')}
+          options={assigneeOptions}
+          selected={assigneeFilter}
+          onChange={(next) => { setAssigneeFilter(next); setPageIndex(0) }}
+          testId="assignee-filter"
+        />
         <div className="h-search" style={{ width: 160, marginLeft: 0 }}>
           <input
             type="date"
