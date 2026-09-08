@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/gollem-dev/agentkit"
 	"github.com/m-mizutani/goerr/v2"
@@ -252,10 +253,26 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 
 	// No workspace and no case yet — choosing one is what this run is for — so the
 	// only ids a sub-agent can be given are the thread the request came from.
+	//
+	// One instant serves the whole turn: the planner reads it from the user
+	// message and every sub-agent from the task context, so the two cannot
+	// disagree about what "today" means inside one turn.
+	now := time.Now().UTC()
 	taskContext, err := agent.TaskContext{
 		SlackChannelID: req.Session.ChannelID,
 		SlackThreadTS:  req.Session.ThreadTS,
+		Now:            now,
 	}.Render()
+	if err != nil {
+		return nil, err
+	}
+
+	// The time goes at the top of the user message rather than into the system
+	// prompt because this host's turns continue the previous turn's conversation
+	// (inheritOpts → agentkit.WithInheritedHistory), which the system prompt is
+	// not part of. Applied here rather than at the three callers that supply
+	// UserInput, so no caller can forget it. See agent.PlannerMessage.
+	userInput, err := agent.PlannerMessage{Now: now, Body: req.UserInput}.Render()
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +285,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 
 	_, err = d.agent.Spawn(ctx, d.kernel, planexec.Input{
 		SystemPrompt:  systemPrompt,
-		UserInput:     req.UserInput,
+		UserInput:     userInput,
 		LanguageLabel: plannerLanguageLabel(ctx),
 		KnownToolIDs:  knownToolIDs,
 		TaskContext:   taskContext,

@@ -2,6 +2,8 @@ package proposal_test
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -287,6 +289,117 @@ const (
 	draftPlan     = `{"tasks":[{"id":"t1","title":"Read the thread","description":"read it","acceptance_criteria":"read","tools":["slack_ro"],"budget_usd":0.01}]}`
 	draftFinalize = `{"finalize":{"reason":"enough is known"}}`
 )
+
+// generateCall is one Generate as the model saw it: the system prompt its
+// session was opened with, and the text of the user input it was sent.
+type generateCall struct {
+	SystemPrompt string
+	Input        string
+}
+
+// recordingLLM is durableLLM plus what each call was made with, in call order.
+// This is where the host's per-run decisions actually land, so it is the
+// observable a test asserting on them has to read.
+func recordingLLM(replies ...string) (gollem.LLMClient, func() []generateCall) {
+	var n atomic.Int32
+	var mu sync.Mutex
+	var calls []generateCall
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
+			// The system prompt is a session-level setting, so it is read here and
+			// attributed to the calls this session makes.
+			cfg := gollem.NewSessionConfig(opts...)
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					var b strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
+						}
+					}
+					mu.Lock()
+					calls = append(calls, generateCall{SystemPrompt: cfg.SystemPrompt(), Input: b.String()})
+					mu.Unlock()
+					i := int(n.Add(1)) - 1
+					if i >= len(replies) {
+						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
+					}
+					return &gollem.Response{Texts: []string{replies[i]}, InputToken: 5, OutputToken: 3}, nil
+				},
+				HistoryFunc: func() (*gollem.History, error) {
+					return &gollem.History{LLType: gollem.LLMTypeOpenAI, Version: gollem.HistoryVersion}, nil
+				},
+			}, nil
+		},
+	}
+	return client, func() []generateCall {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]generateCall, len(calls))
+		copy(out, calls)
+		return out
+	}
+}
+
+// rfc3339Pattern matches the RFC3339 UTC instant the prompts render.
+var rfc3339Pattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
+
+// rfc3339In returns the single RFC3339 instant in s, failing the test when there
+// is none — an assertion comparing two absent values would otherwise pass.
+func rfc3339In(t *testing.T, s string) string {
+	t.Helper()
+	found := rfc3339Pattern.FindString(s)
+	gt.String(t, found).NotEqual("")
+	return found
+}
+
+// The turn's current time, so a request phrased "by today" resolves against the
+// real date rather than against whatever the model's training suggests.
+//
+// It rides in the FIRST USER MESSAGE because this host's turns continue the
+// previous turn's conversation (inheritOpts → agentkit.WithInheritedHistory),
+// which the system prompt is not part of.
+//
+// The planner and its sub-agents must be told the SAME instant — the sub-agent
+// reads it from agent.TaskContext, which is built separately — or a task
+// dispatched mid-turn resolves a relative date differently from the planner that
+// wrote it. Asserting equality is what pins the two together: each side's own
+// rendering is already covered by agent.PlannerMessage and agent.TaskContext.
+func TestDurableTellsThePlannerAndItsSubAgentsOneTime(t *testing.T) {
+	ctx := context.Background()
+	llm, calls := recordingLLM(
+		draftPlan,
+		"the deploy failed at 14:00",
+		draftFinalize,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","custom_field_values":{"severity":"high"}}`,
+	)
+
+	h := newDurableHarness(t, llm)
+	ssn := h.session(t, ctx)
+	h.run(t, h.request(ssn, "1700000000.000200"))
+
+	seen := calls()
+	gt.Array(t, seen).Length(4).Required()
+
+	// Call 1 is the plan: the time leads its user message, and is NOT in the
+	// system prompt, which the inherited history does not carry.
+	planner := seen[0]
+	gt.String(t, planner.Input).Contains("# Current time")
+	gt.String(t, planner.Input).Contains("(UTC)")
+	gt.Bool(t, strings.Contains(planner.SystemPrompt, "# Current time")).False()
+	// The request itself is still there, after the section that dates it.
+	gt.String(t, planner.Input).Contains("@bot draft a case for the failed deploy")
+	gt.Bool(t, strings.Index(planner.Input, "# Current time") <
+		strings.Index(planner.Input, "@bot draft a case for the failed deploy")).True()
+
+	// Call 2 is the sub-agent, prompted from the task context.
+	child := seen[1]
+	gt.String(t, child.SystemPrompt).Contains("- current_time: ")
+
+	plannerTime := rfc3339In(t, planner.Input)
+	childTime := rfc3339In(t, child.SystemPrompt)
+	gt.String(t, childTime).Equal(plannerTime)
+}
 
 // A finished turn must hand the draft to the host — from the completion handler,
 // since StartTurn returned long before the model answered — carrying the
