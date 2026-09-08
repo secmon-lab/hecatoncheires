@@ -318,8 +318,12 @@ func (d *Durable) input(ctx context.Context, req TurnRequest, scope agentkernel.
 		KnownToolIDs:  knownToolIDs,
 		TaskContext:   taskContext,
 		// Milestones are drawn where the person who triggered the turn is looking,
-		// which for a reaction-raised case is not the case thread.
-		Progress:            planexec.ProgressTarget{ChannelID: uiChannel, ThreadTS: uiThread},
+		// which for a reaction-raised case is not the case thread. MessageTS is the
+		// acknowledgement the host already posted there, so the run updates that
+		// message instead of adding a second one.
+		Progress: planexec.ProgressTarget{
+			ChannelID: uiChannel, ThreadTS: uiThread, MessageTS: req.ProgressMessageTS,
+		},
 		AllowSubAgentWrites: allowWrites,
 		AllowQuestion:       true,
 		// A create turn must materialise a case, which the direct fast path
