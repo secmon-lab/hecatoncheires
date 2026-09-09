@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // TagUseCase orchestrates workspace-wide Tag operations. Tags are first-class
@@ -24,7 +25,12 @@ func NewTagUseCase(repo interfaces.Repository) *TagUseCase {
 // ErrTagInUse is returned when deleting a tag that is still referenced by at
 // least one knowledge entry. The delete is refused so no dangling reference can
 // be created.
-var ErrTagInUse = goerr.New("tag is in use")
+//
+// Tagged benign for the same reason as ErrUnknownTag: the refusal states a
+// precondition the caller can satisfy (re-tag or delete the referencing entries
+// first), and knowledge__delete_tag is an agent tool, so every probe would
+// otherwise file a Sentry issue.
+var ErrTagInUse = goerr.New("tag is in use", goerr.T(errutil.TagBenign))
 
 // CreateTag creates a new tag. Name is optional and is trimmed; the ID is a
 // freshly generated immutable TagID.

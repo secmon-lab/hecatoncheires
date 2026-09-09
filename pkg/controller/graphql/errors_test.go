@@ -43,6 +43,13 @@ func TestErrorCode(t *testing.T) {
 		{"missing required (model)", goerr.Wrap(model.ErrMissingRequired, "x"), gqlctrl.ErrCodeBadUserInput},
 		{"workspace not found", goerr.Wrap(model.ErrWorkspaceNotFound, "x"), gqlctrl.ErrCodeNotFound},
 		{"action comment not found", goerr.Wrap(usecase.ErrActionCommentNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		// The knowledge write path's rejections. Classifying them is what keeps
+		// them visible: they carry errutil.TagBenign, so an unclassified one would
+		// be answered 500 by statusForExtensionCode AND skipped by Sentry, leaving
+		// an operator no record of a server fault the client was told about.
+		{"invalid knowledge input", goerr.Wrap(usecase.ErrKnowledgeInput, "x"), gqlctrl.ErrCodeBadUserInput},
+		{"unknown tag id", goerr.Wrap(usecase.ErrUnknownTag, "x"), gqlctrl.ErrCodeBadUserInput},
+		{"tag still referenced", goerr.Wrap(usecase.ErrTagInUse, "x"), gqlctrl.ErrCodeConflict},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -128,6 +135,8 @@ func TestIsClientError(t *testing.T) {
 		{"access denied → client", goerr.Wrap(usecase.ErrAccessDenied, "x"), true},
 		{"not found → client", goerr.Wrap(usecase.ErrCaseNotFound, "x"), true},
 		{"activation failed → server", goerr.Wrap(usecase.ErrActivationFailed, "x"), false},
+		{"unknown tag id → client", goerr.Wrap(usecase.ErrUnknownTag, "x"), true},
+		{"tag still referenced → client", goerr.Wrap(usecase.ErrTagInUse, "x"), true},
 		{"random → server", goerr.New("boom"), false},
 	}
 	for _, c := range cases {

@@ -24,7 +24,15 @@ import (
 //
 // Apply with goerr.T(errutil.TagBenign) at the call site that knows the
 // error is benign. The tag is preserved across goerr.Wrap chains, so it is
-// fine to tag deep in a usecase even if the outer layer wraps further.
+// fine to tag deep in a usecase even if the outer layer wraps further — and
+// across a non-goerr wrapper in between, since goerr.HasTag resolves the
+// chain with errors.As.
+//
+// A sentinel that is benign wherever it surfaces may carry the tag on its own
+// declaration instead (usecase.ErrUnknownTag and its neighbours do). Reserve
+// that for an error whose whole meaning is "the caller sent something this
+// service will not accept"; anything that can also mean a backend failed
+// belongs at the call site that can tell the two apart.
 var TagBenign = goerr.NewTag("benign")
 
 type SentryConfig struct {

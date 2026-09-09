@@ -30,12 +30,24 @@ func NewKnowledgeUseCase(repo interfaces.Repository, embedClient interfaces.Embe
 
 // ErrKnowledgeInput is returned when create/update input fails validation at the
 // usecase entry point (before any persistence).
-var ErrKnowledgeInput = goerr.New("invalid knowledge input")
+//
+// Tagged benign: this rejects what the caller sent, so it is never a defect in
+// this service. The agent is the caller that hits it most — it composes the
+// title, claim and tag set itself — and the strategies report every failed tool
+// call, which without the tag files one Sentry issue per malformed attempt. The
+// model is unaffected: the failure is still returned and still fed back to it.
+var ErrKnowledgeInput = goerr.New("invalid knowledge input", goerr.T(errutil.TagBenign))
 
 // ErrUnknownTag is returned when a knowledge create/update references a tag id
 // that does not exist in the workspace. The operation is rejected wholesale —
 // no partial write occurs.
-var ErrUnknownTag = goerr.New("unknown tag id")
+//
+// Tagged benign for the same reason as ErrKnowledgeInput, and for the reason the
+// Notion 404 is: the agent supplies tag ids itself, from an earlier
+// knowledge__list_tags hit or from its own context, so a stale or invented id is
+// the model's to correct with knowledge__create_tag. A repository failure inside
+// verifyTagsExist is NOT this sentinel and stays reportable.
+var ErrUnknownTag = goerr.New("unknown tag id", goerr.T(errutil.TagBenign))
 
 // CreateKnowledgeInput is the domain-level input for creating a knowledge entry.
 type CreateKnowledgeInput struct {
