@@ -232,7 +232,7 @@ from the eval job tool set — action creation is the primary observable.)
 | Tool | Mode | Notes |
 |------|------|-------|
 | `slack_search` | sim + live | |
-| `notion_search` | sim + live | One key covers all three Notion tools: `notion__search`, `notion__get_page` and `notion__get_database`. |
+| `notion_search` | sim + live | One key covers all four Notion tools: `notion__search`, `notion__get_page`, `notion__get_database` and `notion__search_database`. |
 | `github_search` | **live-only** | simulating it needs a production interface extraction, deferred |
 | `jira_search` | **live-only** | wraps the external gollem-dev/tools/jira ToolSet, which has no simulatable interface seam either |
 | `webfetch` | **live-only** | real HTTP GET + LLM injection screening; the eval LLM does the screening |

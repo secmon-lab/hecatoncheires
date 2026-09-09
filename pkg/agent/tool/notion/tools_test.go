@@ -2,6 +2,8 @@ package notiontool_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,15 +87,28 @@ func TestNew(t *testing.T) {
 		gt.Array(t, notiontool.New(notiontool.Deps{})).Length(0)
 	})
 
-	t.Run("registers search, get_page and get_database", func(t *testing.T) {
+	t.Run("registers search, get_page, get_database and search_database", func(t *testing.T) {
 		tools := notiontool.New(notiontool.Deps{Client: &fakeNotionClient{}})
-		gt.Array(t, tools).Length(3).Required()
+		gt.Array(t, tools).Length(4).Required()
 
 		names := make([]string, 0, len(tools))
 		for _, tl := range tools {
 			names = append(names, tl.Spec().Name)
 		}
-		gt.Array(t, names).Equal([]string{"notion__search", "notion__get_page", "notion__get_database"})
+		gt.Array(t, names).Equal([]string{
+			"notion__search", "notion__get_page", "notion__get_database", "notion__search_database",
+		})
+	})
+
+	// get_database lists the rows unfiltered, so an agent that needs to narrow
+	// them has to be sent to the other tool — and told as data, not only in
+	// prose, for the reason ARGUS-91 gives below.
+	t.Run("get_database points at search_database", func(t *testing.T) {
+		tools := notiontool.New(notiontool.Deps{Client: &fakeNotionClient{}})
+		gt.String(t, findTool(t, tools, "notion__get_database").Spec().Description).
+			Contains("notion__search_database")
+		gt.String(t, findTool(t, tools, "notion__search_database").Spec().Description).
+			Contains("notion__get_database")
 	})
 
 	// gollem rejects a tool whose object parameter declares no properties and
@@ -557,6 +572,14 @@ func TestGetDatabaseToolDescribesTheSchema(t *testing.T) {
 		gt.Value(t, got["matched"]).Equal(0)
 	})
 
+	t.Run("names the tool that searches these rows", func(t *testing.T) {
+		fake := schemaFake(rows)
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"database_id": "db-1"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, got["search_tool"]).Equal("notion__search_database")
+	})
+
 	// An empty database is a real answer, and it must not read like a failure.
 	t.Run("reports an empty database as a successful zero", func(t *testing.T) {
 		fake := schemaFake(&notiontool.QueryResult{})
@@ -582,5 +605,277 @@ func TestGetDatabaseToolDescribesTheSchema(t *testing.T) {
 		gt.Value(t, fake.gotQueryOptions[0].Filter).Nil()
 		gt.Array(t, fake.gotQueryOptions[0].Sorts).Length(0)
 		gt.Array(t, fake.gotQueryOptions[0].Properties).Length(0)
+	})
+}
+
+func TestSearchDatabaseTool(t *testing.T) {
+	rows := &notiontool.QueryResult{
+		Items: []notiontool.SearchItem{{
+			ID:         "row-1",
+			Type:       "page",
+			Title:      "Reset a stuck job",
+			URL:        "https://www.notion.so/row-1",
+			LastEdited: time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC),
+			Properties: map[string]string{"Summary": "Steps to clear the queue and retry."},
+		}},
+		HasMore:    true,
+		NextCursor: "cursor-2",
+	}
+
+	newTool := func(c notiontool.Client) gollem.Tool {
+		return findTool(t, notiontool.New(notiontool.Deps{Client: c}), "notion__search_database")
+	}
+
+	t.Run("searches one database by keyword and returns the named columns", func(t *testing.T) {
+		fake := schemaFake(rows)
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id":       "db-1",
+			"query":             "stuck job",
+			"search_properties": []any{"Name", "Summary"},
+			"properties":        []any{"Summary"},
+			"sorts":             []any{map[string]any{"timestamp": "last_edited_time", "direction": "descending"}},
+			"page_size":         float64(50),
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDatabaseIDs).Equal([]string{"db-1"})
+		gt.Array(t, fake.gotSchemaDataSrcID).Equal([]string{"ds-1"})
+		gt.Array(t, fake.gotDataSourceIDs).Equal([]string{"ds-1"})
+		gt.Array(t, fake.gotQueryOptions).Length(1).Required()
+
+		opts := fake.gotQueryOptions[0]
+		gt.Number(t, opts.PageSize).Equal(50)
+		gt.Value(t, opts.Filter).NotNil().Required()
+		gt.Array(t, opts.Sorts).Length(1).Required()
+		gt.Value(t, opts.Sorts[0]["timestamp"]).Equal("last_edited_time")
+		gt.Value(t, opts.Sorts[0]["direction"]).Equal("descending")
+		gt.Array(t, opts.Properties).Length(1).Required()
+		gt.String(t, opts.Properties[0].Name).Equal("Summary")
+
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(1)
+		gt.Value(t, got["database_id"]).Equal("db-1")
+		gt.Value(t, got["database_title"]).Equal("Knowledge Base")
+		gt.Value(t, got["data_source_id"]).Equal("ds-1")
+		gt.Value(t, got["has_more"]).Equal(true)
+		gt.Value(t, got["next_cursor"]).Equal("cursor-2")
+
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, items).Length(1).Required()
+		gt.Value(t, items[0]["id"]).Equal("row-1")
+		gt.Value(t, items[0]["title"]).Equal("Reset a stuck job")
+		gt.Value(t, items[0]["url"]).Equal("https://www.notion.so/row-1")
+		gt.Value(t, items[0]["last_edited"]).Equal("2026-05-01T08:00:00Z")
+		gt.Value(t, items[0]["read_tool"]).Equal("notion__get_page")
+
+		values := gt.Cast[map[string]string](t, items[0]["properties"])
+		gt.Value(t, values["Summary"]).Equal("Steps to clear the queue and retry.")
+	})
+
+	t.Run("omits the column values a row does not carry", func(t *testing.T) {
+		fake := schemaFake(&notiontool.QueryResult{
+			Items: []notiontool.SearchItem{{ID: "row-1", Type: "page", Title: "Reset a stuck job"}},
+		})
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"database_id": "db-1"})
+		gt.NoError(t, err).Required()
+
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, items).Length(1).Required()
+		gt.Value(t, items[0]["properties"]).Nil()
+	})
+
+	// Narrowing nothing is a legitimate call: it is how an agent asks for the
+	// column values of the first page of rows.
+	t.Run("searches with no filter when nothing narrows", func(t *testing.T) {
+		fake := schemaFake(rows)
+
+		_, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"properties":  []any{"Summary"},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotQueryOptions).Length(1).Required()
+		gt.Value(t, fake.gotQueryOptions[0].Filter).Nil()
+		gt.Array(t, fake.gotQueryOptions[0].Sorts).Length(0)
+		gt.Array(t, fake.gotQueryOptions[0].Properties).Length(1)
+	})
+
+	t.Run("reports zero rows as a successful search", func(t *testing.T) {
+		fake := schemaFake(&notiontool.QueryResult{})
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"query":       "nothing here",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(0)
+		gt.Value(t, got["message"]).Nil()
+		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
+	})
+
+	// A repairable mistake comes back as a result with the schema attached, so
+	// the agent can fix the call without asking for the schema again — and
+	// without the strategies filing a Sentry issue per attempt.
+	t.Run("rejects an unusable condition without querying", func(t *testing.T) {
+		fake := schemaFake(rows)
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"filter": map[string]any{"conditions": []any{
+				map[string]any{"property": "Status", "operator": "contains", "value": "Publ"},
+			}},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.Value(t, got["matched"]).Equal(0)
+		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
+
+		message := gt.Cast[string](t, got["message"])
+		gt.String(t, message).Contains("contains")
+		gt.String(t, message).Contains("Status")
+
+		gt.Array(t, gt.Cast[[]map[string]any](t, got["property_schema"])).Length(4)
+		gt.Map(t, gt.Cast[map[string][]string](t, got["operators_by_type"])).HasKey("select")
+	})
+
+	// An argument whose shape is wrong is caught before the schema is even read.
+	t.Run("rejects a malformed argument before calling Notion", func(t *testing.T) {
+		fake := schemaFake(rows)
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"sorts":       "last_edited_time",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSchemaDataSrcID).Length(0)
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.String(t, gt.Cast[string](t, got["message"])).Contains("sorts must be an array")
+	})
+
+	t.Run("reports an ambiguous data source without reading the schema", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			database: &notiontool.Database{
+				ID: "db-1",
+				DataSources: []notiontool.DataSourceRef{
+					{ID: "ds-1", Name: "Active"},
+					{ID: "ds-2", Name: "Archived"},
+				},
+			},
+			queryResult: rows,
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"query":       "stuck",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSchemaDataSrcID).Length(0)
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("data_source_ambiguous")
+		gt.Value(t, got["matched"]).Equal(0)
+		gt.Array(t, gt.Cast[[]map[string]any](t, got["data_sources"])).Length(2)
+		gt.String(t, gt.Cast[string](t, got["message"])).Contains("data_source_id")
+	})
+
+	t.Run("searches the requested data source when several exist", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			database: &notiontool.Database{
+				ID: "db-1",
+				DataSources: []notiontool.DataSourceRef{
+					{ID: "ds-1", Name: "Active"},
+					{ID: "ds-2", Name: "Archived"},
+				},
+			},
+			dataSource: &notiontool.DataSource{
+				ID:         "ds-2",
+				Properties: []notiontool.PropertySchema{{ID: "title", Name: "Name", Type: "title"}},
+			},
+			queryResult: rows,
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id":    "db-1",
+			"data_source_id": "ds-2",
+			"query":          "stuck",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSchemaDataSrcID).Equal([]string{"ds-2"})
+		gt.Array(t, fake.gotDataSourceIDs).Equal([]string{"ds-2"})
+		gt.Value(t, got["data_source_id"]).Equal("ds-2")
+		gt.Value(t, got["status"]).Equal("ok")
+	})
+
+	t.Run("returns error when database_id is missing", func(t *testing.T) {
+		fake := schemaFake(rows)
+		_, err := newTool(fake).Run(context.Background(), map[string]any{})
+		gt.Value(t, err).NotNil().Required()
+		gt.Array(t, fake.gotDatabaseIDs).Length(0)
+	})
+
+	// These are NOT rejections: a caller told "no rows" would conclude there is
+	// no evidence, when in fact the search never ran.
+	t.Run("propagates the reason a call to Notion failed", func(t *testing.T) {
+		t.Run("database read", func(t *testing.T) {
+			fake := schemaFake(rows)
+			fake.databaseErr = goerr.New("notion database endpoint returned HTTP 404 (object_not_found)")
+			_, err := newTool(fake).Run(context.Background(), map[string]any{"database_id": "db-1"})
+			gt.Value(t, err).NotNil().Required()
+			gt.String(t, err.Error()).Contains("object_not_found")
+		})
+
+		t.Run("schema read", func(t *testing.T) {
+			fake := schemaFake(rows)
+			fake.dataSourceErr = goerr.New("notion data source endpoint returned HTTP 403 (restricted_resource)")
+			_, err := newTool(fake).Run(context.Background(), map[string]any{"database_id": "db-1"})
+			gt.Value(t, err).NotNil().Required()
+			gt.String(t, err.Error()).Contains("restricted_resource")
+			gt.String(t, err.Error()).Contains("failed to fetch notion data source schema")
+		})
+
+		t.Run("row query", func(t *testing.T) {
+			fake := schemaFake(rows)
+			fake.queryErr = goerr.New("notion data source query endpoint returned HTTP 429 (rate_limited)")
+			_, err := newTool(fake).Run(context.Background(), map[string]any{
+				"database_id": "db-1",
+				"query":       "stuck job",
+			})
+			gt.Value(t, err).NotNil().Required()
+			gt.String(t, err.Error()).Contains("rate_limited")
+			gt.String(t, err.Error()).Contains("failed to query notion data source")
+		})
+	})
+
+	// A failed tool call's goerr values are rendered into the response the model
+	// reads and reproduced in the Slack thread, so a failure carries the size of
+	// the request and never the row content it searched for.
+	t.Run("attaches the request size but not the conditions to a failure", func(t *testing.T) {
+		fake := schemaFake(rows)
+		fake.queryErr = goerr.New("notion data source query endpoint returned HTTP 500")
+
+		_, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"query":       "stuck job",
+			"filter": map[string]any{"conditions": []any{
+				map[string]any{"property": "Status", "operator": "equals", "value": "Published"},
+			}},
+		})
+		gt.Value(t, err).NotNil().Required()
+
+		values := goerr.Values(err)
+		gt.Value(t, values["condition_count"]).Equal(3)
+		rendered := fmt.Sprintf("%v", values)
+		gt.Bool(t, strings.Contains(rendered, "stuck")).False()
+		gt.Bool(t, strings.Contains(rendered, "Published")).False()
 	})
 }

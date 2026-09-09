@@ -201,6 +201,7 @@ Available in the investigation / interactive contexts **and in Jobs** (both mode
 | `notion__search` | R | Search Notion pages and databases shared with the integration (title match). |
 | `notion__get_page` | R | Retrieve a page's content as Notion-flavored Markdown. Page ids only — a database id belongs to `notion__get_database`. |
 | `notion__get_database` | R | Describe a database — its data sources and every column's name and type — and list the rows it holds, so a `database` search hit can be read too. |
+| `notion__search_database` | R | Search one database's rows: keywords ANDed across the properties you name, property-value conditions, ordering, and the column values to return. |
 
 ### GitHub tools (`github`)
 

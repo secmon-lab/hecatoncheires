@@ -18,7 +18,8 @@ Hecatoncheires integrates with Notion to surface Notion content to the AI agent 
 
 - `notion__search` — search pages and databases shared with the integration.
 - `notion__get_page` — retrieve a page's content as Notion-flavored Markdown.
-- `notion__get_database` — list the pages (rows) held by a database.
+- `notion__get_database` — describe a database's columns and list the pages (rows) it holds.
+- `notion__search_database` — search one database's rows by keyword and property value.
 
 This document covers the Notion setup needed for those tools.
 
@@ -67,7 +68,7 @@ When the token is configured, you should see:
 Notion service enabled
 ```
 
-in the server logs at startup. The three agent tool registrations (`notion__search`, `notion__get_page`, `notion__get_database`) light up automatically when the agent runs.
+in the server logs at startup. The four agent tool registrations (`notion__search`, `notion__get_page`, `notion__get_database`, `notion__search_database`) light up automatically when the agent runs.
 
 If the token is omitted, the Notion-backed agent tools are silently skipped and the server logs:
 
@@ -82,12 +83,27 @@ Notion API token not configured, Source features will be limited
 | `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Each hit carries `read_tool`, naming the tool that reads it (`notion__get_page` or `notion__get_database`). Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
 | `notion__get_page` | `GET /v1/pages/{page_id}/markdown` | Returns Notion-flavored ("enhanced") Markdown rendered server-side by Notion. Requires `Notion-Version: 2026-03-11` (sent automatically by `pkg/agent/tool/notion/client.go`). |
 | `notion__get_database` | `GET /v1/databases/{database_id}`, `GET /v1/data_sources/{data_source_id}`, then `POST /v1/data_sources/{data_source_id}/query` | Three calls, because Notion's 2025-09-03 API split moved a database's rows into data sources: the first reports the data sources, the second reports the column schema, the third lists one data source's rows. The schema call is skipped when paging through a listing (`start_cursor` set) unless `describe_properties` asks for choices. All send `Notion-Version: 2026-03-11`. |
+| `notion__search_database` | The same three, with `filter` / `sorts` in the query body and `filter_properties` in its query string | Notion has no parent-scoped search endpoint — its own documentation says to use the data source query for that — so searching one database means filtering its rows here. The schema is read on every call, because the conditions are written against property names and types. |
 
 #### About databases and data sources
 
 `notion__search` reports databases alongside pages, but `notion__get_page` reads pages only — Notion answers a database id there with `400 validation_error: … is a database, not a page`. `notion__get_database` is what closes that gap: it returns the database's rows as `id` / `title` / `url` entries, and the agent then opens whichever row it needs with `notion__get_page`. Each search hit also carries `read_tool` naming the tool that reads it, so the routing is data the agent can follow rather than only prose in the tool descriptions.
 
 Since Notion's 2025-09-03 API version, a database does not hold its rows directly; it holds one or more **data sources** that do. Almost every database has exactly one, and the tool queries it without being asked. When a database has several, the tool returns no rows and reports the `data_sources` list instead, so the agent can call again with `data_source_id` set to the one it wants.
+
+#### Searching one database's rows
+
+`notion__search_database` narrows the rows of a single database. It takes the same `database_id` / `data_source_id` pair as `notion__get_database`, plus:
+
+- `query` — keywords separated by whitespace (the ideographic space counts). A row must match **every** keyword. Each keyword is matched against the properties named in `search_properties`, defaulting to the row title.
+- `search_properties` — which columns the keywords are matched against. A text column (`title`, `rich_text`, `url`, `email`, `phone_number`) matches a **substring**; a `select` or `status` column matches a **choice name exactly**, and `multi_select` matches "holds this choice exactly". Notion has no substring match for a choice column, so pass the choice as it is spelled in the schema. Any other column type is refused rather than matched loosely.
+- `filter` — property-value conditions: `operator` (`and` / `or`), `conditions`, and `groups` of conditions. Each condition is `{property, operator, value}`, plus `value_type` for a formula or rollup and `aggregation` for a rollup over a list. The tool resolves the property name to its id, checks the operator against that column's type, and coerces the value (a number from `"42"`, a checkbox from `"true"`, a date from ISO 8601), so a wrong argument comes back named rather than as a Notion 400.
+- `sorts` — ordering keys, each naming either a `property` or a `timestamp` (`created_time` / `last_edited_time`) plus a `direction`. Earlier entries take precedence; the direction defaults to ascending, as Notion's does.
+- `properties` — the columns whose values each returned row carries, rendered as one line of text each (capped at 500 characters, lists at 10 entries). This is what lets an agent judge a row without opening it.
+
+**Keywords and conditions share Notion's two-level nesting limit.** Keywords become an `and` of one part per keyword, and a part is an `or` across the search properties when several are named. A caller's own conditions merge into that same `and`; an `or` filter with no groups is wrapped into it. The one combination that is refused is a keyword search alongside an `or` filter that also carries groups — that would be a third level. The rejection says to write the keywords as conditions instead.
+
+**Notion cannot search page bodies.** `POST /v1/search` matches titles only, and a data source query matches property values only, so a term that appears only in a page's body is not findable through the API at all. Naming the columns that carry such terms — a summary, a keyword list — in `search_properties` is how that gap is covered.
 
 #### Reading a database's column schema
 

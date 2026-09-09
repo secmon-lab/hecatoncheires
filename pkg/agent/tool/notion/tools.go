@@ -8,6 +8,7 @@ package notiontool
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gollem-dev/gollem"
@@ -21,9 +22,9 @@ type Deps struct {
 	Client Client
 }
 
-// New returns the Notion tools (search + get_page + get_database) when a client
-// is provided. Returns nil when deps.Client is nil — the caller can simply
-// append the result to the agent's tool list.
+// New returns the Notion tools when a client is provided. Returns nil when
+// deps.Client is nil — the caller can simply append the result to the agent's
+// tool list.
 func New(deps Deps) []gollem.Tool {
 	if deps.Client == nil {
 		return nil
@@ -32,8 +33,13 @@ func New(deps Deps) []gollem.Tool {
 		&searchTool{client: deps.Client},
 		&getPageTool{client: deps.Client},
 		&getDatabaseTool{client: deps.Client},
+		&searchDatabaseTool{client: deps.Client},
 	}
 }
+
+// searchDatabaseToolName is referenced from the other tools' results, which is
+// how an agent is told where to search rather than only being told in prose.
+const searchDatabaseToolName = "notion__search_database"
 
 // searchTool searches Notion pages and databases by title.
 type searchTool struct {
@@ -249,6 +255,8 @@ func (t *getDatabaseTool) Spec() gollem.ToolSpec {
 		Name: "notion__get_database",
 		Description: "Describe a Notion database and list its rows — use this for a notion__search result whose type is \"database\". " +
 			"Returns the database title, its rows as id/title/url entries, and 'property_schema': every column's name and type. " +
+			"It lists the rows unfiltered and in Notion's own order: to search the rows by keyword or property value, " +
+			"call " + searchDatabaseToolName + " (named in this result as 'search_tool') with the property names reported here. " +
 			"Read a row's own content with notion__get_page. " +
 			"A database keeps its rows in one or more data sources: when it has several, no rows are returned and the 'data_sources' " +
 			"list is reported instead, so call again with data_source_id set to the one you want. " +
@@ -307,9 +315,13 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 	}
 
 	out := map[string]any{
-		"database_id":  db.ID,
-		"title":        db.Title,
-		"url":          db.URL,
+		"database_id": db.ID,
+		"title":       db.Title,
+		"url":         db.URL,
+		// Which tool searches these rows is stated as data, not only in this
+		// tool's prose: the same routing carried as data on each search hit is
+		// what stopped a database id from being sent to the page tool.
+		"search_tool":  searchDatabaseToolName,
 		"data_sources": sources,
 	}
 
@@ -385,6 +397,337 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 	out["has_more"] = res.HasMore
 	out["next_cursor"] = res.NextCursor
 	return out, nil
+}
+
+// searchDatabaseTool searches the rows of one database by keyword and by
+// property value.
+//
+// It is a separate tool from getDatabaseTool rather than more arguments on it
+// because the name is what an agent picks from: "get_database" does not read as
+// somewhere to search, and choosing the wrong Notion tool is a mistake that has
+// already happened in production (ARGUS-91, a database id sent to
+// notion__get_page once per hit).
+type searchDatabaseTool struct {
+	client Client
+}
+
+func (t *searchDatabaseTool) Spec() gollem.ToolSpec {
+	condition := func() *gollem.Parameter {
+		return &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"property": {
+					Type:        gollem.TypeString,
+					Description: "Property name, exactly as listed in notion__get_database's property_schema.",
+					Required:    true,
+				},
+				"operator": {
+					Type: gollem.TypeString,
+					Description: "How to compare. Which operators a property accepts depends on its type — " +
+						"notion__get_database reports that under operators_by_type.",
+					Required: true,
+					Enum: []string{
+						"equals", "does_not_equal", "contains", "does_not_contain",
+						"starts_with", "ends_with", "is_empty", "is_not_empty",
+						"greater_than", "greater_than_or_equal_to", "less_than", "less_than_or_equal_to",
+						"before", "after", "on_or_before", "on_or_after",
+						"past_week", "past_month", "past_year", "this_week",
+						"next_week", "next_month", "next_year",
+					},
+				},
+				"value": {
+					Type: gollem.TypeString,
+					Description: "What to compare against, written as text: a number as \"42\", a checkbox as " +
+						"\"true\", a date as \"2026-01-31\" or \"2026-01-31T09:00:00Z\", a person or a related page " +
+						"as its id. Leave it out for is_empty, is_not_empty and the past_/this_/next_ operators.",
+				},
+				"value_type": {
+					Type: gollem.TypeString,
+					Description: "Required only for a formula or rollup property: what it evaluates to. Notion " +
+						"does not report that in the schema, so it cannot be inferred.",
+					Enum: valueTypeNames,
+				},
+				"aggregation": {
+					Type: gollem.TypeString,
+					Description: "For a rollup over a list only: how many of the rolled-up values must match. " +
+						"A rollup that computes a number or a date needs no aggregation.",
+					Enum: rollupAggregations,
+				},
+			},
+		}
+	}
+
+	return gollem.ToolSpec{
+		Name: searchDatabaseToolName,
+		Description: "Search the rows of one Notion database. Give it a database id and keywords: only rows " +
+			"containing EVERY keyword are returned. It can also filter on property values, order the rows, and " +
+			"return the values of the properties you name. " +
+			"Call notion__get_database first for the property names and types. " +
+			"Notion cannot search page bodies, so a term that appears only in a page's body is not findable — " +
+			"name the properties that carry such terms (a summary, a keyword list) in search_properties. " +
+			"Use this instead of notion__get_database whenever you need to narrow the rows down. " +
+			"'status' says what happened: \"ok\" (the row count is in 'matched'), \"invalid_request\" (the message " +
+			"says what to fix; the property schema is attached), or \"data_source_ambiguous\". A row count of 0 " +
+			"with status \"ok\" means nothing matched; a failed call means the search did not run at all.",
+		Parameters: map[string]*gollem.Parameter{
+			"database_id": {
+				Type:        gollem.TypeString,
+				Description: "The Notion database ID (with or without dashes).",
+				Required:    true,
+			},
+			"data_source_id": {
+				Type:        gollem.TypeString,
+				Description: "Which data source of the database to search. Omit unless a previous call reported several.",
+				Required:    false,
+			},
+			"query": {
+				Type: gollem.TypeString,
+				Description: "Keywords separated by spaces. A row must match EVERY keyword to be returned. Each " +
+					"keyword is matched against the properties named in search_properties.",
+				Required: false,
+			},
+			"search_properties": {
+				Type: gollem.TypeArray,
+				Description: "Which properties each keyword is matched against. Defaults to the row title. " +
+					"A text property matches a substring; a select, status or multi_select property matches a " +
+					"choice name exactly, so pass the choice as it is spelled in the schema.",
+				Required: false,
+				Items:    &gollem.Parameter{Type: gollem.TypeString},
+			},
+			"filter": {
+				Type: gollem.TypeObject,
+				Description: "Narrow the rows by property values, in addition to the keywords. " +
+					"Property names and types come from notion__get_database.",
+				Required: false,
+				Properties: map[string]*gollem.Parameter{
+					"operator": {
+						Type:        gollem.TypeString,
+						Description: "How conditions and groups combine. Defaults to and.",
+						Enum:        []string{operatorAnd, operatorOr},
+					},
+					"conditions": {
+						Type:        gollem.TypeArray,
+						Description: "Conditions combined by the operator above.",
+						Items:       condition(),
+					},
+					"groups": {
+						Type: gollem.TypeArray,
+						Description: "Nested groups of conditions. Notion nests only two levels deep, so a group " +
+							"holds plain conditions — and a group cannot be combined with 'query' when operator is or.",
+						Items: &gollem.Parameter{
+							Type: gollem.TypeObject,
+							Properties: map[string]*gollem.Parameter{
+								"operator": {
+									Type:     gollem.TypeString,
+									Required: true,
+									Enum:     []string{operatorAnd, operatorOr},
+								},
+								"conditions": {
+									Type:     gollem.TypeArray,
+									Required: true,
+									Items:    condition(),
+								},
+							},
+						},
+					},
+				},
+			},
+			"sorts": {
+				Type:        gollem.TypeArray,
+				Description: "Order the rows. Earlier entries take precedence.",
+				Required:    false,
+				Items: &gollem.Parameter{
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"property": {
+							Type:        gollem.TypeString,
+							Description: "Property name to order by. Set either this or timestamp, not both.",
+						},
+						"timestamp": {
+							Type:        gollem.TypeString,
+							Description: "Order by when the row was created or last edited.",
+							Enum:        []string{propTypeCreatedTime, propTypeLastEditedTime},
+						},
+						"direction": {
+							Type:        gollem.TypeString,
+							Description: "Defaults to ascending.",
+							Enum:        []string{directionAscending, directionDescending},
+						},
+					},
+				},
+			},
+			"properties": {
+				Type: gollem.TypeArray,
+				Description: "Property names whose values to include on each returned row, so the rows can be " +
+					"judged without opening each one. Omit to return only id, title, url and last_edited.",
+				Required: false,
+				Items:    &gollem.Parameter{Type: gollem.TypeString},
+			},
+			"page_size": {
+				Type:        gollem.TypeInteger,
+				Description: "Number of rows per page (1-100, default 20).",
+				Required:    false,
+			},
+			"start_cursor": {
+				Type:        gollem.TypeString,
+				Description: "Pagination cursor returned as 'next_cursor' by a previous call.",
+				Required:    false,
+			},
+		},
+	}
+}
+
+func (t *searchDatabaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	databaseID, _ := args["database_id"].(string)
+	if databaseID == "" {
+		return nil, goerr.New("database_id is required")
+	}
+
+	db, err := t.client.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to fetch notion database", goerr.V("database_id", databaseID))
+	}
+
+	out := map[string]any{
+		"database_id":    db.ID,
+		"database_title": db.Title,
+	}
+
+	dataSourceID, reason := pickDataSource(db.DataSources, args)
+	if dataSourceID == "" {
+		sources := make([]map[string]any, 0, len(db.DataSources))
+		for _, ds := range db.DataSources {
+			sources = append(sources, map[string]any{"id": ds.ID, "name": ds.Name})
+		}
+		out["data_source_id"] = ""
+		out["data_sources"] = sources
+		out["items"] = []map[string]any{}
+		out["message"] = reason
+		out["status"] = statusDataSourceAmbiguous
+		out["matched"] = 0
+		return out, nil
+	}
+	out["data_source_id"] = dataSourceID
+
+	keywords, err := parseSearchQuery(args)
+	if err != nil {
+		return rejectedResult(out, nil, err)
+	}
+	filterSpec, err := parseFilterArgs(args)
+	if err != nil {
+		return rejectedResult(out, nil, err)
+	}
+	sortSpecs, err := parseSortArgs(args)
+	if err != nil {
+		return rejectedResult(out, nil, err)
+	}
+	searchNames, err := parseNameList(args, "search_properties", searchPropertiesMax)
+	if err != nil {
+		return rejectedResult(out, nil, err)
+	}
+	returnNames, err := parseNameList(args, "properties", returnPropertiesMax)
+	if err != nil {
+		return rejectedResult(out, nil, err)
+	}
+
+	tool.Update(ctx, searchProgress(db.Title, keywords))
+
+	// The schema is read on every search: the conditions are written against
+	// property names and types, and those are not in the database object.
+	ds, err := t.client.GetDataSource(ctx, dataSourceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to fetch notion data source schema",
+			goerr.V("database_id", databaseID),
+			goerr.V("data_source_id", dataSourceID),
+		)
+	}
+
+	var targets []PropertySchema
+	if len(keywords) > 0 || len(searchNames) > 0 {
+		targets, err = resolveSearchTargets(ds, searchNames)
+		if err != nil {
+			return rejectedResult(out, ds, err)
+		}
+	}
+
+	filter, err := buildFilter(ds, keywords, targets, filterSpec)
+	if err != nil {
+		return rejectedResult(out, ds, err)
+	}
+	sorts, err := buildSorts(ds, sortSpecs)
+	if err != nil {
+		return rejectedResult(out, ds, err)
+	}
+	returnProps, err := resolveProperties(ds, returnNames)
+	if err != nil {
+		return rejectedResult(out, ds, err)
+	}
+
+	opts := QueryOptions{Filter: filter, Sorts: sorts, Properties: returnProps}
+	if v, err := tool.ExtractInt64(args, "page_size"); err == nil && v > 0 {
+		opts.PageSize = int(v)
+	}
+	if s, ok := args["start_cursor"].(string); ok {
+		opts.StartCursor = s
+	}
+
+	res, err := t.client.QueryDataSource(ctx, dataSourceID, opts)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query notion data source",
+			goerr.V("database_id", databaseID),
+			goerr.V("data_source_id", dataSourceID),
+			goerr.V("condition_count", conditionCount(keywords, filterSpec)),
+		)
+	}
+
+	items := make([]map[string]any, 0, len(res.Items))
+	for _, it := range res.Items {
+		item := map[string]any{
+			"id":          it.ID,
+			"type":        it.Type,
+			"title":       it.Title,
+			"url":         it.URL,
+			"last_edited": it.LastEdited.Format(time.RFC3339),
+			"read_tool":   readToolFor(it.Type),
+		}
+		if len(it.Properties) > 0 {
+			item["properties"] = it.Properties
+		}
+		items = append(items, item)
+	}
+
+	out["status"] = statusOK
+	out["matched"] = len(items)
+	out["items"] = items
+	out["has_more"] = res.HasMore
+	out["next_cursor"] = res.NextCursor
+	return out, nil
+}
+
+// searchProgress is the one line the run's progress message shows for this
+// call. It names the keywords rather than the ids, which is what a person
+// reading the thread can recognise.
+func searchProgress(databaseTitle string, keywords []string) string {
+	if len(keywords) == 0 {
+		return fmt.Sprintf("Searching the Notion database %q...", databaseTitle)
+	}
+	return fmt.Sprintf("Searching the Notion database %q for %q...", databaseTitle, strings.Join(keywords, " "))
+}
+
+// conditionCount is attached to a failed query so an operator can see how big
+// the request was. The conditions themselves are not: a failed tool call's goerr
+// values are rendered into the response the model reads and reproduced in the
+// Slack thread, so what travels here is a size, never row content.
+func conditionCount(keywords []string, spec *filterSpec) int {
+	count := len(keywords)
+	if spec == nil {
+		return count
+	}
+	count += len(spec.Conditions)
+	for _, group := range spec.Groups {
+		count += len(group.Conditions)
+	}
+	return count
 }
 
 // pickDataSource decides which data source of a database to list. It returns an
