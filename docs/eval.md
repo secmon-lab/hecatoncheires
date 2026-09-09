@@ -299,9 +299,10 @@ and a page titled "Portal Incident Response" describing the escalation path.
 
 Hits are numbered per kind (`sim-page-1`, `sim-database-1`, …), so the trajectory
 shows which kind an id came from. Each client call is recorded under its own name
-— `notion_search`, `notion_get_page`, `notion_get_database`, and
-`notion_query_data_source` for the row query a `notion__get_database` call makes
-after reading the database — so a check can name the one it means:
+— `notion_search`, `notion_get_page`, `notion_get_database`, plus
+`notion_get_data_source` for the column-schema read and
+`notion_query_data_source` for the row query that a `notion__get_database` call
+makes after reading the database — so a check can name the one it means:
 
 ```toml
 [[expect.checks]]

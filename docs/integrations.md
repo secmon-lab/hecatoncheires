@@ -81,13 +81,35 @@ Notion API token not configured, Source features will be limited
 |------|----------|-------|
 | `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Each hit carries `read_tool`, naming the tool that reads it (`notion__get_page` or `notion__get_database`). Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
 | `notion__get_page` | `GET /v1/pages/{page_id}/markdown` | Returns Notion-flavored ("enhanced") Markdown rendered server-side by Notion. Requires `Notion-Version: 2026-03-11` (sent automatically by `pkg/agent/tool/notion/client.go`). |
-| `notion__get_database` | `GET /v1/databases/{database_id}` then `POST /v1/data_sources/{data_source_id}/query` | Two calls, because Notion's 2025-09-03 API split moved a database's rows into data sources: the first reports the data sources, the second lists one of their rows. Also sends `Notion-Version: 2026-03-11`. |
+| `notion__get_database` | `GET /v1/databases/{database_id}`, `GET /v1/data_sources/{data_source_id}`, then `POST /v1/data_sources/{data_source_id}/query` | Three calls, because Notion's 2025-09-03 API split moved a database's rows into data sources: the first reports the data sources, the second reports the column schema, the third lists one data source's rows. The schema call is skipped when paging through a listing (`start_cursor` set) unless `describe_properties` asks for choices. All send `Notion-Version: 2026-03-11`. |
 
 #### About databases and data sources
 
 `notion__search` reports databases alongside pages, but `notion__get_page` reads pages only — Notion answers a database id there with `400 validation_error: … is a database, not a page`. `notion__get_database` is what closes that gap: it returns the database's rows as `id` / `title` / `url` entries, and the agent then opens whichever row it needs with `notion__get_page`. Each search hit also carries `read_tool` naming the tool that reads it, so the routing is data the agent can follow rather than only prose in the tool descriptions.
 
 Since Notion's 2025-09-03 API version, a database does not hold its rows directly; it holds one or more **data sources** that do. Almost every database has exactly one, and the tool queries it without being asked. When a database has several, the tool returns no rows and reports the `data_sources` list instead, so the agent can call again with `data_source_id` set to the one it wants.
+
+#### Reading a database's column schema
+
+A database object reports only the id and name of each data source, never the columns. `notion__get_database` therefore also reads `GET /v1/data_sources/{id}` and returns:
+
+- `property_schema` — every column's `name` and `type`, sorted by name. Notion returns the columns as a JSON object, whose order is not meaningful, so sorting makes two descriptions of the same data source identical.
+- `operators_by_type` — the filter operators each of those types accepts. Only the types this data source actually uses are listed.
+- `options` on a column, when `describe_properties` named it. Only `select`, `status` and `multi_select` columns have choices, and they are reported per request rather than for everything: a database in production can carry dozens of columns, and their choice lists together do not fit in an agent's context. One property's choices are capped at 50, with `options_truncated` saying so.
+
+A `formula` or `rollup` column is reported with the union of the operators its possible result types accept: Notion's schema carries a formula's expression and a rollup's aggregation but never their result type, so which operators apply is not knowable until the caller declares it.
+
+#### Telling "nothing matched" apart from "the call did not happen"
+
+Every read tool's result carries `status` and `matched`:
+
+| `status` | Meaning | What the agent should do |
+|---|---|---|
+| `ok` | The call ran. `matched` is the number of rows or hits in this response (Notion reports no total; `has_more` says whether more exist). | `matched` of 0 means nothing matched. |
+| `invalid_request` | The arguments could not be turned into a Notion request — an unknown property name, an operator the column's type does not accept, a value of the wrong type. `message` says which, and `property_schema` is attached so the call can be repaired without asking again. | Fix the arguments and call again. Do not conclude that nothing matched. |
+| `data_source_ambiguous` | The database holds several data sources and none was named. `data_sources` lists them. | Call again with `data_source_id`. |
+
+A failure to reach Notion at all — no permission, page not shared, rate limited, Notion down — is **not** one of these. It is returned as an error, so the agent sees a failed tool call. That distinction is what lets a workflow with the rule "if there is no evidence in this database, hand the request to a person" behave correctly: an empty result and an unreachable database must not look the same.
 
 #### About the Markdown Content API
 
