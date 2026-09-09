@@ -75,6 +75,8 @@ func ErrorCode(err error) string {
 		errors.Is(err, model.ErrInvalidGitHubRepo),
 		errors.Is(err, usecase.ErrUnknownUser),
 		errors.Is(err, usecase.ErrInvalidArgument),
+		errors.Is(err, usecase.ErrKnowledgeInput),
+		errors.Is(err, usecase.ErrUnknownTag),
 		errors.Is(err, usecase.ErrCaseThreadModeNoActions):
 		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrCaseNotFound),
@@ -89,6 +91,7 @@ func ErrorCode(err error) string {
 	case errors.Is(err, usecase.ErrCaseAlreadyClosed),
 		errors.Is(err, usecase.ErrCaseAlreadyOpen),
 		errors.Is(err, usecase.ErrJobAlreadyRunning),
+		errors.Is(err, usecase.ErrTagInUse),
 		errors.Is(err, usecase.ErrDuplicateField):
 		return ErrCodeConflict
 	}

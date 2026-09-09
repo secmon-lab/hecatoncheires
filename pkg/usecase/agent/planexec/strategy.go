@@ -646,7 +646,9 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 			}
 			// Reported as well as fed back: the planner needs the failure to react
 			// to, and an operator needs it to tell a broken tool from a model that
-			// chose not to use its result.
+			// chose not to use its result. An error tagged errutil.TagBenign — a
+			// tool refusing what the planner sent — is demoted to an INFO log
+			// inside Handle rather than skipped here; see react's stepTool.
 			errutil.Handle(ctx, goerr.Wrap(err, "planexec: planner tool call",
 				goerr.V("tool", call.Name), goerr.V("call_id", call.ID)),
 				"planexec: planner tool call")
