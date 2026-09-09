@@ -31,6 +31,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // probeState is the state of the probe strategy below.
@@ -1271,6 +1272,18 @@ func TestToolErrorValuesLeavesEveryOtherOutcomeAlone(t *testing.T) {
 		_, err := handlerFor(nil, cause)(ctx, req)
 		gt.Error(t, err).Is(agentkit.ErrLimitExceeded)
 		gt.String(t, err.Error()).Contains("  tool=probe__ping")
+	})
+
+	t.Run("a benign tag survives the wrapper", func(t *testing.T) {
+		// This wrapper is a plain struct, not a goerr.Error, and it sits between
+		// the tool's error and the goerr.Wrap the strategy adds before calling
+		// errutil.Handle. A tag set on a usecase sentinel — the knowledge tools'
+		// input rejections — has to reach Handle through it, or the demotion is
+		// silently lost and the failure pages after all.
+		cause := goerr.Wrap(goerr.New("rejected", goerr.T(errutil.TagBenign)),
+			"create knowledge", goerr.V("tool", req.Call.Name))
+		_, err := handlerFor(nil, cause)(ctx, req)
+		gt.Bool(t, goerr.HasTag(goerr.Wrap(err, "react: tool call"), errutil.TagBenign)).True()
 	})
 }
 

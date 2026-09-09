@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -38,11 +39,34 @@ type TaskContext struct {
 	// SlackThreadTS is the thread the run's conversation lives in: the case
 	// thread for a thread-mode case, the triggering thread for a mention.
 	SlackThreadTS string
+	// Now is the turn's start time, rendered as the sub-agent's absolute current
+	// time. Without it a task whose text says "last week" or "by today" has no
+	// instant to resolve against and the model falls back on whatever date its
+	// training suggests.
+	//
+	// The turn's instant rather than the call's, because a sub-agent's system
+	// prompt is built once when it is spawned and never rebuilt. That also keeps
+	// the value out of the per-call cache prefix: it is constant for the whole
+	// child, so its prompt stays a cache hit across the child's calls.
+	Now time.Time
+}
+
+// taskContextView is what prompts/task_context.md is executed against. The
+// rendered forms are computed here rather than in the template so the template
+// holds no formatting logic.
+type taskContextView struct {
+	WorkspaceID    string
+	CaseID         int64
+	SlackChannelID string
+	SlackThreadTS  string
+	// CurrentTime is Now as an RFC3339 UTC string, empty when Now is zero.
+	CurrentTime string
 }
 
 // IsZero reports whether there is nothing worth telling a sub-agent.
 func (c TaskContext) IsZero() bool {
-	return c.WorkspaceID == "" && c.CaseID == 0 && c.SlackChannelID == "" && c.SlackThreadTS == ""
+	return c.WorkspaceID == "" && c.CaseID == 0 && c.SlackChannelID == "" &&
+		c.SlackThreadTS == "" && c.Now.IsZero()
 }
 
 // Render returns the block, or an empty string when there is nothing to say —
@@ -52,8 +76,17 @@ func (c TaskContext) Render() (string, error) {
 	if c.IsZero() {
 		return "", nil
 	}
+	view := taskContextView{
+		WorkspaceID:    c.WorkspaceID,
+		CaseID:         c.CaseID,
+		SlackChannelID: c.SlackChannelID,
+		SlackThreadTS:  c.SlackThreadTS,
+	}
+	if !c.Now.IsZero() {
+		view.CurrentTime = c.Now.UTC().Format(time.RFC3339)
+	}
 	var buf bytes.Buffer
-	if err := taskContextTemplate.Execute(&buf, c); err != nil {
+	if err := taskContextTemplate.Execute(&buf, view); err != nil {
 		return "", goerr.Wrap(err, "render the sub-agent task context",
 			goerr.V("workspace_id", c.WorkspaceID), goerr.V("case_id", c.CaseID))
 	}

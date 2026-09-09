@@ -114,21 +114,29 @@ func (in Input) Validate() error {
 type ProgressTarget struct {
 	ChannelID string `json:"channel_id,omitempty"`
 	ThreadTS  string `json:"thread_ts,omitempty"`
+	// MessageTS is a progress message the host already posted into the thread —
+	// the create path's acknowledgement, posted before the turn is spawned so the
+	// thread is not silent while it starts. The run updates that message rather
+	// than posting a second one, which is what keeps a turn to ONE message. Empty
+	// means the run posts its own on its first milestone.
+	MessageTS string `json:"message_ts,omitempty"`
 }
 
 // isZero reports whether there is nowhere to draw.
 func (t ProgressTarget) isZero() bool { return t.ChannelID == "" || t.ThreadTS == "" }
 
-// Progress draws a run's milestone lines. The host implements it; planexec holds
-// no Slack dependency.
+// Progress draws a run's current milestone. The host implements it; planexec
+// holds no Slack dependency.
 //
-// It is stateless on purpose: the message id and the lines so far live in the
-// run's checkpointed state, so another instance picking the run up keeps drawing
-// into the same message instead of starting a second one.
+// It is stateless on purpose: the message id lives in the run's checkpointed
+// state, so another instance picking the run up keeps drawing into the same
+// message instead of starting a second one.
 type Progress interface {
-	// Render draws lines as one message and returns its id. An empty messageTS
-	// means "post a new one"; anything else means "update that one".
-	Render(ctx context.Context, target ProgressTarget, messageTS string, lines []string) (string, error)
+	// Render draws line as the single line of one message and returns its id. An
+	// empty messageTS means "post a new one"; anything else means "update that
+	// one". The line REPLACES whatever the message showed before — a run's
+	// progress never accumulates in the thread.
+	Render(ctx context.Context, target ProgressTarget, messageTS string, line string) (string, error)
 }
 
 // Asker delivers a run's question to whoever can answer it, for a host that waits
@@ -316,9 +324,12 @@ type taskRef struct {
 
 // progressState is the minimum needed to keep drawing into the same message
 // after the run moves to another instance.
+//
+// There is no line history: only the current milestone is ever drawn, and it is
+// passed straight through to the host. A state written by a build that recorded
+// the history decodes fine — the extra field is simply dropped.
 type progressState struct {
-	MessageTS string   `json:"message_ts,omitempty"`
-	Lines     []string `json:"lines,omitempty"`
+	MessageTS string `json:"message_ts,omitempty"`
 }
 
 // Register registers the strategy under name and returns the typed handle.
@@ -369,7 +380,12 @@ func (s *strategy[T]) Init(in Input) (state, error) {
 	if err := in.Validate(); err != nil {
 		return state{}, goerr.Wrap(err, "planexec: invalid input")
 	}
-	return state{Phase: phasePlan, Round: 1, Input: in, NextInput: in.UserInput}, nil
+	return state{
+		Phase: phasePlan, Round: 1, Input: in, NextInput: in.UserInput,
+		// A host that already posted a progress message hands its id in, so the
+		// run's first milestone updates that message instead of posting a second.
+		Progress: progressState{MessageTS: in.Progress.MessageTS},
+	}, nil
 }
 
 func (s *strategy[T]) Step(ctx context.Context, sys agentkit.Syscalls, st state) (state, agentkit.Decision[Output[T]], error) {
@@ -630,7 +646,9 @@ func (s *strategy[T]) stepPlannerTool(ctx context.Context, sys agentkit.Syscalls
 			}
 			// Reported as well as fed back: the planner needs the failure to react
 			// to, and an operator needs it to tell a broken tool from a model that
-			// chose not to use its result.
+			// chose not to use its result. An error tagged errutil.TagBenign — a
+			// tool refusing what the planner sent — is demoted to an INFO log
+			// inside Handle rather than skipped here; see react's stepTool.
 			errutil.Handle(ctx, goerr.Wrap(err, "planexec: planner tool call",
 				goerr.V("tool", call.Name), goerr.V("call_id", call.ID)),
 				"planexec: planner tool call")
@@ -1375,30 +1393,36 @@ func (s *strategy[T]) plannerPrompt(st state, budgetLine string) (string, error)
 	return prompt, nil
 }
 
-// note appends a milestone and draws it. Drawing is observability: a failure
-// leaves the thread without a progress line but must never fail the turn.
+// note draws a milestone as the whole of the run's progress message, replacing
+// whatever it showed before. Drawing is observability: a failure leaves the
+// thread without that progress line but must never fail the turn.
 func (s *strategy[T]) note(ctx context.Context, st state, line string) state {
 	if line == "" {
 		return st
 	}
-	st.Progress.Lines = append(st.Progress.Lines, line)
 	if s.progress == nil || st.Input.Progress.isZero() {
 		return st
 	}
-	// KNOWN LIMITATION, deliberately accepted. The draw happens inside the same
-	// transition as the LLM call that follows it, so a call that errors leaves a
-	// message Slack has already accepted while the id it returned is discarded with
-	// the uncommitted state. The retry then posts a second message, and the user
-	// sees the run's progress twice.
+	// KNOWN LIMITATION, deliberately accepted, for a run that posts its OWN
+	// progress message. The draw happens inside the same transition as the LLM
+	// call that follows it, so a call that errors leaves a message Slack has
+	// already accepted while the id it returned is discarded with the uncommitted
+	// state. The retry then posts a second message, and the user sees the run's
+	// progress twice.
 	//
-	// Making the draw its own committed transition would fix it, at the cost of a
-	// checkpoint write per progress line — roughly doubling the state writes of
-	// every run. Skipping the draw on a retry does NOT fix it: the first attempt's
-	// message is already posted, and the retry would simply post the next line as a
-	// second message instead. Since the damage is one duplicated progress message —
-	// no duplicated reply, case write or tool call — the write cost is not worth
-	// paying. Revisit if Slack ever offers an idempotency key on postMessage.
-	ts, err := s.progress.Render(ctx, st.Input.Progress, st.Progress.MessageTS, st.Progress.Lines)
+	// A run whose host handed it a message id (ProgressTarget.MessageTS) cannot
+	// hit this: the id is part of the input, so the retry re-reads the same one
+	// and updates the same message.
+	//
+	// Making the draw its own committed transition would fix the rest, at the cost
+	// of a checkpoint write per progress line — roughly doubling the state writes
+	// of every run. Skipping the draw on a retry does NOT fix it: the first
+	// attempt's message is already posted, and the retry would simply post the
+	// next line as a second message instead. Since the damage is one duplicated
+	// progress message — no duplicated reply, case write or tool call — the write
+	// cost is not worth paying. Revisit if Slack ever offers an idempotency key on
+	// postMessage.
+	ts, err := s.progress.Render(ctx, st.Input.Progress, st.Progress.MessageTS, line)
 	if err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "planexec: draw the progress message"),
 			"planexec: draw the progress message")

@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 )
@@ -38,34 +39,21 @@ func (uc *CaseUseCase) CreateThreadBoundCaseForTest(ctx context.Context, workspa
 	return uc.createThreadBoundCase(ctx, workspaceID, channelID, threadTS, reporterID, title, description, fieldValues, requestKey)
 }
 
-// BuildTraceContextBlocksForTest is exported for testing
-var BuildTraceContextBlocksForTest = buildTraceContextBlocks
+// ProgressBlockForTest exposes progressBlock, the single context block a run's
+// progress message is made of.
+var ProgressBlockForTest = progressBlock
 
-// TraceMessageForTest is the test-facing alias for the unexported
-// traceMessage so external tests can exercise the append/replace rendering
-// contract through the helpers below.
-type TraceMessageForTest = traceMessage
-
-// NewTraceMessageForTest builds a traceMessage wired to the given Slack
-// service, mirroring newTraceMessage but injectable from external tests.
-func NewTraceMessageForTest(svc slack.Service, channelID, threadTS string) *TraceMessageForTest {
-	return &traceMessage{slackService: svc, channelID: channelID, threadTS: threadTS}
+// NewAgentProgressForTest builds the planexec.Progress implementation the durable
+// agents draw through, wired to the given usecase.
+func NewAgentProgressForTest(uc *AgentUseCase) planexec.Progress {
+	return agentProgress{uc: uc}
 }
 
-// TraceMessageAppendForTest invokes the unexported appendLine (milestone
-// history) on a traceMessage.
-func TraceMessageAppendForTest(tm *TraceMessageForTest, ctx context.Context, line string) {
-	tm.appendLine(ctx, line)
+// PostProgressAckForTest invokes the unexported postProgressAck, which posts the
+// create turn's progress message before the run is spawned.
+func PostProgressAckForTest(uc *AgentUseCase, ctx context.Context, channelID, threadTS string) string {
+	return uc.postProgressAck(ctx, channelID, threadTS)
 }
-
-// TraceMessageReplaceForTest invokes the unexported replaceLine (transient
-// live line) on a traceMessage.
-func TraceMessageReplaceForTest(tm *TraceMessageForTest, ctx context.Context, line string) {
-	tm.replaceLine(ctx, line)
-}
-
-// MaxTraceBlocksForTest exposes the per-message block ceiling for assertions.
-const MaxTraceBlocksForTest = maxTraceBlocks
 
 // BuildCaseCreatedTailBlocksForTest is exported for testing
 var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks

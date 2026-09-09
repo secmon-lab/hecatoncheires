@@ -3,9 +3,11 @@ package threadcase
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
 // Mode discriminates the purpose of a thread-mode turn.
@@ -123,12 +125,17 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, creat
 }
 
 // buildUserInput assembles the first user message handed to the planner. The
-// system / delta conversation messages are prepended; the current mention is
-// appended last (when it carries text). The mention is passed as a
-// ConversationMessage so its author is rendered exactly like every other
-// speaker — the agent needs the author's Slack user ID to satisfy a request
-// like "assign me".
-func buildUserInput(systemMessages, deltaMessages []ConversationMessage, mention ConversationMessage) string {
+// turn's current time comes first; the system / delta conversation messages
+// follow; the current mention is appended last (when it carries text). The
+// mention is passed as a ConversationMessage so its author is rendered exactly
+// like every other speaker — the agent needs the author's Slack user ID to
+// satisfy a request like "assign me".
+//
+// The time is stated HERE rather than in the system prompt because a thread-mode
+// turn continues the previous turn's conversation
+// (Durable.inheritOpts → agentkit.WithInheritedHistory) and the system prompt is
+// not part of that history. See agent.PlannerMessage.
+func buildUserInput(now time.Time, systemMessages, deltaMessages []ConversationMessage, mention ConversationMessage) (string, error) {
 	var b strings.Builder
 	if len(systemMessages) > 0 {
 		b.WriteString("# Thread so far\n")
@@ -147,12 +154,15 @@ func buildUserInput(systemMessages, deltaMessages []ConversationMessage, mention
 		}
 		b.WriteString(mention.Text)
 	}
-	if b.Len() == 0 {
+	body := b.String()
+	if body == "" {
 		// Defensive: never hand the planner an empty user input (planexec
 		// rejects it at Validate). Materialize turns may have no mention text.
-		return "Investigate this case and decide the next action."
+		// Checked on the body rather than on the assembled message, so the time
+		// section cannot stand in for the instruction that belongs here.
+		body = "Investigate this case and decide the next action."
 	}
-	return b.String()
+	return agent.PlannerMessage{Now: now, Body: body}.Render()
 }
 
 func writeMessages(b *strings.Builder, msgs []ConversationMessage, skipTS string) {

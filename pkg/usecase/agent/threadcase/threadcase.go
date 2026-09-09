@@ -30,7 +30,13 @@ type TurnRequest struct {
 	// two are the same thread.
 	UIChannelID string
 	UIThreadTS  string
-	MentionTS   string
+	// ProgressMessageTS is a progress message the host already posted into the UI
+	// thread — the create path's acknowledgement, posted before this turn is
+	// spawned so the thread is not silent while it starts. The run updates that
+	// message rather than posting a second progress message, which is what keeps a
+	// turn to one. Empty means the run posts its own on its first milestone.
+	ProgressMessageTS string
+	MentionTS         string
 	// MentionText is the raw text of the mention that triggered this turn.
 	MentionText string
 	// MentionUserID / MentionUserName identify its author. The ID is what makes

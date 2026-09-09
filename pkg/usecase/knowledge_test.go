@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // fakeEmbedClient produces a deterministic 3-axis embedding: index 0 = "github",
@@ -121,6 +123,94 @@ func TestKnowledgeUseCase_CreateUnknownTagFails(t *testing.T) {
 		TagIDs: []model.TagID{nonExistent},
 	})
 	gt.Error(t, err).Is(usecase.ErrUnknownTag)
+}
+
+// TestKnowledgeUseCase_InputRejectionsAreBenign pins that a rejection of what the
+// caller sent is demoted out of the error tracker. The agent composes these
+// arguments itself, and the strategies report every failed tool call, so without
+// the tag a model that invents a tag id files one issue per attempt. The
+// assertion is on the error the usecase actually returns, since that is the value
+// errutil.Handle receives after the tool and strategy layers wrap it.
+func TestKnowledgeUseCase_InputRejectionsAreBenign(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
+	tagUC := usecase.NewTagUseCase(repo)
+	ws := newWS()
+
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
+	t.Run("an unknown tag id is benign", func(t *testing.T) {
+		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+			Title:  "some title",
+			Claim:  "some body",
+			TagIDs: []model.TagID{model.NewTagID()},
+		})
+		gt.Error(t, err).Is(usecase.ErrUnknownTag)
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
+	})
+
+	t.Run("invalid input is benign", func(t *testing.T) {
+		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+			Title:  "  ",
+			TagIDs: []model.TagID{opsID},
+		})
+		gt.Error(t, err).Is(usecase.ErrKnowledgeInput)
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
+	})
+
+	t.Run("an unknown tag id on update is benign", func(t *testing.T) {
+		created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+			Title:  "some knowledge",
+			Claim:  "body",
+			TagIDs: []model.TagID{opsID},
+		})
+		gt.NoError(t, err).Required()
+
+		newTagIDs := []model.TagID{model.NewTagID()}
+		_, err = uc.UpdateKnowledge(ctx, ws, usecase.UpdateKnowledgeInput{
+			ID:     created.ID,
+			TagIDs: &newTagIDs,
+		})
+		gt.Error(t, err).Is(usecase.ErrUnknownTag)
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
+	})
+
+	t.Run("a repository failure inside tag verification stays reportable", func(t *testing.T) {
+		// verifyTagsExist raises both the unknown-tag rejection and a backend
+		// failure. Only the caller-input half is demoted; a broken Tag() backend
+		// must still page, or the demotion has hidden a real outage.
+		backendErr := goerr.New("tag backend unavailable")
+		failUC := usecase.NewKnowledgeUseCase(
+			&tagListFailureRepo{Repository: memory.New(), err: backendErr}, nil)
+		_, err := failUC.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+			Title:  "some title",
+			Claim:  "some body",
+			TagIDs: []model.TagID{opsID},
+		})
+		gt.Error(t, err).Is(backendErr)
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).False()
+	})
+}
+
+// tagListFailureRepo makes Tag().List fail while leaving every other repository
+// intact, so the non-input failure path of tag verification can be exercised.
+type tagListFailureRepo struct {
+	interfaces.Repository
+	err error
+}
+
+func (r *tagListFailureRepo) Tag() interfaces.TagRepository {
+	return &failingTagRepo{TagRepository: r.Repository.Tag(), err: r.err}
+}
+
+type failingTagRepo struct {
+	interfaces.TagRepository
+	err error
+}
+
+func (r *failingTagRepo) List(_ context.Context, _ string) ([]*model.Tag, error) {
+	return nil, r.err
 }
 
 func TestKnowledgeUseCase_CreateFailOpenWithoutEmbedClient(t *testing.T) {

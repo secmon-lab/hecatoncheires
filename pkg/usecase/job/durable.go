@@ -451,8 +451,12 @@ func (d *DurableRuntime) spawn(ctx context.Context, strategy model.JobStrategy, 
 // Slack pair comes from the Case, so it is empty for a case that has no Slack
 // binding and the sub-agent prompt then omits those lines rather than offering
 // an empty id.
-func caseTaskContext(key model.JobRunKey, c *model.Case) agent.TaskContext {
-	out := agent.TaskContext{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID}
+//
+// now is the run's start time. The Job planner is told the same instant through
+// its own system prompt (BuildSystemPrompt, from PromptInputs.Now), so planner
+// and sub-agents cannot disagree about what "today" means inside one run.
+func caseTaskContext(key model.JobRunKey, c *model.Case, now time.Time) agent.TaskContext {
+	out := agent.TaskContext{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID, Now: now}
 	if c != nil {
 		out.SlackChannelID = c.SlackChannelID
 		out.SlackThreadTS = c.SlackThreadTS

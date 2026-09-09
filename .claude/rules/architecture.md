@@ -628,7 +628,9 @@ must preserve:
 A model's argument mistake still reaches Sentry through the strategies'
 `errutil.Handle`, and that is deliberate: the run recovers, but a model looping
 on the same rejected call is exactly what an operator needs to see. Do not
-silence it — make the feedback good enough that the loop stops.
+silence it — make the feedback good enough that the loop stops. That holds for a
+schema rejection specifically, and it is NOT lifted by the `errutil.TagBenign`
+exception below: an argument that does not match the ToolSpec is never tagged.
 
 Better feedback did not stop that loop, though: the model re-emitted the same
 `memo__apply_memo_changes` call, so the memo writes were never applied while the
@@ -694,6 +696,26 @@ lines appended to the message. Five properties a change here must preserve:
 
 Note what this does NOT change: the failure still reaches Sentry through the
 strategies' `errutil.Handle`, for the same reason the argument rejection does.
+
+**The one exception is an error tagged `errutil.TagBenign`, which is logged at
+INFO and never reaches Sentry.** Both strategies still call `errutil.Handle` on
+every failed tool call — the exception lives in `Handle`, not in the strategies,
+so there is no per-tool opt-out to write and none to forget. Reserve the tag for
+an error whose whole meaning is "the caller sent something this service will not
+accept", where the caller is the model and the repair is its own next tool call:
+`usecase.ErrUnknownTag` (a tag id the model invented or that has since been
+deleted) and its neighbours, the Notion `404`, the `webfetch` content-type
+refusals. Anything that can also mean a backend broke stays reportable — and so
+does a schema rejection, per the paragraph above.
+
+Two consequences a change here must preserve. The model is unaffected: the
+failure is returned and fed back exactly as before, so tagging never weakens the
+feedback the paragraphs above exist to strengthen. And a tag on a **sentinel**
+reaches every caller of that usecase, not only the agent — `docs/operations.md`
+§ "What is not reported" is the operator-facing catalog, and a sentinel that the
+GraphQL layer can also return must be classified in
+`pkg/controller/graphql/errors.go` too, or it is answered `500` while raising no
+issue for anyone to find.
 
 **What it DID change, and the rule that follows: on a tool-call path there is no
 longer such a thing as an operator-only diagnostic.** A value attached with

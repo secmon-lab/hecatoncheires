@@ -637,7 +637,9 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			// lands under it rather than nowhere.
 			channelID:       channelID,
 			sessionThreadTS: sessionThreadTS,
-			taskContext:     caseTaskContext(key, c),
+			// startedAt is the same instant PromptInputs.Now gave the planner's
+			// system prompt, so planner and sub-agents read one clock.
+			taskContext: caseTaskContext(key, c, startedAt),
 		})
 		if spawnErr != nil {
 			// A busy subject cannot reach here: the caller holds the (workspace, case,

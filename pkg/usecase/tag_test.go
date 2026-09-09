@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 func TestTagUseCase_CreateTag(t *testing.T) {
@@ -156,6 +158,11 @@ func TestTagUseCase_DeleteTagInUseReturnsErrTagInUse(t *testing.T) {
 	// Attempt to delete the tag; must fail with ErrTagInUse.
 	err = tagUC.DeleteTag(ctx, ws, tag.ID)
 	gt.Error(t, err).Is(usecase.ErrTagInUse)
+
+	// The refusal states a precondition the caller can satisfy, so it must not
+	// page: knowledge__delete_tag is an agent tool and the strategies report
+	// every failed tool call.
+	gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
 }
 
 func TestTagUseCase_IDs_AreUnique(t *testing.T) {

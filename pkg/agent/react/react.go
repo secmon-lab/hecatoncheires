@@ -317,6 +317,13 @@ func (s *strategy) stepTool(ctx context.Context, sys agentkit.Syscalls, st state
 		// an operator needs it to tell a broken tool from a model that chose not
 		// to use its result, and the run timeline that also records it is only
 		// written for a run that keeps a run record.
+		//
+		// Every failure is handed to errutil.Handle, including the ones that
+		// never page: an error tagged errutil.TagBenign — a tool refusing what
+		// the model sent, which its own next call can repair — is demoted to an
+		// INFO log inside Handle. Keeping that decision there rather than here
+		// is deliberate; a per-tool skip would have to be written at each call
+		// site and would be forgotten at the next one.
 		errutil.Handle(ctx, goerr.Wrap(err, "react: tool call",
 			goerr.V("tool", call.Name), goerr.V("call_id", call.ID)), "react: tool call")
 	}

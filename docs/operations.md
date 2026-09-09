@@ -83,6 +83,32 @@ otherwise a caller built the web-fetch client without the setting.
 Every other `webfetch` failure stays reportable, including any failure of the
 screening LLM call itself — a broken screening path is an operator's problem.
 
+The knowledge and tag write paths are tagged for the same reason — the agent
+composes the title, the claim and the tag set itself, and a refusal states a
+precondition it can satisfy on its next turn:
+
+- **`unknown tag id`** — the entry references a tag that does not exist in the
+  workspace. The id came from an earlier `knowledge__list_tags` hit or from the
+  model's own context, so a stale or invented one is the model's to correct with
+  `knowledge__create_tag`. Search the log for the message and the
+  `missing_tag_ids` value.
+- **`invalid knowledge input`** — a missing title, an empty tag set, or a claim
+  over the length limit, rejected before any write.
+- **`tag is in use`** — `knowledge__delete_tag` refused because a knowledge entry
+  still references the tag.
+
+Every other failure on those paths stays reportable, including a repository
+failure raised while verifying the tags — that one is a broken backend, not a
+caller's input.
+
+These three are also reachable through the GraphQL knowledge and tag mutations,
+where the same reasoning applies: they are classified as client faults
+(`BAD_USER_INPUT` for the first two, `CONFLICT` for `tag is in use`), so the API
+answers `400` / `409` and no issue is raised. An unclassified error there would
+be answered `500` — and, once tagged, raise no issue either, leaving a server
+fault the client was told about with no operator-facing record. So a sentinel
+listed here must also carry a code in `pkg/controller/graphql/errors.go`.
+
 ### Operational troubleshoot
 
 - **Slack `missing_scope` even after adding the scope**: re-install the

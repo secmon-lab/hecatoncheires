@@ -2,6 +2,8 @@ package threadcase_test
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -117,23 +119,36 @@ func durableLLM(replies ...string) gollem.LLMClient {
 	return client
 }
 
-// recordingDurableLLM is durableLLM plus the system prompt each call was made
-// under, in call order. The prompt is where the host's per-run decisions actually
-// land — the language directive above all — so it is the observable a test asserting
-// on them has to read.
-func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) {
+// generateCall is one Generate as the model saw it: the system prompt its
+// session was opened with, and the text of the user input it was sent.
+type generateCall struct {
+	SystemPrompt string
+	Input        string
+}
+
+// recordingDurableLLM is durableLLM plus what each call was made with, in call
+// order. This is where the host's per-run decisions actually land — the language
+// directive and the turn's current time above all — so it is the observable a
+// test asserting on them has to read.
+func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []generateCall) {
 	var n atomic.Int32
 	var mu sync.Mutex
-	var prompts []string
+	var calls []generateCall
 	client := &mock.LLMClientMock{
 		NewSessionFunc: func(_ context.Context, opts ...gollem.SessionOption) (gollem.Session, error) {
 			// The system prompt is a session-level setting, so it is read here and
 			// attributed to the calls this session makes.
 			cfg := gollem.NewSessionConfig(opts...)
 			return &mock.SessionMock{
-				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					var b strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							b.WriteString(string(txt))
+						}
+					}
 					mu.Lock()
-					prompts = append(prompts, cfg.SystemPrompt())
+					calls = append(calls, generateCall{SystemPrompt: cfg.SystemPrompt(), Input: b.String()})
 					mu.Unlock()
 					i := int(n.Add(1)) - 1
 					if i >= len(replies) {
@@ -147,13 +162,25 @@ func recordingDurableLLM(replies ...string) (gollem.LLMClient, func() []string) 
 			}, nil
 		},
 	}
-	return client, func() []string {
+	return client, func() []generateCall {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make([]string, len(prompts))
-		copy(out, prompts)
+		out := make([]generateCall, len(calls))
+		copy(out, calls)
 		return out
 	}
+}
+
+// rfc3339Pattern matches the RFC3339 UTC instant the prompts render.
+var rfc3339Pattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
+
+// rfc3339In returns the single RFC3339 instant in s, failing the test when there
+// is none — an assertion comparing two absent values would otherwise pass.
+func rfc3339In(t *testing.T, s string) string {
+	t.Helper()
+	found := rfc3339Pattern.FindString(s)
+	gt.String(t, found).NotEqual("")
+	return found
 }
 
 func durableFailingLLM() gollem.LLMClient {
@@ -398,7 +425,7 @@ func TestDurableMentionDirectBecomesARespond(t *testing.T) {
 // There is no other symptom: the turn succeeds and nothing logs.
 func TestDurableMentionTellsTheTurnWhichLanguageToAnswerIn(t *testing.T) {
 	ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
-	llm, prompts := recordingDurableLLM(
+	llm, calls := recordingDurableLLM(
 		`{"direct":{"tools":[]}}`,
 		// The reply's own wording is not the contract here — the directive handed to
 		// the model is — so the fixture stays English.
@@ -411,10 +438,57 @@ func TestDurableMentionTellsTheTurnWhichLanguageToAnswerIn(t *testing.T) {
 
 	// The planner call and the direct-reply child: both carry the directive, and the
 	// second is the one whose text is posted to the thread.
-	seen := prompts()
+	seen := calls()
 	gt.Array(t, seen).Length(2).Required()
-	gt.String(t, seen[0]).Contains("**Japanese**")
-	gt.String(t, seen[1]).Contains("**Japanese**")
+	gt.String(t, seen[0].SystemPrompt).Contains("**Japanese**")
+	gt.String(t, seen[1].SystemPrompt).Contains("**Japanese**")
+}
+
+// The turn's current time. Without it the planner resolves "today" and "by
+// tomorrow" against whatever date its training suggests — the create turn that
+// produced this test was told "by today" and wrote a due date a month in the
+// past.
+//
+// It rides in the FIRST USER MESSAGE because a thread-mode turn continues the
+// previous turn's conversation (Durable.inheritOpts →
+// agentkit.WithInheritedHistory) and the system prompt is not part of that
+// history: a resumed turn would otherwise carry the earlier messages with
+// nothing saying when they were written.
+//
+// The planner and its sub-agents must be told the SAME instant — the sub-agent
+// reads it from agent.TaskContext, which is built separately — or a task
+// dispatched mid-turn resolves a relative date differently from the planner that
+// wrote it. Asserting equality is what pins the two together: each side's own
+// rendering is already covered by agent.PlannerMessage and agent.TaskContext.
+func TestDurableMentionTellsThePlannerAndItsSubAgentsOneTime(t *testing.T) {
+	ctx := context.Background()
+	llm, calls := recordingDurableLLM(
+		investigatePlan,
+		"Read the thread.",
+		replanDone,
+		`{"kind":"respond","message":"It is still open."}`,
+	)
+	h := newDurableHarness(t, llm)
+	ssn := h.session(t, ctx, 42)
+
+	h.run(t, h.mentionRequest(ssn, "1700000001.000010"))
+
+	seen := calls()
+	gt.Array(t, seen).Length(4).Required()
+
+	// Call 1 is the plan: the time leads its user message, and is NOT in the
+	// system prompt, which the inherited history does not carry.
+	planner := seen[0]
+	gt.String(t, planner.Input).Contains("# Current time")
+	gt.Bool(t, strings.Contains(planner.SystemPrompt, "# Current time")).False()
+
+	// Call 2 is the sub-agent, prompted from the task context.
+	child := seen[1]
+	gt.String(t, child.SystemPrompt).Contains("- current_time: ")
+
+	plannerTime := rfc3339In(t, planner.Input)
+	childTime := rfc3339In(t, child.SystemPrompt)
+	gt.String(t, childTime).Equal(plannerTime)
 }
 
 // A create turn's proposal must reach the host with its field values already
