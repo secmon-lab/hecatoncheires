@@ -14,6 +14,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // Deps groups the dependencies needed to register Notion-backed agent tools.
@@ -49,10 +50,15 @@ type searchTool struct {
 func (t *searchTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name: "notion__search",
-		Description: "Search Notion pages and databases shared with the integration. Matches titles against the query string. " +
-			"Returns id, type (page or database), title, URL, last edited timestamp, and read_tool. " +
+		Description: "Search Notion pages and databases shared with the integration. Matches titles against the query string — " +
+			"Notion cannot search page bodies, and this endpoint takes ONE substring, not several keywords. " +
+			"Returns id, type (page or database), title, URL, last edited timestamp, read_tool, and the hit's parent " +
+			"(parent_type, parent_id, and parent_database_name when the parent is a database), so it can be told whether a hit " +
+			"belongs to the database you care about. " +
 			"read_tool names the tool that reads that hit — notion__get_page for a page, notion__get_database for a database. " +
-			"Call the tool the hit names; the two are not interchangeable and passing a database id to notion__get_page fails.",
+			"Call the tool the hit names; the two are not interchangeable and passing a database id to notion__get_page fails. " +
+			"A database hit also carries search_tool: use " + searchDatabaseToolName + " to search that database's rows by " +
+			"several keywords or by property value, which this tool cannot do.",
 		Parameters: map[string]*gollem.Parameter{
 			"query": {
 				Type:        gollem.TypeString,
@@ -69,6 +75,18 @@ func (t *searchTool) Spec() gollem.ToolSpec {
 				Description: "Limit results to a specific object type. Empty for both pages and databases.",
 				Required:    false,
 				Enum:        []string{"page", "database"},
+			},
+			"sort_by_last_edited": {
+				Type: gollem.TypeString,
+				Description: "Order hits by when they were last edited. Omit for Notion's relevance order. " +
+					"Notion cannot sort this search by anything else.",
+				Required: false,
+				Enum:     []string{directionAscending, directionDescending},
+			},
+			"start_cursor": {
+				Type:        gollem.TypeString,
+				Description: "Pagination cursor returned as 'next_cursor' by a previous call.",
+				Required:    false,
 			},
 		},
 	}
@@ -89,6 +107,12 @@ func (t *searchTool) Run(ctx context.Context, args map[string]any) (map[string]a
 	if s, ok := args["filter_type"].(string); ok {
 		opts.FilterType = s
 	}
+	if s, ok := args["sort_by_last_edited"].(string); ok {
+		opts.SortByEdit = s
+	}
+	if s, ok := args["start_cursor"].(string); ok {
+		opts.StartCursor = s
+	}
 
 	tool.Update(ctx, fmt.Sprintf("Searching Notion: %q", query))
 
@@ -99,23 +123,84 @@ func (t *searchTool) Run(ctx context.Context, args map[string]any) (map[string]a
 		)
 	}
 
+	names := t.resolveParentNames(ctx, res.Items)
+
 	items := make([]map[string]any, 0, len(res.Items))
 	for _, it := range res.Items {
 		items = append(items, map[string]any{
-			"id":          it.ID,
-			"type":        it.Type,
-			"title":       it.Title,
-			"url":         it.URL,
-			"last_edited": it.LastEdited.Format(time.RFC3339),
-			"read_tool":   readToolFor(it.Type),
+			"id":                   it.ID,
+			"type":                 it.Type,
+			"title":                it.Title,
+			"url":                  it.URL,
+			"last_edited":          it.LastEdited.Format(time.RFC3339),
+			"read_tool":            readToolFor(it.Type),
+			"search_tool":          searchToolFor(it.Type),
+			"parent_type":          it.Parent.Type,
+			"parent_id":            it.Parent.ID,
+			"parent_database_name": names[it.Parent.ID],
 		})
 	}
 
 	return map[string]any{
+		"status":      statusOK,
+		"matched":     len(items),
 		"items":       items,
 		"has_more":    res.HasMore,
 		"next_cursor": res.NextCursor,
 	}, nil
+}
+
+// parentNameResolveMax bounds how many distinct parent databases one search
+// resolves the name of.
+//
+// Notion does not include a parent's title in a search result, so each name is
+// one more request, and Notion rate-limits at roughly three per second. The id
+// is what decides whether a hit belongs to the database the caller cares about;
+// the name is for quoting it. So the ids are always complete and the names run
+// out first.
+const parentNameResolveMax = 5
+
+// resolveParentNames looks up the titles of the distinct parent databases among
+// the hits, keyed by database id.
+//
+// A lookup that fails leaves the name absent and the search successful: the hit
+// is still usable through its id, and failing the whole search because one
+// parent could not be read would be a worse answer than a missing label.
+func (t *searchTool) resolveParentNames(ctx context.Context, items []SearchItem) map[string]string {
+	names := make(map[string]string)
+	for _, it := range items {
+		if it.Parent.Type != parentTypeDatabase || it.Parent.ID == "" {
+			continue
+		}
+		if _, seen := names[it.Parent.ID]; seen {
+			continue
+		}
+		if len(names) == parentNameResolveMax {
+			break
+		}
+		// Recorded before the call so a failed lookup is not retried for the
+		// next hit that shares the same parent.
+		names[it.Parent.ID] = ""
+
+		db, err := t.client.GetDatabase(ctx, it.Parent.ID)
+		if err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to resolve notion parent database name",
+				goerr.V("parent_database_id", it.Parent.ID),
+			), "failed to resolve notion parent database name")
+			continue
+		}
+		names[it.Parent.ID] = db.Title
+	}
+	return names
+}
+
+// searchToolFor names the tool that searches inside a search hit. Only a
+// database has rows to search; a page is read whole.
+func searchToolFor(itemType string) string {
+	if itemType == "database" {
+		return searchDatabaseToolName
+	}
+	return ""
 }
 
 // The values the "status" field of a read tool's result takes.

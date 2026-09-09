@@ -369,6 +369,9 @@ type searchObject struct {
 	ID             string    `json:"id"`
 	URL            string    `json:"url"`
 	LastEditedTime time.Time `json:"last_edited_time"`
+	// Parent stays raw: which key carries the id depends on the parent's kind,
+	// and a kind Notion adds later must not fail the decode.
+	Parent json.RawMessage `json:"parent"`
 	// Title is where a database carries its name.
 	Title []richText `json:"title"`
 	// Properties is where a page carries its name, under a user-defined key
@@ -405,6 +408,7 @@ func convertSearchItem(ctx context.Context, obj searchObject, props []PropertySc
 			URL:        obj.URL,
 			LastEdited: obj.LastEditedTime,
 			Properties: renderRowProperties(obj.Properties, props),
+			Parent:     convertParent(obj.Parent),
 		}, true
 	case "database":
 		return SearchItem{
@@ -413,6 +417,7 @@ func convertSearchItem(ctx context.Context, obj searchObject, props []PropertySc
 			Title:      plainText(obj.Title),
 			URL:        obj.URL,
 			LastEdited: obj.LastEditedTime,
+			Parent:     convertParent(obj.Parent),
 		}, true
 	default:
 		errutil.Handle(ctx, goerr.New("skipped an unrecognised notion search result",
@@ -440,6 +445,51 @@ func extractPageTitle(props map[string]json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// parentObject is a search hit's parent reference. Notion names the id after
+// the parent's kind, so all four keys are read and the one that is set wins.
+type parentObject struct {
+	Type         string `json:"type"`
+	DatabaseID   string `json:"database_id"`
+	DataSourceID string `json:"data_source_id"`
+	PageID       string `json:"page_id"`
+	BlockID      string `json:"block_id"`
+}
+
+// convertParent reads a search hit's parent. An absent, unreadable or
+// unrecognised parent yields the zero value rather than an error: the hit
+// itself is still worth returning, and the caller reports an empty parent type
+// as "not known" rather than as "no parent".
+//
+// A workspace-level page has no id to report, which is why Type is what a
+// caller tests rather than the presence of ID.
+func convertParent(raw json.RawMessage) ParentRef {
+	if len(raw) == 0 {
+		return ParentRef{}
+	}
+
+	var decoded parentObject
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return ParentRef{}
+	}
+
+	switch decoded.Type {
+	case "database_id":
+		return ParentRef{Type: parentTypeDatabase, ID: decoded.DatabaseID}
+	case "data_source_id":
+		// Reachable only if this endpoint is ever pinned past Notion's
+		// 2025-09-03 split, which renamed a row's parent. Reported as the
+		// database it stands for rather than dropped.
+		return ParentRef{Type: parentTypeDatabase, ID: decoded.DataSourceID}
+	case "page_id":
+		return ParentRef{Type: parentTypePage, ID: decoded.PageID}
+	case "block_id":
+		return ParentRef{Type: parentTypeBlock, ID: decoded.BlockID}
+	case "workspace":
+		return ParentRef{Type: parentTypeWorkspace}
+	}
+	return ParentRef{}
 }
 
 // renderRowProperties renders the values of the requested columns as text,

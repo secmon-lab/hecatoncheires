@@ -67,6 +67,14 @@ type SearchItem struct {
 	Parent ParentRef
 }
 
+// The parent kinds a search hit reports.
+const (
+	parentTypeDatabase  = "database"
+	parentTypePage      = "page"
+	parentTypeBlock     = "block"
+	parentTypeWorkspace = "workspace"
+)
+
 // ParentRef names what a search hit belongs to. Notion reports the parent's id
 // but never its title, so Name is left to the caller that resolves it.
 type ParentRef struct {

@@ -967,6 +967,108 @@ func TestGetDataSource(t *testing.T) {
 	})
 }
 
+func TestSearchReportsTheParent(t *testing.T) {
+	searchWith := func(t *testing.T, results string, opts notiontool.SearchOptions) (*notiontool.SearchResult, string, string) {
+		t.Helper()
+		var capturedBody, capturedVersion string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+			capturedVersion = r.Header.Get("Notion-Version")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","has_more":false,"next_cursor":null,"results":[` + results + `]}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.Search(context.Background(), "outage", opts)
+		gt.NoError(t, err).Required()
+		return got, capturedBody, capturedVersion
+	}
+
+	t.Run("reads each kind of parent Notion reports", func(t *testing.T) {
+		got, _, version := searchWith(t, `
+			{"object":"page","id":"row-1","url":"https://www.notion.so/row-1",
+			 "parent":{"type":"database_id","database_id":"db-1"}},
+			{"object":"page","id":"child-1","url":"https://www.notion.so/child-1",
+			 "parent":{"type":"page_id","page_id":"page-9"}},
+			{"object":"page","id":"inline-1","url":"https://www.notion.so/inline-1",
+			 "parent":{"type":"block_id","block_id":"block-3"}},
+			{"object":"page","id":"loose-1","url":"https://www.notion.so/loose-1",
+			 "parent":{"type":"workspace","workspace":true}}`, notiontool.SearchOptions{})
+
+		// The search endpoint stays pinned to the version this decoder is
+		// written against; a row's parent is a database_id there, not a
+		// data_source_id.
+		gt.String(t, version).Equal("2022-06-28")
+
+		gt.Array(t, got.Items).Length(4).Required()
+		gt.String(t, got.Items[0].Parent.Type).Equal("database")
+		gt.String(t, got.Items[0].Parent.ID).Equal("db-1")
+		gt.String(t, got.Items[0].Parent.Name).Equal("")
+
+		gt.String(t, got.Items[1].Parent.Type).Equal("page")
+		gt.String(t, got.Items[1].Parent.ID).Equal("page-9")
+
+		gt.String(t, got.Items[2].Parent.Type).Equal("block")
+		gt.String(t, got.Items[2].Parent.ID).Equal("block-3")
+
+		gt.String(t, got.Items[3].Parent.Type).Equal("workspace")
+		gt.String(t, got.Items[3].Parent.ID).Equal("")
+	})
+
+	t.Run("reads a database hit's parent too", func(t *testing.T) {
+		got, _, _ := searchWith(t, `
+			{"object":"database","id":"db-1","url":"https://www.notion.so/db-1",
+			 "title":[{"plain_text":"Knowledge Base"}],
+			 "parent":{"type":"page_id","page_id":"page-1"}}`, notiontool.SearchOptions{})
+
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].Title).Equal("Knowledge Base")
+		gt.String(t, got.Items[0].Parent.Type).Equal("page")
+		gt.String(t, got.Items[0].Parent.ID).Equal("page-1")
+	})
+
+	// A hit is still worth returning without its parent, so an absent or
+	// unrecognised one leaves the field empty rather than failing the search.
+	t.Run("leaves an absent or unrecognised parent empty", func(t *testing.T) {
+		got, _, _ := searchWith(t, `
+			{"object":"page","id":"row-1","url":"https://www.notion.so/row-1"},
+			{"object":"page","id":"row-2","url":"https://www.notion.so/row-2",
+			 "parent":{"type":"agent_id","agent_id":"agent-1"}},
+			{"object":"page","id":"row-3","url":"https://www.notion.so/row-3","parent":"unexpected"}`,
+			notiontool.SearchOptions{})
+
+		gt.Array(t, got.Items).Length(3).Required()
+		for _, item := range got.Items {
+			gt.String(t, item.Parent.Type).Equal("")
+			gt.String(t, item.Parent.ID).Equal("")
+		}
+	})
+
+	t.Run("sends the cursor and the ordering it was given", func(t *testing.T) {
+		_, body, _ := searchWith(t, "", notiontool.SearchOptions{
+			StartCursor: "cursor-1",
+			SortByEdit:  "descending",
+		})
+
+		gt.Bool(t, strings.Contains(body, `"start_cursor":"cursor-1"`)).True()
+		gt.Bool(t, strings.Contains(body, `"timestamp":"last_edited_time"`)).True()
+		gt.Bool(t, strings.Contains(body, `"direction":"descending"`)).True()
+	})
+
+	t.Run("omits the cursor and the sort when neither is given", func(t *testing.T) {
+		_, body, _ := searchWith(t, "", notiontool.SearchOptions{})
+
+		gt.Bool(t, strings.Contains(body, `"start_cursor"`)).False()
+		gt.Bool(t, strings.Contains(body, `"sort"`)).False()
+	})
+}
+
 func TestQueryDataSourceNarrowsAndSelects(t *testing.T) {
 	const rowBody = `{
 		"object": "list",
