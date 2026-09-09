@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,56 @@ func (f *fakeNotionClient) QueryDataSource(_ context.Context, dataSourceID strin
 		return nil, f.queryErr
 	}
 	return f.queryResult, nil
+}
+
+// blockingNotionClient answers a search immediately and then holds every
+// database read until the test releases it or the caller's context is done. It
+// stands in for a Notion that has stopped responding while a search has already
+// succeeded.
+type blockingNotionClient struct {
+	searchResult *notiontool.SearchResult
+	release      chan struct{}
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (b *blockingNotionClient) Search(context.Context, string, notiontool.SearchOptions) (*notiontool.SearchResult, error) {
+	if b.searchResult != nil {
+		return b.searchResult, nil
+	}
+	return &notiontool.SearchResult{}, nil
+}
+
+func (b *blockingNotionClient) GetPageMarkdown(_ context.Context, pageID string) (*notiontool.PageMarkdown, error) {
+	return &notiontool.PageMarkdown{PageID: pageID}, nil
+}
+
+func (b *blockingNotionClient) GetDatabase(ctx context.Context, databaseID string) (*notiontool.Database, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.release:
+		return &notiontool.Database{ID: databaseID, Title: "Some database"}, nil
+	}
+}
+
+func (b *blockingNotionClient) GetDataSource(_ context.Context, dataSourceID string) (*notiontool.DataSource, error) {
+	return &notiontool.DataSource{ID: dataSourceID}, nil
+}
+
+func (b *blockingNotionClient) QueryDataSource(context.Context, string, notiontool.QueryOptions) (*notiontool.QueryResult, error) {
+	return &notiontool.QueryResult{}, nil
+}
+
+func (b *blockingNotionClient) databaseCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }
 
 func findTool(t *testing.T, tools []gollem.Tool, name string) gollem.Tool {
@@ -400,6 +451,41 @@ func TestSearchToolReportsTheParent(t *testing.T) {
 		_, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
 		gt.NoError(t, err).Required()
 		gt.Array(t, fake.gotDatabaseIDs).Equal([]string{"db-1"})
+	})
+
+	// The count bound does not bound the wait: each lookup is an HTTP request
+	// under the client's own 30-second timeout. The search has already
+	// succeeded by this point, so the labels get a deadline and the answer does
+	// not wait past it.
+	t.Run("stops naming parents when the time budget runs out", func(t *testing.T) {
+		items := make([]notiontool.SearchItem, 0, 3)
+		for i := 1; i <= 3; i++ {
+			items = append(items, hit(fmt.Sprintf("row-%d", i), "database", fmt.Sprintf("db-%d", i)))
+		}
+		fake := &blockingNotionClient{
+			searchResult: &notiontool.SearchResult{Items: items},
+			release:      make(chan struct{}),
+		}
+		defer close(fake.release)
+
+		tool := notiontool.NewSearchToolWithNameBudgetForTest(fake, 20*time.Millisecond)
+		got, err := tool.Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		// The search still answers, with every id and no labels.
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(3)
+
+		hits := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, hits).Length(3).Required()
+		for i, item := range hits {
+			gt.Value(t, item["parent_id"]).Equal(fmt.Sprintf("db-%d", i+1))
+			gt.Value(t, item["parent_database_name"]).Equal("")
+		}
+
+		// The deadline stopped the phase rather than letting it work through
+		// every parent.
+		gt.Number(t, fake.databaseCalls()).LessOrEqual(2)
 	})
 
 	t.Run("reports an unknown parent as empty rather than guessing", func(t *testing.T) {

@@ -45,6 +45,9 @@ const searchDatabaseToolName = "notion__search_database"
 // searchTool searches Notion pages and databases by title.
 type searchTool struct {
 	client Client
+	// nameBudget bounds the parent-name lookups. Zero means
+	// parentNameResolveBudget.
+	nameBudget time.Duration
 }
 
 func (t *searchTool) Spec() gollem.ToolSpec {
@@ -160,14 +163,33 @@ func (t *searchTool) Run(ctx context.Context, args map[string]any) (map[string]a
 // out first.
 const parentNameResolveMax = 5
 
+// parentNameResolveBudget bounds the time the whole naming phase may take.
+//
+// The count above does not bound the wait: each lookup is an HTTP request under
+// the client's own 30-second timeout, and a rate-limited one waits and retries
+// on top of that, so a handful of unresponsive parents could hold back a search
+// that has already succeeded for minutes. The search is the answer and the names
+// are labels on it, so the labels get a deadline and the answer does not wait
+// past it.
+const parentNameResolveBudget = 5 * time.Second
+
 // resolveParentNames looks up the titles of the distinct parent databases among
 // the hits, keyed by database id.
 //
-// A lookup that fails leaves the name absent and the search successful: the hit
-// is still usable through its id, and failing the whole search because one
-// parent could not be read would be a worse answer than a missing label.
+// A lookup that fails — or that the budget cuts short — leaves the name absent
+// and the search successful: the hit is still usable through its id, and failing
+// a whole search because one label could not be read would be a worse answer
+// than a missing label.
 func (t *searchTool) resolveParentNames(ctx context.Context, items []SearchItem) map[string]string {
 	names := make(map[string]string)
+
+	budget := t.nameBudget
+	if budget <= 0 {
+		budget = parentNameResolveBudget
+	}
+	nameCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
 	for _, it := range items {
 		if it.Parent.Type != parentTypeDatabase || it.Parent.ID == "" {
 			continue
@@ -178,15 +200,24 @@ func (t *searchTool) resolveParentNames(ctx context.Context, items []SearchItem)
 		if len(names) == parentNameResolveMax {
 			break
 		}
+		if nameCtx.Err() != nil {
+			// Out of time. The remaining parents keep their ids and lose only
+			// their labels.
+			break
+		}
 		// Recorded before the call so a failed lookup is not retried for the
 		// next hit that shares the same parent.
 		names[it.Parent.ID] = ""
 
-		db, err := t.client.GetDatabase(ctx, it.Parent.ID)
+		db, err := t.client.GetDatabase(nameCtx, it.Parent.ID)
 		if err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "failed to resolve notion parent database name",
-				goerr.V("parent_database_id", it.Parent.ID),
-			), "failed to resolve notion parent database name")
+			// A lookup the budget cut short is that bound working, not a defect
+			// to report.
+			if nameCtx.Err() == nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to resolve notion parent database name",
+					goerr.V("parent_database_id", it.Parent.ID),
+				), "failed to resolve notion parent database name")
+			}
 			continue
 		}
 		names[it.Parent.ID] = db.Title

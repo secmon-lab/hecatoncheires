@@ -3,6 +3,9 @@ package notiontool
 import (
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/gollem-dev/gollem"
 )
 
 // NewClientWithBaseURLForTest builds a Client whose Notion API requests all
@@ -13,6 +16,13 @@ func NewClientWithBaseURLForTest(token, apiBaseURL string) Client {
 		httpClient: &http.Client{},
 		apiBaseURL: apiBaseURL,
 	}
+}
+
+// NewSearchToolWithNameBudgetForTest builds the search tool with a shortened
+// deadline for the parent-name lookups, so a test can drive the budget running
+// out without waiting the production five seconds.
+func NewSearchToolWithNameBudgetForTest(client Client, budget time.Duration) gollem.Tool {
+	return &searchTool{client: client, nameBudget: budget}
 }
 
 // RenderPropertyValueForTest exposes the rendering of one Notion property value

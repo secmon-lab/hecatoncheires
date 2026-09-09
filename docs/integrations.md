@@ -103,6 +103,8 @@ Since Notion's 2025-09-03 API version, a database does not hold its rows directl
 
 Notion does not include the parent's title in a search result, so each name is one extra `GET /v1/databases/{id}`. Distinct parents are resolved once each and **capped at 5 per search**, because Notion rate-limits at roughly three requests a second: past the cap, and for a parent whose read fails, the id is still reported and the name is left empty. A name that cannot be read is logged (through `errutil.Handle`) and never fails the search — the hit remains usable through its id.
 
+The whole naming phase also has a **5-second deadline**. The count alone does not bound the wait: each lookup runs under the client's own 30-second timeout and a rate-limited one waits and retries on top of that, so a few unresponsive parents could otherwise hold back a search that has already succeeded. When the deadline passes, the remaining parents keep their ids and lose only their labels, and the timeout is not reported as a failure.
+
 The search endpoint stays pinned to `Notion-Version: 2022-06-28`, which is the response shape the decoder is written against. That is also why a row's parent arrives as `database_id` rather than the `data_source_id` of Notion's 2025-09-03 split.
 
 #### Searching one database's rows
