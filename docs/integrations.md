@@ -32,8 +32,8 @@ This document covers the Notion setup needed for those tools.
    - **Associated workspace**: pick the workspace that owns the pages/databases you want to expose.
    - **Type**: **Internal**.
 4. Under **Capabilities**, enable:
-   - **Read content** — required for both `Search` and the Markdown content endpoint.
-   - The other capabilities (Update content / Insert content / etc.) are **not** required for the agent tools.
+   - **Read content** — required for `Search`, the Markdown content endpoint, the database and data source reads, and the row query. Nothing else in this list is needed for the agent tools: Update content / Insert content / the comment capabilities are **not** required.
+   - **User information** (the *without email addresses* level is enough) — required **only** if you want `people`, `created_by` and `last_edited_by` column values to come back as names. With **No user information**, Notion's own documentation says "User objects will not include any information about the user", so those columns are reported as user ids instead. Nothing breaks either way, and the *including email addresses* level is never needed — no agent tool reads an email address.
 5. Click **Save**.
 6. Copy the **Internal Integration Token** (starts with `secret_…`). This is the value passed via `--notion-api-token` / `HECATONCHEIRES_NOTION_API_TOKEN`.
 
@@ -50,6 +50,8 @@ For each top-level page or database you want the agent to see:
 3. Notion grants the connection access to the page **and all of its descendants**, so it is usually enough to share a small number of root pages.
 
 Pages or child blocks that are **not** shared with the connection will appear as `<unknown>` placeholders in the Markdown output (a documented Notion API limitation).
+
+Sharing a database grants access to its data sources and its rows, so a database an agent is meant to search has to be shared exactly once, at the database. An unshared database is not silently empty: Notion answers `404 object_not_found`, which the tools surface as a failed call rather than as zero rows — see [Telling "nothing matched" apart from "the call did not happen"](#telling-nothing-matched-apart-from-the-call-did-not-happen) for why that distinction matters to a workflow that hands unanswerable requests to a person.
 
 ### 3. Configure the Server
 
