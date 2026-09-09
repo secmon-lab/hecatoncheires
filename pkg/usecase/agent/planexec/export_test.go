@@ -1,7 +1,31 @@
 package planexec
 
+import "context"
+
 // Test-only exports. The compiler enforces these never reach the
 // production binary because the file ends in _test.go.
+
+// NoteForTest draws one milestone against a state already carrying messageTS,
+// and reports the message id the state ends up with. It exists so a test can
+// exercise the draw decision itself (an empty line, a missing target) without
+// scripting a whole run.
+func NoteForTest(ctx context.Context, p Progress, target ProgressTarget, messageTS, line string) string {
+	s := &strategy[TextResult]{progress: p, cfg: Config[TextResult]{TextOnly: true}}
+	st := state{Input: Input{Progress: target}, Progress: progressState{MessageTS: messageTS}}
+	return s.note(ctx, st, line).Progress.MessageTS
+}
+
+// DecodeProgressStateForTest decodes a checkpointed state and reports the
+// progress message id it carries, so a test can pin that a state written by a
+// build that still recorded the line history resumes into the same message.
+func DecodeProgressStateForTest(raw []byte) (string, error) {
+	s := &strategy[TextResult]{cfg: Config[TextResult]{TextOnly: true}}
+	st, err := s.DecodeState(s.Version(), raw)
+	if err != nil {
+		return "", err
+	}
+	return st.Progress.MessageTS, nil
+}
 
 // ParsePlanResultForTest exposes parsePlanResult so external test
 // packages (planexec_test) can exercise the parser without bringing

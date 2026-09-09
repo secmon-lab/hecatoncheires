@@ -71,9 +71,24 @@ Differences worth knowing before changing it:
   a strategy is registered once at startup and then serves every run, so a
   finalizer must read its own scope (the workspace, the case) rather than close
   over one.
-- **`Progress` is stateless.** The message id and the lines so far live in the
-  checkpointed state, so a run picked up by another instance keeps drawing into
-  the same Slack message instead of starting a second one.
+- **`Progress` draws ONE line into ONE message, and it is stateless.** A turn
+  occupies a single Slack message holding a single context block, whose text is
+  REPLACED at every milestone — `Render` takes the current line, not a history,
+  so an implementation cannot go back to appending. The message id lives in the
+  checkpointed state (`progressState`, which holds nothing else), so a run picked
+  up by another instance keeps drawing into the same message instead of starting
+  a second one.
+- **A host may hand in the message to draw into** (`ProgressTarget.MessageTS`).
+  The create path posts its acknowledgement before the turn is spawned — the
+  thread would otherwise be silent for the seconds a Spawn takes — and passes
+  that id in, so the acknowledgement and the run's milestones are one message
+  rather than two. Two consequences: a host that posts nothing leaves the field
+  empty and the run posts its own on its first milestone, and a run given an id
+  is immune to the duplicate-message limitation noted at `note` (the id is part
+  of the input, so a retried transition re-reads the same one).
+- **The turn's answer is never written into the progress message.** The reply,
+  the case summary and the question form are each their own thread message, and
+  the progress message is left showing the last milestone the run reached.
 
 ## Where things live
 - `.cckiro` and `.spec` are gitignored (not tracked). Put durable design docs in `docs/develop/` (next to `architecture.md`).

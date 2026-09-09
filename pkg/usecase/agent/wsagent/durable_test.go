@@ -105,21 +105,20 @@ func (h *recordingHost) Calls() []hostCall {
 }
 
 // recordingProgress captures each milestone render and the message id it was
-// asked to update.
+// asked to update. One render is one line: the message shows the run's current
+// milestone, and each replaces the one before it.
 type recordingProgress struct {
 	mu      sync.Mutex
-	renders [][]string
+	renders []string
 	seenTS  []string
 }
 
 func (p *recordingProgress) Render(_ context.Context, target planexec.ProgressTarget,
-	messageTS string, lines []string,
+	messageTS string, line string,
 ) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cp := make([]string, len(lines))
-	copy(cp, lines)
-	p.renders = append(p.renders, cp)
+	p.renders = append(p.renders, line)
 	p.seenTS = append(p.seenTS, messageTS)
 	return "1700000000.000900", nil
 }
@@ -132,17 +131,12 @@ func (p *recordingProgress) targets() []string {
 	return out
 }
 
-// lastRender returns the lines of the most recent render, which is what the user
-// is left looking at once the turn ends.
-func (p *recordingProgress) lastRender() []string {
+// lines returns the milestone each render drew, in call order.
+func (p *recordingProgress) lines() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.renders) == 0 {
-		return nil
-	}
-	last := p.renders[len(p.renders)-1]
-	out := make([]string, len(last))
-	copy(out, last)
+	out := make([]string, len(p.renders))
+	copy(out, p.renders)
 	return out
 }
 
@@ -360,9 +354,9 @@ func TestDurableStartTurnPostsTheAnswer(t *testing.T) {
 		gt.Value(t, ts).Equal("1700000000.000900")
 	}
 
-	// The lines accumulate across the turn's transitions, so what the user is left
-	// looking at is the whole trail rather than only the last step.
-	trail := strings.Join(h.progress.lastRender(), "\n")
+	// The turn's transitions each draw ONE line, replacing the one before it, so
+	// the thread carries a single context block rather than a growing trail.
+	trail := strings.Join(h.progress.lines(), "\n")
 	gt.String(t, trail).Contains("Planning")
 	gt.String(t, trail).Contains("Investigating")
 	gt.String(t, trail).Contains("Re-planning")

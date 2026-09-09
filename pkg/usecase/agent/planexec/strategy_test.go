@@ -107,29 +107,63 @@ func (p *scriptedPlanner) seenSystemPrompts() []string {
 }
 
 // recordingProgress captures every milestone render, so a test can assert what
-// the user was shown and that the message id is reused.
+// the user was shown and that the message id is reused. One render is one line:
+// the message shows the run's CURRENT milestone, never a history.
 type recordingProgress struct {
-	mu     sync.Mutex
-	lines  [][]string
-	lastTS string
+	mu      sync.Mutex
+	lines   []string
+	seenTS  []string
+	renderT string
 }
 
-func (p *recordingProgress) Render(_ context.Context, _ planexec.ProgressTarget, messageTS string, lines []string) (string, error) {
+func (p *recordingProgress) Render(_ context.Context, _ planexec.ProgressTarget, messageTS string, line string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cp := make([]string, len(lines))
-	copy(cp, lines)
-	p.lines = append(p.lines, cp)
-	p.lastTS = messageTS
-	return "1700000000.000001", nil
+	p.lines = append(p.lines, line)
+	p.seenTS = append(p.seenTS, messageTS)
+	if p.renderT == "" {
+		p.renderT = "1700000000.000001"
+	}
+	return p.renderT, nil
 }
 
-func (p *recordingProgress) renders() [][]string {
+// renders returns the line each render drew, in call order.
+func (p *recordingProgress) renders() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([][]string, len(p.lines))
+	out := make([]string, len(p.lines))
 	copy(out, p.lines)
 	return out
+}
+
+// targets returns the message id each render was asked to draw into, in call
+// order. The first is empty when the run posts its own message.
+func (p *recordingProgress) targets() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.seenTS))
+	copy(out, p.seenTS)
+	return out
+}
+
+// failingProgress reports every draw as a failure, which is what a Slack outage
+// looks like from the strategy's side.
+type failingProgress struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *failingProgress) Render(_ context.Context, _ planexec.ProgressTarget, _ string, _ string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return "", goerr.New("slack is unreachable")
+}
+
+func (p *failingProgress) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
 
 // childMetadataRecorder captures the metadata each child Process was spawned
@@ -318,13 +352,143 @@ func TestPlanCollectReplanFinal(t *testing.T) {
 	gt.String(t, seen[2]).Contains("Observations from prior investigations")
 	gt.String(t, seen[2]).Contains("deploy failed")
 
-	// Milestones accumulate into ONE message, reused by id.
+	// Milestones are drawn into ONE message, reused by id: the first render
+	// posts it (no id yet), every later one updates the id it returned.
 	renders := progress.renders()
 	gt.Number(t, len(renders)).GreaterOrEqual(3)
-	gt.String(t, renders[0][0]).Contains("Planning")
-	gt.String(t, progress.lastTS).Equal("1700000000.000001")
-	last := renders[len(renders)-1]
-	gt.Number(t, len(last)).GreaterOrEqual(len(renders[0]))
+	gt.String(t, renders[0]).Contains("Planning")
+	targets := progress.targets()
+	gt.Value(t, targets[0]).Equal("")
+	for _, ts := range targets[1:] {
+		gt.Value(t, ts).Equal("1700000000.000001")
+	}
+}
+
+// A render draws ONE line — the milestone the run just reached — and the lines
+// never accumulate. This is what keeps the thread to a single context block
+// whose text is replaced rather than appended to.
+func TestProgressDrawsTheCurrentLineOnly(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Done.`,
+	}}
+	progress := &recordingProgress{}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), progress, nil)
+
+	in := textInput()
+	in.Progress = planexec.ProgressTarget{ChannelID: "C1", ThreadTS: "1700000000.000001"}
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	// The run's milestones, in the order the person sees them replace one
+	// another in the single progress message.
+	gt.Array(t, progress.renders()).Equal([]string{
+		"🧭 Planning",
+		"🔎 Investigating (1 task(s))",
+		"✅ Round 1: 1 task(s) done",
+		"🧭 Re-planning",
+		"📝 Writing the answer",
+	})
+}
+
+// A host that already posted a progress message hands its id to the run, and the
+// run UPDATES it instead of posting a second one. That is how the create path's
+// acknowledgement and the run's milestones end up in one message.
+func TestProgressUpdatesTheMessageTheHostPosted(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Done.`,
+	}}
+	progress := &recordingProgress{}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), progress, nil)
+
+	in := textInput()
+	in.Progress = planexec.ProgressTarget{
+		ChannelID: "C1", ThreadTS: "1700000000.000001",
+		MessageTS: "1700000000.000009",
+	}
+	proc := rt.run(t, in, nil)
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	targets := progress.targets()
+	gt.Number(t, len(targets)).GreaterOrEqual(1).Required()
+	// No render was ever asked to post a new message: every one names an id.
+	for _, ts := range targets {
+		gt.Value(t, ts).NotEqual("")
+	}
+	gt.Value(t, targets[0]).Equal("1700000000.000009")
+}
+
+// Drawing is observability. A Slack outage leaves the thread without progress
+// lines; it must never fail the turn the person asked for.
+func TestProgressFailureDoesNotFailTheTurn(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Done.`,
+	}}
+	progress := &failingProgress{}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), progress, nil)
+
+	in := textInput()
+	in.Progress = planexec.ProgressTarget{ChannelID: "C1", ThreadTS: "1700000000.000001"}
+	proc := rt.run(t, in, nil)
+
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	out := decodeText(t, proc.Output)
+	gt.String(t, out.Text).Contains("Done.")
+	// Every milestone was still attempted — a failed draw does not stop later
+	// ones, so a transient outage recovers on the next line.
+	gt.Number(t, progress.count()).GreaterOrEqual(3)
+}
+
+// A run with nowhere to draw draws nothing, and still finishes.
+func TestProgressIsSkippedWithoutATarget(t *testing.T) {
+	planner := &scriptedPlanner{replies: []string{
+		`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
+		`read it`,
+		`{"finalize":{"reason":"done"}}`,
+		`Done.`,
+	}}
+	progress := &recordingProgress{}
+	rt := newTextRuntime(t, planner.client(), generousBudget(), progress, nil)
+
+	// textInput leaves Progress zero.
+	proc := rt.run(t, textInput(), nil)
+
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+	gt.Array(t, progress.renders()).Length(0)
+}
+
+// An empty milestone draws nothing rather than blanking the progress message.
+func TestProgressSkipsAnEmptyLine(t *testing.T) {
+	progress := &recordingProgress{}
+	target := planexec.ProgressTarget{ChannelID: "C1", ThreadTS: "1700000000.000001"}
+
+	ts := planexec.NoteForTest(context.Background(), progress, target, "1700000000.000009", "")
+
+	gt.Array(t, progress.renders()).Length(0)
+	gt.Value(t, ts).Equal("1700000000.000009")
+}
+
+// A run checkpointed by a build that still recorded the line history resumes
+// into the SAME progress message. The history is dropped on read rather than
+// rejected, so a deploy does not strand every in-flight run.
+func TestProgressStateFromAnOlderBuildKeepsItsMessage(t *testing.T) {
+	raw := []byte(`{"phase":"plan","round":1,` +
+		`"input":{"system_prompt":"p","user_input":"u","known_tool_ids":["slack_ro"]},` +
+		`"next_input":"u",` +
+		`"progress":{"message_ts":"1700000000.000009","lines":["🧭 Planning","🔎 Investigating (2 task(s))"]}}`)
+
+	ts, err := planexec.DecodeProgressStateForTest(raw)
+
+	gt.NoError(t, err).Required()
+	gt.Value(t, ts).Equal("1700000000.000009")
 }
 
 // A child's toolsets must be the ones its task was planned with, while the rest
@@ -1676,7 +1840,7 @@ type countingProgress struct {
 }
 
 func (p *countingProgress) Render(_ context.Context, _ planexec.ProgressTarget,
-	messageTS string, _ []string,
+	messageTS string, _ string,
 ) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -2,7 +2,7 @@ package usecase_test
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +13,7 @@ import (
 	agentprocmemory "github.com/gollem-dev/agentkit/repository/memory"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
@@ -26,6 +27,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/pricing"
 	goslack "github.com/slack-go/slack" //nolint:depguard
 )
@@ -44,6 +46,7 @@ type agentTestSlackService struct {
 	getBotUserIDFn           func(ctx context.Context) (string, error)
 	getPermalinkFn           func(ctx context.Context, channelID string, ts string) (string, error)
 	postMu                   sync.Mutex
+	postID                   atomic.Int32
 	postedMessages           []agentPostedMessage
 	updatedMessages          []agentUpdatedMessage
 	permalinkCalls           []agentPermalinkCall
@@ -70,6 +73,10 @@ type agentPostedMessage struct {
 	ChannelID string
 	ThreadTS  string
 	Text      string
+	// Timestamp is the id this post was given, so a test can follow which of a
+	// turn's messages a later UpdateMessage rewrote.
+	Timestamp string
+	Blocks    []goslack.Block
 }
 
 type agentPermalinkCall struct {
@@ -81,6 +88,7 @@ type agentUpdatedMessage struct {
 	ChannelID string
 	Timestamp string
 	Text      string
+	Blocks    []goslack.Block
 }
 
 func (m *agentTestSlackService) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]slack.ConversationMessage, error) {
@@ -112,14 +120,19 @@ func (m *agentTestSlackService) PostThreadReply(ctx context.Context, channelID s
 }
 
 func (m *agentTestSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string, opts ...slack.PostThreadOption) (string, error) {
+	// A distinct id per post, so a test can tell which message a later update
+	// rewrote — the whole point of a turn drawing its progress into ONE of them.
+	ts := "1234567890.post" + strconv.Itoa(int(m.postID.Add(1)))
 	m.postMu.Lock()
 	m.postedMessages = append(m.postedMessages, agentPostedMessage{
 		ChannelID: channelID,
 		ThreadTS:  threadTS,
 		Text:      text,
+		Timestamp: ts,
+		Blocks:    blocks,
 	})
 	m.postMu.Unlock()
-	return "1234567890.session01", nil
+	return ts, nil
 }
 
 func (m *agentTestSlackService) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []goslack.Block, text string) error {
@@ -128,6 +141,7 @@ func (m *agentTestSlackService) UpdateMessage(ctx context.Context, channelID str
 		ChannelID: channelID,
 		Timestamp: timestamp,
 		Text:      text,
+		Blocks:    blocks,
 	})
 	m.postMu.Unlock()
 	return nil
@@ -698,55 +712,21 @@ func TestParseAgentActionValue(t *testing.T) {
 	})
 }
 
-func TestBuildTraceContextBlocks(t *testing.T) {
-	t.Run("empty lines produce empty blocks", func(t *testing.T) {
-		blocks := usecase.BuildTraceContextBlocksForTest(nil)
-		gt.Array(t, blocks).Length(0)
-	})
+// A milestone renders as one context block carrying one mrkdwn element. The
+// compact, de-emphasised context rendering is what keeps a run's progress from
+// reading like the agent's own reply.
+func TestProgressBlock(t *testing.T) {
+	block := usecase.ProgressBlockForTest("\U0001f527 `tool_a`")
 
-	t.Run("each line becomes its own context block", func(t *testing.T) {
-		lines := []string{
-			"\U0001f527 `tool_a`",
-			"\U0001f527 `tool_b`",
-			"❌ Error: boom",
-		}
-		blocks := usecase.BuildTraceContextBlocksForTest(lines)
-		gt.Array(t, blocks).Length(len(lines)).Required()
+	ctxBlock, ok := block.(*goslack.ContextBlock)
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, ctxBlock.Type).Equal(goslack.MBTContext)
+	gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
 
-		for i, block := range blocks {
-			ctxBlock, ok := block.(*goslack.ContextBlock)
-			gt.Bool(t, ok).True().Required()
-			gt.Value(t, ctxBlock.Type).Equal(goslack.MBTContext)
-			gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
-
-			text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
-			gt.Bool(t, ok).True().Required()
-			gt.Value(t, text.Type).Equal(goslack.MarkdownType)
-			gt.String(t, text.Text).Equal(lines[i])
-		}
-	})
-
-	t.Run("caps blocks at Slack's 50-block per-message limit", func(t *testing.T) {
-		lines := make([]string, 75)
-		for i := range lines {
-			lines[i] = fmt.Sprintf("line-%02d", i)
-		}
-		blocks := usecase.BuildTraceContextBlocksForTest(lines)
-		gt.Array(t, blocks).Length(50).Required()
-
-		// The most recent lines must survive (lines[25] .. lines[74]).
-		first, ok := blocks[0].(*goslack.ContextBlock)
-		gt.Bool(t, ok).True().Required()
-		firstText, ok := first.ContextElements.Elements[0].(*goslack.TextBlockObject)
-		gt.Bool(t, ok).True().Required()
-		gt.String(t, firstText.Text).Equal("line-25")
-
-		last, ok := blocks[49].(*goslack.ContextBlock)
-		gt.Bool(t, ok).True().Required()
-		lastText, ok := last.ContextElements.Elements[0].(*goslack.TextBlockObject)
-		gt.Bool(t, ok).True().Required()
-		gt.String(t, lastText.Text).Equal("line-74")
-	})
+	text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, text.Type).Equal(goslack.MarkdownType)
+	gt.String(t, text.Text).Equal("\U0001f527 `tool_a`")
 }
 
 func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
@@ -1167,18 +1147,22 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	gt.Value(t, session.ActionID).Equal(createdAction.ID)
 }
 
-// traceCapture wraps the existing mockSlackService (defined in source_test.go)
-// and records every PostThreadMessage / UpdateMessage call so the trace tests
+// progressCapture wraps the existing mockSlackService (defined in source_test.go)
+// and records every PostThreadMessage / UpdateMessage call so the progress tests
 // can assert on the rendered text and call sequence. All other Service methods
-// fall through to mockSlackService.
-type traceCapture struct {
+// fall through to mockSlackService. Set failPost / failUpdate to make the
+// corresponding call fail, which is what a Slack outage looks like from the
+// caller's side.
+type progressCapture struct {
 	mockSlackService
-	mu     sync.Mutex
-	posts  []traceCall
-	postID atomic.Int32
+	mu         sync.Mutex
+	posts      []progressCall
+	postID     atomic.Int32
+	failPost   bool
+	failUpdate bool
 }
 
-type traceCall struct {
+type progressCall struct {
 	method  string
 	ts      string
 	blocks  []goslack.Block
@@ -1186,35 +1170,41 @@ type traceCall struct {
 	channel string
 }
 
-func (s *traceCapture) calls() []traceCall {
+func (s *progressCapture) calls() []progressCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]traceCall, len(s.posts))
+	out := make([]progressCall, len(s.posts))
 	copy(out, s.posts)
 	return out
 }
 
-func (s *traceCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string, _ ...slack.PostThreadOption) (string, error) {
+func (s *progressCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string, _ ...slack.PostThreadOption) (string, error) {
+	if s.failPost {
+		return "", goerr.New("slack is unreachable")
+	}
 	// Use a deterministic, monotonically-increasing TS per post so successive
 	// messages can be distinguished without relying on wall-clock timing.
 	id := s.postID.Add(1)
 	ts := "ts-" + string(rune('0'+id))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.posts = append(s.posts, traceCall{method: "post", ts: ts, blocks: blocks, text: text, channel: channelID})
+	s.posts = append(s.posts, progressCall{method: "post", ts: ts, blocks: blocks, text: text, channel: channelID})
 	return ts, nil
 }
 
-func (s *traceCapture) UpdateMessage(_ context.Context, channelID, ts string, blocks []goslack.Block, text string) error {
+func (s *progressCapture) UpdateMessage(_ context.Context, channelID, ts string, blocks []goslack.Block, text string) error {
+	if s.failUpdate {
+		return goerr.New("slack is unreachable")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.posts = append(s.posts, traceCall{method: "update", ts: ts, blocks: blocks, text: text, channel: channelID})
+	s.posts = append(s.posts, progressCall{method: "update", ts: ts, blocks: blocks, text: text, channel: channelID})
 	return nil
 }
 
-// traceBlockTexts extracts the rendered markdown text of every context block
-// in order, so trace tests can assert on the visible lines.
-func traceBlockTexts(blocks []goslack.Block) []string {
+// progressBlockTexts extracts the rendered markdown text of every context block
+// in order, so progress tests can assert on the visible lines.
+func progressBlockTexts(blocks []goslack.Block) []string {
 	out := make([]string, 0, len(blocks))
 	for _, b := range blocks {
 		cb, ok := b.(*goslack.ContextBlock)
@@ -1230,114 +1220,113 @@ func traceBlockTexts(blocks []goslack.Block) []string {
 	return out
 }
 
-// TestTraceMessage_AppendAccumulatesReplaceOverwrites verifies the core
-// contract of the trace banner: milestone lines (appendLine) accumulate as
-// separate context blocks and stay visible, while the transient activity line
-// (replaceLine) overwrites a single trailing block instead of piling up. A
-// new milestone clears the live line, so per-tool chatter never lingers after
-// the step that produced it.
-func TestTraceMessage_AppendAccumulatesReplaceOverwrites(t *testing.T) {
+// A run's progress is ONE context block holding ONE line. The first render posts
+// the message; every later one replaces that line in place, so a long run
+// occupies the same space in the thread as a short one.
+func TestAgentProgress_DrawsOneBlockAndReplacesItsLine(t *testing.T) {
 	ctx := context.Background()
-	cap := &traceCapture{}
-	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
+	capture := &progressCapture{}
+	uc := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         memory.New(),
+		SlackService: capture,
+	})
+	progress := usecase.NewAgentProgressForTest(uc)
+	target := planexec.ProgressTarget{ChannelID: "C-PROGRESS", ThreadTS: "1700000000.000001"}
 
-	// First milestone: posts a fresh message with a single block.
-	usecase.TraceMessageAppendForTest(tm, ctx, "🧭 Planning")
-	// Second milestone: accumulates, two blocks now.
-	usecase.TraceMessageAppendForTest(tm, ctx, "🔎 Investigating (2 task(s))")
+	ts, err := progress.Render(ctx, target, "", "🧭 Planning")
+	gt.NoError(t, err).Required()
 
-	calls := cap.calls()
-	gt.Array(t, calls).Length(2).Required()
+	calls := capture.calls()
+	gt.Array(t, calls).Length(1).Required()
 	gt.Value(t, calls[0].method).Equal("post")
+	gt.Value(t, calls[0].channel).Equal("C-PROGRESS")
+	gt.Array(t, calls[0].blocks).Length(1)
+	gt.Array(t, progressBlockTexts(calls[0].blocks)).Equal([]string{"🧭 Planning"})
+	// The line is the whole message, so it is also the notification fallback.
+	gt.Value(t, calls[0].text).Equal("🧭 Planning")
+	gt.Value(t, ts).Equal(calls[0].ts)
+
+	next, err := progress.Render(ctx, target, ts, "📝 Writing the answer")
+	gt.NoError(t, err).Required()
+
+	calls = capture.calls()
+	gt.Array(t, calls).Length(2).Required()
 	gt.Value(t, calls[1].method).Equal("update")
-	gt.Array(t, traceBlockTexts(calls[1].blocks)).Equal([]string{
-		"🧭 Planning",
-		"🔎 Investigating (2 task(s))",
+	gt.Value(t, calls[1].ts).Equal(ts)
+	// Still one block: the milestone replaced the previous one rather than being
+	// appended below it.
+	gt.Array(t, calls[1].blocks).Length(1)
+	gt.Array(t, progressBlockTexts(calls[1].blocks)).Equal([]string{"📝 Writing the answer"})
+	gt.Value(t, calls[1].text).Equal("📝 Writing the answer")
+	gt.Value(t, next).Equal(ts)
+}
+
+// A Slack failure is reported to the caller rather than swallowed: the strategy
+// is what decides that a failed draw is non-fatal, and it cannot decide that
+// about a failure it never sees.
+func TestAgentProgress_ReportsSlackFailures(t *testing.T) {
+	ctx := context.Background()
+	target := planexec.ProgressTarget{ChannelID: "C-PROGRESS", ThreadTS: "1700000000.000001"}
+
+	t.Run("post", func(t *testing.T) {
+		capture := &progressCapture{failPost: true}
+		uc := usecase.NewAgentUseCase(usecase.AgentDeps{Repo: memory.New(), SlackService: capture})
+
+		ts, err := usecase.NewAgentProgressForTest(uc).Render(ctx, target, "", "🧭 Planning")
+
+		gt.Error(t, err)
+		gt.Value(t, ts).Equal("")
 	})
 
-	// Three activity updates: each overwrites the single live line, so the
-	// block count stays at 3 (2 milestones + 1 live line), never growing.
-	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Slack: from:@issei")
-	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Notion: scraping")
-	usecase.TraceMessageReplaceForTest(tm, ctx, "Fetching Notion page abc")
+	t.Run("update", func(t *testing.T) {
+		capture := &progressCapture{failUpdate: true}
+		uc := usecase.NewAgentUseCase(usecase.AgentDeps{Repo: memory.New(), SlackService: capture})
 
-	calls = cap.calls()
-	last := calls[len(calls)-1]
-	gt.Array(t, traceBlockTexts(last.blocks)).Equal([]string{
-		"🧭 Planning",
-		"🔎 Investigating (2 task(s))",
-		"Fetching Notion page abc",
-	})
-	// Fallback text mirrors the rendered lines, live line last.
-	gt.String(t, last.text).Contains("Fetching Notion page abc")
+		ts, err := usecase.NewAgentProgressForTest(uc).Render(ctx, target, "ts-1", "🧭 Planning")
 
-	// A new milestone clears the live activity line.
-	usecase.TraceMessageAppendForTest(tm, ctx, "✓ Reporter profile & recent activity")
-	calls = cap.calls()
-	last = calls[len(calls)-1]
-	gt.Array(t, traceBlockTexts(last.blocks)).Equal([]string{
-		"🧭 Planning",
-		"🔎 Investigating (2 task(s))",
-		"✓ Reporter profile & recent activity",
+		gt.Error(t, err)
+		// The id comes back unchanged so the next milestone retries the same
+		// message rather than posting a second one.
+		gt.Value(t, ts).Equal("ts-1")
 	})
 }
 
-// TestTraceMessage_LiveLineSurvivesBlockCap verifies that when milestone
-// history exceeds Slack's 50-block ceiling, the history is truncated to the
-// oldest dropped but the transient live line is always preserved as the final
-// block — it is never pushed out by milestone overflow.
-func TestTraceMessage_LiveLineSurvivesBlockCap(t *testing.T) {
+// The create path's acknowledgement is the same one-block progress message the
+// run then updates, which is what keeps a create turn to a single message.
+func TestPostProgressAck(t *testing.T) {
 	ctx := context.Background()
-	cap := &traceCapture{}
-	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
 
-	// Push well past the cap with milestones.
-	for i := range usecase.MaxTraceBlocksForTest + 10 {
-		usecase.TraceMessageAppendForTest(tm, ctx, fmt.Sprintf("milestone %d", i))
-	}
-	// Then a live activity line.
-	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Slack: tail")
+	t.Run("posts one context block and returns its ts", func(t *testing.T) {
+		capture := &progressCapture{}
+		uc := usecase.NewAgentUseCase(usecase.AgentDeps{Repo: memory.New(), SlackService: capture})
 
-	calls := cap.calls()
-	last := calls[len(calls)-1]
-	texts := traceBlockTexts(last.blocks)
-	// Total blocks never exceed the cap.
-	gt.Number(t, len(texts)).Equal(usecase.MaxTraceBlocksForTest)
-	// The live line is always the last block.
-	gt.Value(t, texts[len(texts)-1]).Equal("Searching Slack: tail")
-	// The most recent milestone is retained just above the live line.
-	gt.Value(t, texts[len(texts)-2]).Equal(fmt.Sprintf("milestone %d", usecase.MaxTraceBlocksForTest+10-1))
+		ts := usecase.PostProgressAckForTest(uc, ctx, "C-PROGRESS", "1700000000.000001")
 
-	// The fallback text mirrors the visible window (it must not carry the
-	// dropped milestones, or it could blow past Slack's 4000-char text limit).
-	fallbackLines := strings.Split(last.text, "\n")
-	gt.Number(t, len(fallbackLines)).Equal(usecase.MaxTraceBlocksForTest)
-	gt.Value(t, fallbackLines[len(fallbackLines)-1]).Equal("Searching Slack: tail")
-	gt.String(t, last.text).NotContains("milestone 0\n")
-}
+		calls := capture.calls()
+		gt.Array(t, calls).Length(1).Required()
+		gt.Value(t, calls[0].method).Equal("post")
+		gt.Value(t, calls[0].channel).Equal("C-PROGRESS")
+		gt.Array(t, calls[0].blocks).Length(1)
+		// The expected text comes from the same translation source the production
+		// code reads, so a reworded translation does not break this.
+		gt.Array(t, progressBlockTexts(calls[0].blocks)).
+			Equal([]string{i18n.T(ctx, i18n.MsgThreadCaseCreating)})
+		gt.Value(t, ts).Equal(calls[0].ts)
+	})
 
-// TestTraceMessage_ConcurrentUpdatesDoNotPanic exercises the mutex guarding
-// the shared lines/liveLine state, mirroring parallel sub-agent activity
-// updates racing planner milestones.
-func TestTraceMessage_ConcurrentUpdatesDoNotPanic(t *testing.T) {
-	ctx := context.Background()
-	cap := &traceCapture{}
-	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
+	t.Run("returns empty when Slack refuses the post", func(t *testing.T) {
+		capture := &progressCapture{failPost: true}
+		uc := usecase.NewAgentUseCase(usecase.AgentDeps{Repo: memory.New(), SlackService: capture})
 
-	var wg sync.WaitGroup
-	for i := range 50 {
-		wg.Add(2)
-		go func(n int) {
-			defer wg.Done()
-			usecase.TraceMessageAppendForTest(tm, ctx, fmt.Sprintf("milestone %d", n))
-		}(i)
-		go func(n int) {
-			defer wg.Done()
-			usecase.TraceMessageReplaceForTest(tm, ctx, fmt.Sprintf("activity %d", n))
-		}(i)
-	}
-	wg.Wait()
+		// Empty leaves the run to post its own progress message, which is the
+		// degradation every other host already lives with.
+		gt.Value(t, usecase.PostProgressAckForTest(uc, ctx, "C-PROGRESS", "1700000000.000001")).Equal("")
+		gt.Array(t, capture.calls()).Length(0)
+	})
 
-	// At least one Slack call was made and the banner is still renderable.
-	gt.Number(t, len(cap.calls())).GreaterOrEqual(1)
+	t.Run("returns empty with no Slack service", func(t *testing.T) {
+		uc := usecase.NewAgentUseCase(usecase.AgentDeps{Repo: memory.New()})
+
+		gt.Value(t, usecase.PostProgressAckForTest(uc, ctx, "C-PROGRESS", "1700000000.000001")).Equal("")
+	})
 }

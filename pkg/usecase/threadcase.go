@@ -371,10 +371,10 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		uc.markThreadQuestionStale(ctx, postedChannel, session.PendingQuestion.PostedMessageTS)
 	}
 
-	traceMsg := uc.newTraceMessage(req.uiChannel, req.uiTS)
-	// Immediate progress so the user is not left staring at silence while the
-	// agent investigates.
-	traceMsg.appendLine(ctx, i18n.T(ctx, i18n.MsgThreadCaseCreating))
+	// Immediate progress so the user is not left staring at silence while the turn
+	// spins up. The run draws its own milestones into this same message, so a turn
+	// leaves exactly one progress message in the thread.
+	progressTS := uc.postProgressAck(ctx, req.uiChannel, req.uiTS)
 
 	// The session predates the case, so the reporter and the reaction source it
 	// carries are how a durable run's completion handler attributes the case it
@@ -389,6 +389,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		ThreadTS:          req.caseTS,
 		UIChannelID:       req.uiChannel,
 		UIThreadTS:        req.uiTS,
+		ProgressMessageTS: progressTS,
 		MentionText:       req.mentionText,
 		MentionTS:         req.mentionTS,
 		MentionUserID:     req.reporter,
@@ -617,20 +618,22 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 // here: the sub-agent performs them via the case__update_case_status tool during
 // investigation (see pkg/usecase/agent/threadcase), so the only host-applied
 // terminal outcomes are respond and materialize.
-func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, entry *model.WorkspaceEntry, caseID int64, channelID, threadTS string, traceMsg *traceMessage, d *threadcase.Decision) {
+// The reply is its own thread message: the run's progress message is left on its
+// last milestone rather than being rewritten into the answer.
+func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, entry *model.WorkspaceEntry, caseID int64, channelID, threadTS string, d *threadcase.Decision) {
 	if d == nil {
 		return
 	}
 	switch d.Kind {
 	case threadcase.DecisionRespond:
-		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, d.Message)
+		uc.postThreadReply(ctx, channelID, threadTS, d.Message)
 	case threadcase.DecisionMaterialize:
 		if uc.deps.CaseUC != nil {
 			fv := buildThreadFieldValues(entry, d.Fields)
 			if _, err := uc.deps.CaseUC.MaterializeThreadCase(ctx, wsID, caseID, d.Title, d.Description, fv); err != nil {
-				// Materialize failed — surface it instead of finalizing with the
-				// success text, which would mislabel a failed update as done.
-				uc.finalizeTrace(ctx, traceMsg, channelID, threadTS,
+				// Materialize failed — surface it instead of replying with the success
+				// text, which would mislabel a failed update as done.
+				uc.postThreadReply(ctx, channelID, threadTS,
 					uc.userErrorText(ctx, err, "thread case: materialize on mention"))
 				return
 			}
@@ -639,23 +642,8 @@ func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, e
 		if text == "" {
 			text = i18n.T(ctx, i18n.MsgThreadCaseUpdated)
 		}
-		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, text)
+		uc.postThreadReply(ctx, channelID, threadTS, text)
 	}
-}
-
-// finalizeTrace posts the final reply, falling back to a direct thread reply
-// when the trace message machinery is unavailable (e.g. nil Slack service).
-func (uc *AgentUseCase) finalizeTrace(ctx context.Context, traceMsg *traceMessage, channelID, threadTS, text string) {
-	if text == "" {
-		return
-	}
-	if traceMsg != nil {
-		if err := traceMsg.finalize(ctx, text); err != nil {
-			errutil.Handle(ctx, err, "thread case: finalize trace")
-		}
-		return
-	}
-	uc.postThreadReply(ctx, channelID, threadTS, text)
 }
 
 // postThreadReply is a nil-safe helper around SlackService.PostThreadReply.

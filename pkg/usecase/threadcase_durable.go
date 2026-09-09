@@ -28,11 +28,11 @@ func (h threadcaseHost) ApplyMention(ctx context.Context, target threadcase.Targ
 		return goerr.Wrap(err, "resolve the workspace of a finished mention turn",
 			goerr.V("workspace_id", target.WorkspaceID))
 	}
-	// traceMsg is nil: the progress message was drawn by the run itself, from
-	// whichever instance claimed each transition, so there is no in-process handle
-	// to finalize. finalizeTrace posts the reply as its own thread message.
+	// The reply is posted as its own thread message: the progress message was drawn
+	// by the run itself, from whichever instance claimed each transition, and is
+	// left showing the last milestone it reached.
 	h.uc.applyMentionDecision(ctx, target.WorkspaceID, entry, target.CaseID,
-		target.ChannelID, target.ThreadTS, nil, d)
+		target.ChannelID, target.ThreadTS, d)
 	return nil
 }
 

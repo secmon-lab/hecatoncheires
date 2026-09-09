@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -133,6 +134,144 @@ func TestThreadCase_Creation(t *testing.T) {
 		}
 	}
 	gt.Bool(t, foundSummary).True()
+}
+
+// A create turn leaves ONE progress message in the thread: the acknowledgement
+// posted before the turn is spawned, which the run then rewrites for every
+// milestone it reaches. The case summary is a separate message; the progress one
+// is left showing the last milestone.
+func TestThreadCase_CreationDrawsOneProgressMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"The post reports a login outage.",
+		tcReplanDone,
+		`{"kind":"materialize","title":"Login outage","description":"Users cannot log in.","fields":[{"field_id":"severity","value":"high"}]}`,
+	})
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	startAgentRuntime(t, agentRuntimeDeps{UC: agentUC, Repo: repo, Registry: reg, LLM: llm})
+
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	msg := slackmodel.NewMessageFromData(
+		"1700000000.000100", "C-MONITOR", "", "T1", "U-REPORTER", "alice",
+		"Cannot log in to the portal", "1700000000.000100", time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
+	async.Wait()
+	waitForThreadCase(t, repo, "support", "C-MONITOR", "1700000000.000100")
+
+	// Exactly one post carries the acknowledgement, and it holds the single
+	// context block the run keeps rewriting.
+	ack := i18n.T(ctx, i18n.MsgThreadCaseCreating)
+	var ackTS string
+	ackPosts := 0
+	for _, p := range slackMock.posts() {
+		if p.Text == ack {
+			ackPosts++
+			ackTS = p.Timestamp
+			gt.Array(t, progressBlockTexts(p.Blocks)).Equal([]string{ack})
+		}
+	}
+	gt.Number(t, ackPosts).Equal(1).Required()
+
+	// Every later milestone rewrote that same message — no second progress
+	// message was posted — and each rewrite left it holding one line.
+	updates := slackMock.updates()
+	gt.Number(t, len(updates)).GreaterOrEqual(1).Required()
+	for _, u := range updates {
+		gt.Value(t, u.Timestamp).Equal(ackTS)
+		gt.Array(t, progressBlockTexts(u.Blocks)).Equal([]string{u.Text})
+	}
+	// The run's own milestones reached it, so the acknowledgement really is the
+	// message the run draws into rather than a stub nothing followed.
+	gt.String(t, updates[len(updates)-1].Text).Contains("Writing the answer")
+
+	// The case summary is its own message, posted alongside the progress one.
+	summary := waitForPostContaining(t, slackMock, "https://app.test/ws/support/cases/")
+	gt.Value(t, summary.Timestamp).NotEqual(ackTS)
+}
+
+// A mention turn posts no acknowledgement of its own: the run posts its progress
+// message on its first milestone, so this path also leaves exactly one.
+func TestThreadCase_MentionDrawsOneProgressMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	slackMock.getConversationRepliesFn = func(_ context.Context, _ string, _ string, _ int) ([]slack.ConversationMessage, error) {
+		return []slack.ConversationMessage{
+			{UserID: "U-REPORTER", UserName: "alice", Text: "Cannot log in", Timestamp: "1700000000.000100"},
+		}, nil
+	}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	c, err := caseUC.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body", nil, "")
+	gt.NoError(t, err).Required()
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"Reviewed the thread.",
+		tcReplanDone,
+		`{"kind":"respond","message":"The team is investigating; ETA 1 hour."}`,
+	})
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	startAgentRuntime(t, agentRuntimeDeps{UC: agentUC, Repo: repo, Registry: reg, LLM: llm})
+
+	msg := slackmodel.NewMessageFromData(
+		"1700000005.000001", "C-MONITOR", "1700000000.000100", "T1", "U-ASKER", "bob",
+		"<@UBOT001> any update?", "1700000005.000001", time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseMention(ctx, msg, entry, c)).Required()
+	async.Wait()
+	waitForPostContaining(t, slackMock, "ETA 1 hour")
+
+	// No acknowledgement was posted on this path.
+	ack := i18n.T(ctx, i18n.MsgThreadCaseCreating)
+	for _, p := range slackMock.posts() {
+		gt.Value(t, p.Text).NotEqual(ack)
+	}
+
+	// The run posted its own progress message on its first milestone, and every
+	// later one rewrote that same message.
+	progressTS := ""
+	for _, p := range slackMock.posts() {
+		if strings.Contains(p.Text, "Planning") {
+			gt.Value(t, progressTS).Equal("")
+			progressTS = p.Timestamp
+		}
+	}
+	gt.Value(t, progressTS).NotEqual("").Required()
+	updates := slackMock.updates()
+	gt.Number(t, len(updates)).GreaterOrEqual(1).Required()
+	for _, u := range updates {
+		gt.Value(t, u.Timestamp).Equal(progressTS)
+		gt.Array(t, progressBlockTexts(u.Blocks)).Equal([]string{u.Text})
+	}
 }
 
 func TestFirstSlackUserMention(t *testing.T) {
