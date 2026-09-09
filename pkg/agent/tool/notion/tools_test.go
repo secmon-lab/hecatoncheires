@@ -303,6 +303,10 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("data_source_id")
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["data_sources"])).Length(2)
+
+		// A choice the caller has to make, which is what this status means.
+		gt.Value(t, got["status"]).Equal("data_source_ambiguous")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("reports an unknown data_source_id instead of querying it", func(t *testing.T) {
@@ -324,6 +328,13 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Value(t, got["data_source_id"]).Equal("")
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("not one of this database's data sources")
+
+		// An id this database does not hold is an argument to correct, not one
+		// of the listed ids to choose between — so it is not the ambiguous
+		// status, which would send the caller looking through a list its own id
+		// is not in.
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("reports a database that holds no data sources", func(t *testing.T) {
@@ -338,6 +349,12 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Array(t, fake.gotDataSourceIDs).Length(0)
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("no data sources")
+
+		// A database with no data sources has no rows: an answer of zero, not
+		// something to fix and not a choice to make. Reported as ambiguous, a
+		// caller would keep asking for an id that does not exist.
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("returns error when database_id is missing", func(t *testing.T) {

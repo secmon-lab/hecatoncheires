@@ -109,6 +109,8 @@ Every read tool's result carries `status` and `matched`:
 | `invalid_request` | The arguments could not be turned into a Notion request — an unknown property name, an operator the column's type does not accept, a value of the wrong type. `message` says which, and `property_schema` is attached so the call can be repaired without asking again. | Fix the arguments and call again. Do not conclude that nothing matched. |
 | `data_source_ambiguous` | The database holds several data sources and none was named. `data_sources` lists them. | Call again with `data_source_id`. |
 
+Three situations are deliberately kept apart here, because they call for three different next steps: a `data_source_id` the database does not hold is `invalid_request` (an argument to correct, not one of the listed ids to choose between), several data sources with none named is `data_source_ambiguous`, and a database holding **no** data sources is `ok` with `matched: 0` — it has no rows, which is an answer rather than something to fix.
+
 A failure to reach Notion at all — no permission, page not shared, rate limited, Notion down — is **not** one of these. It is returned as an error, so the agent sees a failed tool call. That distinction is what lets a workflow with the rule "if there is no evidence in this database, hand the request to a person" behave correctly: an empty result and an unreachable database must not look the same.
 
 #### About the Markdown Content API
