@@ -3,9 +3,11 @@ package notiontool_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -782,6 +784,374 @@ func TestQueryDataSource(t *testing.T) {
 		gt.NoError(t, err).Required()
 		_, err = c.QueryDataSource(context.Background(), "", notiontool.QueryOptions{})
 		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestGetDataSource(t *testing.T) {
+	const schemaBody = `{
+		"object": "data_source",
+		"id": "ds-1",
+		"title": [{"type": "text", "plain_text": "Active"}],
+		"properties": {
+			"Name":        {"id": "title", "name": "Name", "type": "title", "title": {}},
+			"Summary":  {"id": "sumr", "name": "Summary", "type": "rich_text", "rich_text": {}},
+			"Keywords": {"id": "aikw", "name": "Keywords", "type": "multi_select",
+			                "multi_select": {"options": [{"id": "o1", "name": "network"}, {"id": "o2", "name": "storage"}]}},
+			"Status":      {"id": "stat", "name": "Status", "type": "select",
+			                "select": {"options": [{"id": "o3", "name": "Published"}]}}
+		}
+	}`
+
+	t.Run("converts the schema into property names and types", func(t *testing.T) {
+		var capturedMethod, capturedPath, capturedNotionVersion, capturedAuth string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1", func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedPath = r.URL.Path
+			capturedNotionVersion = r.Header.Get("Notion-Version")
+			capturedAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(schemaBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.GetDataSource(context.Background(), "ds-1")
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedMethod).Equal(http.MethodGet)
+		gt.String(t, capturedPath).Equal("/v1/data_sources/ds-1")
+		gt.String(t, capturedNotionVersion).Equal("2026-03-11")
+		gt.String(t, capturedAuth).Equal("Bearer secret-token")
+
+		gt.String(t, got.ID).Equal("ds-1")
+		gt.String(t, got.Name).Equal("Active")
+
+		// Notion returns the properties as a JSON object, whose order is not
+		// meaningful, so they are sorted by name.
+		gt.Array(t, got.Properties).Length(4).Required()
+		gt.String(t, got.Properties[0].Name).Equal("Keywords")
+		gt.String(t, got.Properties[0].ID).Equal("aikw")
+		gt.String(t, got.Properties[0].Type).Equal("multi_select")
+		gt.Array(t, got.Properties[0].Options).Equal([]string{"network", "storage"})
+		gt.Bool(t, got.Properties[0].OptionsTruncated).False()
+
+		gt.String(t, got.Properties[1].Name).Equal("Name")
+		gt.String(t, got.Properties[1].ID).Equal("title")
+		gt.String(t, got.Properties[1].Type).Equal("title")
+
+		gt.String(t, got.Properties[2].Name).Equal("Status")
+		gt.String(t, got.Properties[2].ID).Equal("stat")
+		gt.String(t, got.Properties[2].Type).Equal("select")
+		gt.Array(t, got.Properties[2].Options).Equal([]string{"Published"})
+
+		gt.String(t, got.Properties[3].Name).Equal("Summary")
+		gt.String(t, got.Properties[3].ID).Equal("sumr")
+		gt.String(t, got.Properties[3].Type).Equal("rich_text")
+		gt.Array(t, got.Properties[3].Options).Length(0)
+	})
+
+	// The same reason searchResponse decodes narrowly: a property type Notion
+	// adds later must not fail the whole read, and the agent should still see
+	// that the column exists.
+	t.Run("keeps an unknown property type and ignores unknown fields", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-2", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"object": "data_source",
+				"id": "ds-2",
+				"database_parent": {"type": "database_id", "database_id": "db-1"},
+				"properties": {
+					"Where": {"id": "plc", "name": "Where", "type": "place",
+					          "place": {"unknown_shape": [1, 2, 3]}},
+					"Name":  {"id": "title", "name": "Name", "type": "title", "title": {}}
+				}
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.GetDataSource(context.Background(), "ds-2")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, got.Properties).Length(2).Required()
+		gt.String(t, got.Properties[0].Name).Equal("Name")
+		gt.String(t, got.Properties[1].Name).Equal("Where")
+		gt.String(t, got.Properties[1].Type).Equal("place")
+	})
+
+	t.Run("falls back to the map key when the object omits the name", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-3", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"ds-3","properties":{"Status":{"id":"stat","type":"select","select":{"options":[]}}}}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.GetDataSource(context.Background(), "ds-3")
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Properties).Length(1).Required()
+		gt.String(t, got.Properties[0].Name).Equal("Status")
+	})
+
+	t.Run("caps the choices of one property and says it did", func(t *testing.T) {
+		options := make([]string, 0, 60)
+		for i := 0; i < 60; i++ {
+			options = append(options, fmt.Sprintf(`{"id":"o%d","name":"choice-%d"}`, i, i))
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-4", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"ds-4","properties":{"Tags":{"id":"tags","type":"multi_select","multi_select":{"options":[` +
+				strings.Join(options, ",") + `]}}}}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.GetDataSource(context.Background(), "ds-4")
+		gt.NoError(t, err).Required()
+		gt.Array(t, got.Properties).Length(1).Required()
+		gt.Array(t, got.Properties[0].Options).Length(50)
+		gt.Bool(t, got.Properties[0].OptionsTruncated).True()
+	})
+
+	// Notion answers object_not_found for every id the integration cannot see,
+	// and the ids reaching here come from the model, so a 404 is not an
+	// operator's defect to report (ARGUS-9E).
+	t.Run("tags a 404 benign and states the upstream reason", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-gone", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"object":"error","status":404,"code":"object_not_found","message":"Could not find data source"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.GetDataSource(context.Background(), "ds-gone")
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("404")
+		gt.String(t, err.Error()).Contains("object_not_found")
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).True()
+	})
+
+	t.Run("does not tag a 403 benign", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-denied", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"object":"error","status":403,"code":"restricted_resource","message":"Insufficient permissions"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.GetDataSource(context.Background(), "ds-denied")
+		gt.Value(t, err).NotNil().Required()
+		gt.String(t, err.Error()).Contains("restricted_resource")
+		gt.Bool(t, goerr.HasTag(err, errutil.TagBenign)).False()
+	})
+
+	t.Run("returns error when dataSourceID is empty", func(t *testing.T) {
+		c, err := notiontool.NewClient("secret-token")
+		gt.NoError(t, err).Required()
+		_, err = c.GetDataSource(context.Background(), "")
+		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestQueryDataSourceNarrowsAndSelects(t *testing.T) {
+	const rowBody = `{
+		"object": "list",
+		"has_more": false,
+		"next_cursor": null,
+		"results": [
+			{
+				"object": "page",
+				"id": "row-1",
+				"last_edited_time": "2026-05-01T08:00:00Z",
+				"properties": {
+					"Name":        {"id": "title", "type": "title",
+					                "title": [{"type": "text", "plain_text": "Reset a stuck job"}]},
+					"Summary":  {"id": "sumr", "type": "rich_text",
+					                "rich_text": [{"type": "text", "plain_text": "Steps to clear the queue and retry."}]},
+					"Keywords": {"id": "aikw", "type": "multi_select",
+					                "multi_select": [{"id": "o1", "name": "network"}]},
+					"Status":      {"id": "stat", "type": "select", "select": {"name": "Published"}}
+				},
+				"url": "https://www.notion.so/row-1"
+			}
+		]
+	}`
+
+	// The unfiltered listing is the shape notion__get_database has always sent.
+	// A "filter":null or an empty sorts array would change what Notion is asked
+	// for, so the keys have to be absent, not empty.
+	t.Run("sends no filter, sorts or query string when nothing narrows", func(t *testing.T) {
+		var capturedBody, capturedQuery string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+			capturedQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{})
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedBody).Equal(`{"page_size":20}`)
+		gt.String(t, capturedQuery).Equal("")
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].Title).Equal("Reset a stuck job")
+		gt.Value(t, got.Items[0].Properties).Nil()
+	})
+
+	t.Run("sends the filter and the sorts it was given", func(t *testing.T) {
+		var capturedBody string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			gt.NoError(t, err)
+			capturedBody = string(raw)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			Filter: map[string]any{
+				"and": []map[string]any{
+					{"property": "title", "rich_text": map[string]any{"contains": "network"}},
+				},
+			},
+			Sorts: []map[string]any{
+				{"timestamp": "last_edited_time", "direction": "descending"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, strings.Contains(capturedBody, `"filter":{"and":[{"property":"title","rich_text":{"contains":"network"}}]}`)).True()
+		gt.Bool(t, strings.Contains(capturedBody, `"sorts":[{"direction":"descending","timestamp":"last_edited_time"}]`)).True()
+	})
+
+	t.Run("asks Notion for the requested columns and the title", func(t *testing.T) {
+		var capturedValues url.Values
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			capturedValues = r.URL.Query()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			Properties: []notiontool.PropertySchema{
+				{ID: "sumr", Name: "Summary", Type: "rich_text"},
+				{ID: "aikw", Name: "Keywords", Type: "multi_select"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		// The title id rides along unasked: the row's title is read out of the
+		// same properties map, so a response narrowed to these two columns
+		// would otherwise carry no title.
+		gt.Array(t, capturedValues["filter_properties"]).Equal([]string{"sumr", "aikw", "title"})
+
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.String(t, got.Items[0].Title).Equal("Reset a stuck job")
+		gt.Map(t, got.Items[0].Properties).HasKey("Summary")
+		gt.Map(t, got.Items[0].Properties).HasKey("Keywords")
+		gt.String(t, got.Items[0].Properties["Summary"]).Equal("Steps to clear the queue and retry.")
+		gt.String(t, got.Items[0].Properties["Keywords"]).Equal("network")
+
+		// Status was not asked for, so it is not carried even though the
+		// response contains it.
+		_, ok := got.Items[0].Properties["Status"]
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("does not repeat the title id when it was requested", func(t *testing.T) {
+		var capturedValues url.Values
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			capturedValues = r.URL.Query()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		_, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			Properties: []notiontool.PropertySchema{{ID: "title", Name: "Name", Type: "title"}},
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, capturedValues["filter_properties"]).Equal([]string{"title"})
+	})
+
+	// filter_properties is a transfer-size optimisation. The columns a row
+	// carries are picked locally, so a Notion version that ignores the parameter
+	// changes nothing but the size of the response.
+	t.Run("carries only the requested columns even when Notion returns them all", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			Properties: []notiontool.PropertySchema{{ID: "stat", Name: "Status", Type: "select"}},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, got.Items).Length(1).Required()
+		gt.Number(t, len(got.Items[0].Properties)).Equal(1)
+		gt.String(t, got.Items[0].Properties["Status"]).Equal("Published")
+	})
+
+	t.Run("skips a requested column the row does not carry", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(rowBody))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		c := notiontool.NewClientWithBaseURLForTest("secret-token", srv.URL)
+		got, err := c.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+			Properties: []notiontool.PropertySchema{
+				{ID: "gone", Name: "Retired column", Type: "rich_text"},
+				{ID: "stat", Name: "Status", Type: "select"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got.Items[0].Properties)).Equal(1)
+		gt.String(t, got.Items[0].Properties["Status"]).Equal("Published")
 	})
 }
 

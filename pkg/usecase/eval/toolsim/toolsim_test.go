@@ -160,8 +160,10 @@ func TestNotionGetDatabase_ListsRowsThroughOneDataSource(t *testing.T) {
 // stubNotion is a notiontool.Client with canned answers, used to check what
 // RecordingNotion writes into the trajectory around a live client.
 type stubNotion struct {
-	gotDatabaseID   string
-	gotDataSourceID string
+	gotDatabaseID        string
+	gotDataSourceID      string
+	gotSchemaDataSrcID   string
+	gotQueryOptionFilter map[string]any
 }
 
 func (s *stubNotion) Search(context.Context, string, notiontool.SearchOptions) (*notiontool.SearchResult, error) {
@@ -181,8 +183,21 @@ func (s *stubNotion) GetDatabase(_ context.Context, databaseID string) (*notiont
 	}, nil
 }
 
-func (s *stubNotion) QueryDataSource(_ context.Context, dataSourceID string, _ notiontool.QueryOptions) (*notiontool.QueryResult, error) {
+func (s *stubNotion) GetDataSource(_ context.Context, dataSourceID string) (*notiontool.DataSource, error) {
+	s.gotSchemaDataSrcID = dataSourceID
+	return &notiontool.DataSource{
+		ID:   dataSourceID,
+		Name: "Active",
+		Properties: []notiontool.PropertySchema{
+			{ID: "title", Name: "Name", Type: "title"},
+			{ID: "abcd", Name: "Status", Type: "select", Options: []string{"Open"}},
+		},
+	}, nil
+}
+
+func (s *stubNotion) QueryDataSource(_ context.Context, dataSourceID string, opts notiontool.QueryOptions) (*notiontool.QueryResult, error) {
 	s.gotDataSourceID = dataSourceID
+	s.gotQueryOptionFilter = opts.Filter
 	return &notiontool.QueryResult{Items: []notiontool.SearchItem{
 		{ID: "row-1", Type: "page"},
 		{ID: "row-2", Type: "page"},
@@ -199,20 +214,82 @@ func TestRecordingNotion_RecordsEachLiveCall(t *testing.T) {
 	gt.V(t, db.Title).Equal("Runbooks")
 	gt.V(t, stub.gotDatabaseID).Equal("db-1")
 
-	rows, err := cli.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{PageSize: 10})
+	schema, err := cli.GetDataSource(context.Background(), "ds-1")
+	gt.NoError(t, err)
+	gt.A(t, schema.Properties).Length(2)
+	gt.V(t, stub.gotSchemaDataSrcID).Equal("ds-1")
+
+	rows, err := cli.QueryDataSource(context.Background(), "ds-1", notiontool.QueryOptions{
+		PageSize: 10,
+		Filter:   map[string]any{"property": "title", "rich_text": map[string]any{"contains": "network"}},
+	})
 	gt.NoError(t, err)
 	gt.A(t, rows.Items).Length(2)
 	gt.V(t, stub.gotDataSourceID).Equal("ds-1")
 
 	recs := rec.Records()
-	gt.A(t, recs).Length(2).Required()
+	gt.A(t, recs).Length(3).Required()
 	gt.V(t, recs[0].Tool).Equal("notion_get_database")
 	gt.V(t, recs[0].Mode).Equal("live")
 	gt.V(t, recs[0].Args).Equal(map[string]any{"database_id": "db-1"})
-	gt.V(t, recs[1].Tool).Equal("notion_query_data_source")
+	gt.V(t, recs[1].Tool).Equal("notion_get_data_source")
 	gt.V(t, recs[1].Mode).Equal("live")
 	gt.V(t, recs[1].Args).Equal(map[string]any{"data_source_id": "ds-1"})
-	gt.V(t, recs[1].Result).Equal("2 rows")
+	gt.V(t, recs[1].Result).Equal("2 properties")
+	gt.V(t, recs[2].Tool).Equal("notion_query_data_source")
+	gt.V(t, recs[2].Mode).Equal("live")
+	gt.V(t, recs[2].Result).Equal("2 rows")
+
+	// The filter the agent searched with is what a scenario check reads, so it
+	// has to reach the trajectory rather than being summarised away.
+	queryArgs := gt.Cast[map[string]any](t, recs[2].Args)
+	gt.V(t, queryArgs["data_source_id"]).Equal("ds-1")
+	filter := gt.Cast[map[string]any](t, queryArgs["filter"])
+	gt.V(t, filter["property"]).Equal("title")
+}
+
+func TestNotionPropertiesFrom(t *testing.T) {
+	t.Run("converts the simulator's columns", func(t *testing.T) {
+		got := toolsim.NotionPropertiesFromForTest(`{"items":[
+			{"name":"Name","type":"title"},
+			{"name":"Keywords","type":"multi_select","options":["network","storage"]}
+		]}`)
+		gt.A(t, got).Length(2).Required()
+		gt.V(t, got[0].ID).Equal("title")
+		gt.V(t, got[0].Name).Equal("Name")
+		gt.V(t, got[0].Type).Equal("title")
+		gt.V(t, got[1].Name).Equal("Keywords")
+		gt.V(t, got[1].Type).Equal("multi_select")
+		gt.A(t, got[1].Options).Equal([]string{"network", "storage"})
+	})
+
+	t.Run("forces a title column when the reply names none", func(t *testing.T) {
+		got := toolsim.NotionPropertiesFromForTest(`{"items":[{"name":"Summary","type":"rich_text"}]}`)
+		gt.A(t, got).Length(1).Required()
+		gt.V(t, got[0].ID).Equal("title")
+		gt.V(t, got[0].Type).Equal("title")
+		gt.V(t, got[0].Name).Equal("Summary")
+	})
+
+	t.Run("demotes a second title column", func(t *testing.T) {
+		got := toolsim.NotionPropertiesFromForTest(`{"items":[
+			{"name":"Name","type":"title"},
+			{"name":"Alias","type":"title"}
+		]}`)
+		gt.A(t, got).Length(2).Required()
+		gt.V(t, got[0].Type).Equal("title")
+		gt.V(t, got[1].Type).Equal("rich_text")
+	})
+
+	t.Run("falls back to a single title column on an unusable reply", func(t *testing.T) {
+		for _, text := range []string{"", "not json", `{"items":[]}`} {
+			got := toolsim.NotionPropertiesFromForTest(text)
+			gt.A(t, got).Length(1).Required()
+			gt.V(t, got[0].ID).Equal("title")
+			gt.V(t, got[0].Name).Equal("Name")
+			gt.V(t, got[0].Type).Equal("title")
+		}
+	})
 }
 
 func TestRecorder_SequenceOrder(t *testing.T) {

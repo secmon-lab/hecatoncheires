@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,12 @@ type Client interface {
 
 	// GetDatabase retrieves a database's metadata and the data sources it holds.
 	GetDatabase(ctx context.Context, databaseID string) (*Database, error)
+
+	// GetDataSource retrieves one data source's column schema. A database
+	// object reports only the id and name of each data source, so this is the
+	// only way to learn the property names and types a filter must be written
+	// against.
+	GetDataSource(ctx context.Context, dataSourceID string) (*DataSource, error)
 
 	// QueryDataSource lists the pages held by one data source of a database.
 	QueryDataSource(ctx context.Context, dataSourceID string, opts QueryOptions) (*QueryResult, error)
@@ -169,7 +176,10 @@ func (c *client) Search(ctx context.Context, query string, opts SearchOptions) (
 		NextCursor: decoded.NextCursor,
 	}
 	for _, obj := range decoded.Results {
-		item, ok := convertSearchItem(ctx, obj)
+		// No columns are requested on this path: a workspace-wide search
+		// returns pages from many data sources, so there is no one schema to
+		// name properties from.
+		item, ok := convertSearchItem(ctx, obj, nil)
 		if !ok {
 			continue
 		}
@@ -382,7 +392,10 @@ type titleProperty struct {
 // the rest of the search usable. It is reported rather than dropped silently,
 // because from the caller's side a skipped result is indistinguishable from a
 // search that simply did not match.
-func convertSearchItem(ctx context.Context, obj searchObject) (SearchItem, bool) {
+//
+// props are the columns whose values the row should carry; nil on the search
+// path, where the results are not rows of one known data source.
+func convertSearchItem(ctx context.Context, obj searchObject, props []PropertySchema) (SearchItem, bool) {
 	switch obj.Object {
 	case "page":
 		return SearchItem{
@@ -391,6 +404,7 @@ func convertSearchItem(ctx context.Context, obj searchObject) (SearchItem, bool)
 			Title:      extractPageTitle(obj.Properties),
 			URL:        obj.URL,
 			LastEdited: obj.LastEditedTime,
+			Properties: renderRowProperties(obj.Properties, props),
 		}, true
 	case "database":
 		return SearchItem{
@@ -426,6 +440,36 @@ func extractPageTitle(props map[string]json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// renderRowProperties renders the values of the requested columns as text,
+// keyed by property name.
+//
+// A column the row does not carry is skipped, and so is one whose type this
+// package cannot render — the row is still worth returning without it (see
+// renderPropertyValue). The selection is made here rather than trusted from the
+// response, so it holds whether or not Notion honoured filter_properties.
+func renderRowProperties(raw map[string]json.RawMessage, props []PropertySchema) map[string]string {
+	if len(props) == 0 || len(raw) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string, len(props))
+	for _, p := range props {
+		value, ok := raw[p.Name]
+		if !ok {
+			continue
+		}
+		text, ok := renderPropertyValue(value)
+		if !ok {
+			continue
+		}
+		out[p.Name] = text
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func plainText(parts []richText) string {
@@ -532,13 +576,18 @@ func (c *client) GetDatabase(ctx context.Context, databaseID string) (*Database,
 	return out, nil
 }
 
-// dataSourceQueryRequest is the POST /v1/data_sources/{id}/query body. Only the
-// pagination keys are sent: the tool lists rows in Notion's default order and
-// leaves the choice of which row to open to the agent, so neither filter nor
-// sorts has a caller.
+// dataSourceQueryRequest is the POST /v1/data_sources/{id}/query body.
+//
+// Filter and Sorts are omitempty and built by the caller, so a listing that
+// narrows nothing sends the exact body it sent before either existed. That is
+// not a nicety: an unfiltered listing is the shape notion__get_database has
+// always sent, and a `"filter":null` or an empty filter object would be a
+// change in what Notion is asked for.
 type dataSourceQueryRequest struct {
-	StartCursor string `json:"start_cursor,omitempty"`
-	PageSize    int    `json:"page_size,omitempty"`
+	Filter      map[string]any   `json:"filter,omitempty"`
+	Sorts       []map[string]any `json:"sorts,omitempty"`
+	StartCursor string           `json:"start_cursor,omitempty"`
+	PageSize    int              `json:"page_size,omitempty"`
 }
 
 // dataSourceQueryResponse decodes POST /v1/data_sources/{id}/query. Its results
@@ -564,6 +613,8 @@ func (c *client) QueryDataSource(ctx context.Context, dataSourceID string, opts 
 	}
 
 	encoded, err := json.Marshal(&dataSourceQueryRequest{
+		Filter:      opts.Filter,
+		Sorts:       opts.Sorts,
 		StartCursor: opts.StartCursor,
 		PageSize:    pageSize,
 	})
@@ -574,6 +625,9 @@ func (c *client) QueryDataSource(ctx context.Context, dataSourceID string, opts 
 	}
 
 	path := fmt.Sprintf("/v1/data_sources/%s/query", url.PathEscape(dataSourceID))
+	if query := filterPropertiesQuery(opts.Properties); query != "" {
+		path += "?" + query
+	}
 
 	resp, err := c.doJSON(ctx, http.MethodPost, path, databaseAPIVersion, encoded)
 	if err != nil {
@@ -604,11 +658,173 @@ func (c *client) QueryDataSource(ctx context.Context, dataSourceID string, opts 
 		NextCursor: decoded.NextCursor,
 	}
 	for _, obj := range decoded.Results {
-		item, ok := convertSearchItem(ctx, obj)
+		item, ok := convertSearchItem(ctx, obj, opts.Properties)
 		if !ok {
 			continue
 		}
 		out.Items = append(out.Items, item)
 	}
 	return out, nil
+}
+
+// titlePropertyID is the id Notion gives every title property. It is a fixed
+// string rather than a lookup: "all Title properties have an id of \"title\"".
+const titlePropertyID = "title"
+
+// filterPropertiesQuery builds the filter_properties query string, which asks
+// Notion to send only the named columns of each row.
+//
+// The title property is always appended. A row's title is read out of the same
+// properties map (extractPageTitle), so a response narrowed to the requested
+// columns would otherwise arrive with no title at all — and the title is the one
+// column every caller displays.
+//
+// This is a transfer-size optimisation, never the source of truth for what a
+// row carries: renderRowProperties picks the requested columns out of whatever
+// comes back, so a Notion version that ignores this parameter changes nothing
+// but the size of the response.
+func filterPropertiesQuery(props []PropertySchema) string {
+	if len(props) == 0 {
+		return ""
+	}
+
+	values := url.Values{}
+	seen := make(map[string]struct{}, len(props)+1)
+	for _, p := range props {
+		if p.ID == "" {
+			continue
+		}
+		if _, ok := seen[p.ID]; ok {
+			continue
+		}
+		seen[p.ID] = struct{}{}
+		values.Add("filter_properties", p.ID)
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	if _, ok := seen[titlePropertyID]; !ok {
+		values.Add("filter_properties", titlePropertyID)
+	}
+	return values.Encode()
+}
+
+// dataSourceResponse decodes only what the schema needs. Narrowed for the same
+// reason as searchResponse: each property's type-specific configuration stays
+// raw except for the choice lists, so a configuration shape Notion changes
+// later cannot fail the whole read.
+type dataSourceResponse struct {
+	ID         string                        `json:"id"`
+	Title      []richText                    `json:"title"`
+	Properties map[string]dataSourceProperty `json:"properties"`
+}
+
+type dataSourceProperty struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Type        string           `json:"type"`
+	Select      *propertyChoices `json:"select"`
+	Status      *propertyChoices `json:"status"`
+	MultiSelect *propertyChoices `json:"multi_select"`
+}
+
+type propertyChoices struct {
+	Options []namedChoice `json:"options"`
+}
+
+// schemaOptionsMax bounds how many choices of one property are reported. A
+// select column in production can hold hundreds.
+const schemaOptionsMax = 50
+
+// GetDataSource fetches one data source's column schema via
+// GET /v1/data_sources/{id}.
+func (c *client) GetDataSource(ctx context.Context, dataSourceID string) (*DataSource, error) {
+	if dataSourceID == "" {
+		return nil, goerr.New("dataSourceID is required")
+	}
+
+	// PathEscape for the same reason as GetPageMarkdown: the id arrives from LLM
+	// tool args, so guard against characters that would escape the
+	// /v1/data_sources/ scope.
+	path := fmt.Sprintf("/v1/data_sources/%s", url.PathEscape(dataSourceID))
+
+	resp, err := c.doJSON(ctx, http.MethodGet, path, databaseAPIVersion, nil)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call notion data source endpoint", goerr.V("dataSourceID", dataSourceID))
+	}
+	defer safe.Close(ctx, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, newAPIError(ctx, "data source", resp, goerr.V("dataSourceID", dataSourceID))
+	}
+
+	var decoded dataSourceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode notion data source response", goerr.V("dataSourceID", dataSourceID))
+	}
+
+	id := decoded.ID
+	if id == "" {
+		id = dataSourceID
+	}
+	out := &DataSource{
+		ID:         id,
+		Name:       plainText(decoded.Title),
+		Properties: make([]PropertySchema, 0, len(decoded.Properties)),
+	}
+	for key, prop := range decoded.Properties {
+		// The map key is the property's display name; the object repeats it.
+		// Prefer the object and fall back to the key, so a response that omits
+		// the field still yields a usable name.
+		name := prop.Name
+		if name == "" {
+			name = key
+		}
+		options, truncated := choiceNames(prop)
+		out.Properties = append(out.Properties, PropertySchema{
+			ID:               prop.ID,
+			Name:             name,
+			Type:             prop.Type,
+			Options:          options,
+			OptionsTruncated: truncated,
+		})
+	}
+	// Notion returns the properties as a JSON object, so their order is not
+	// meaningful. Sorting by name makes two descriptions of the same data source
+	// identical.
+	sort.Slice(out.Properties, func(i, j int) bool {
+		return out.Properties[i].Name < out.Properties[j].Name
+	})
+	return out, nil
+}
+
+// choiceNames pulls the choice names of a select / status / multi_select
+// property. The cap is reported rather than hidden: an agent filtering on a
+// choice it was never shown would get "no rows" with no way to tell that the
+// choice exists.
+func choiceNames(prop dataSourceProperty) ([]string, bool) {
+	var choices *propertyChoices
+	switch prop.Type {
+	case propTypeSelect:
+		choices = prop.Select
+	case propTypeStatus:
+		choices = prop.Status
+	case propTypeMultiSelect:
+		choices = prop.MultiSelect
+	}
+	if choices == nil || len(choices.Options) == 0 {
+		return nil, false
+	}
+
+	names := make([]string, 0, len(choices.Options))
+	for _, option := range choices.Options {
+		if option.Name == "" {
+			continue
+		}
+		if len(names) == schemaOptionsMax {
+			return names, true
+		}
+		names = append(names, option.Name)
+	}
+	return names, false
 }

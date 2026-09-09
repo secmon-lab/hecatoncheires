@@ -112,6 +112,71 @@ func (t *searchTool) Run(ctx context.Context, args map[string]any) (map[string]a
 	}, nil
 }
 
+// The values the "status" field of a read tool's result takes.
+//
+// It exists so that "nothing matched" is distinguishable from "the request was
+// not carried out", without reading the prose in "message". A caller whose next
+// step is "if there is no evidence, hand this to a person" gets that decision
+// wrong in both directions otherwise: it stops on a repairable mistake, or it
+// concludes there is no evidence when the search never ran.
+//
+// A failure to reach Notion at all — no permission, not shared, rate limited —
+// is NOT one of these. It is returned as an error, so the agent sees a failed
+// tool call rather than a result it could mistake for an empty one.
+const (
+	statusOK                  = "ok"
+	statusInvalidRequest      = "invalid_request"
+	statusDataSourceAmbiguous = "data_source_ambiguous"
+)
+
+// schemaSummary lists every property's name and type, plus the choices of the
+// properties the caller asked about.
+//
+// Choices are not listed for everything on purpose: a data source in production
+// carries dozens of properties, and their choice lists together do not fit in a
+// model's context. Names and types do fit, and they are what a filter needs
+// first.
+func schemaSummary(ds *DataSource, withChoices []PropertySchema) []map[string]any {
+	chosen := make(map[string]struct{}, len(withChoices))
+	for _, p := range withChoices {
+		chosen[p.ID] = struct{}{}
+	}
+
+	out := make([]map[string]any, 0, len(ds.Properties))
+	for _, p := range ds.Properties {
+		entry := map[string]any{"name": p.Name, "type": p.Type}
+		if _, ok := chosen[p.ID]; ok && len(p.Options) > 0 {
+			entry["options"] = p.Options
+			entry["options_truncated"] = p.OptionsTruncated
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// rejectedResult answers an unusable request as a successful tool result. See
+// the rejection type for why this is not an error.
+//
+// The schema rides along whenever it is already in hand, so the agent can
+// repair the call from this one response instead of asking for the schema
+// again.
+func rejectedResult(out map[string]any, ds *DataSource, err error) (map[string]any, error) {
+	message, ok := rejectionMessage(err)
+	if !ok {
+		return nil, err
+	}
+
+	out["status"] = statusInvalidRequest
+	out["message"] = message
+	out["items"] = []map[string]any{}
+	out["matched"] = 0
+	if ds != nil {
+		out["property_schema"] = schemaSummary(ds, nil)
+		out["operators_by_type"] = operatorsByType(ds)
+	}
+	return out, nil
+}
+
 // readToolFor names the tool that reads a search hit of the given type. It is
 // carried on every item because the type alone did not stop the agent from
 // sending a database id to notion__get_page (ARGUS-91): the routing is stated
@@ -182,10 +247,13 @@ type getDatabaseTool struct {
 func (t *getDatabaseTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name: "notion__get_database",
-		Description: "List the pages held by a Notion database — use this for a notion__search result whose type is \"database\". " +
-			"Returns the database title and its rows as id/title/url entries; read a row's own content with notion__get_page. " +
+		Description: "Describe a Notion database and list its rows — use this for a notion__search result whose type is \"database\". " +
+			"Returns the database title, its rows as id/title/url entries, and 'property_schema': every column's name and type. " +
+			"Read a row's own content with notion__get_page. " +
 			"A database keeps its rows in one or more data sources: when it has several, no rows are returned and the 'data_sources' " +
-			"list is reported instead, so call again with data_source_id set to the one you want.",
+			"list is reported instead, so call again with data_source_id set to the one you want. " +
+			"'status' says what happened: \"ok\" (the row count is in 'matched'), \"invalid_request\" (fix the arguments and call again), " +
+			"or \"data_source_ambiguous\". A row count of 0 with status \"ok\" means the database is empty, not that the call failed.",
 		Parameters: map[string]*gollem.Parameter{
 			"database_id": {
 				Type:        gollem.TypeString,
@@ -196,6 +264,13 @@ func (t *getDatabaseTool) Spec() gollem.ToolSpec {
 				Type:        gollem.TypeString,
 				Description: "Which data source of the database to list. Omit unless a previous call reported several.",
 				Required:    false,
+			},
+			"describe_properties": {
+				Type: gollem.TypeArray,
+				Description: "Property names whose choices you need. Only select, status and multi_select properties have choices. " +
+					"Every property's name and type is reported anyway; ask here for the choices of the few you intend to filter on.",
+				Required: false,
+				Items:    &gollem.Parameter{Type: gollem.TypeString},
 			},
 			"page_size": {
 				Type:        gollem.TypeInteger,
@@ -241,12 +316,20 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 	// An unresolved data source is reported as a result rather than an error: it
 	// is something the model can act on by calling again, and a returned error
 	// would also be filed as a tool failure by the strategies that report them.
-	dataSourceID, reason := pickDataSource(db.DataSources, args)
+	dataSourceID, reason, outcome := pickDataSource(db.DataSources, args)
 	if dataSourceID == "" {
 		out["data_source_id"] = ""
 		out["items"] = []map[string]any{}
 		out["message"] = reason
+		out["status"] = statusForOutcome(outcome)
+		out["matched"] = 0
 		return out, nil
+	}
+	out["data_source_id"] = dataSourceID
+
+	describe, err := parseNameList(args, "describe_properties", describePropertiesMax)
+	if err != nil {
+		return rejectedResult(out, nil, err)
 	}
 
 	opts := QueryOptions{}
@@ -255,6 +338,26 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 	}
 	if s, ok := args["start_cursor"].(string); ok {
 		opts.StartCursor = s
+	}
+
+	// The schema is read on the first page of a listing, and whenever choices
+	// were asked for. A later page repeats neither: the names and types have not
+	// changed between two pages of one listing, and this can be dozens of
+	// entries.
+	if opts.StartCursor == "" || len(describe) > 0 {
+		ds, err := t.client.GetDataSource(ctx, dataSourceID)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to fetch notion data source schema",
+				goerr.V("database_id", databaseID),
+				goerr.V("data_source_id", dataSourceID),
+			)
+		}
+		chosen, err := resolveProperties(ds, describe)
+		if err != nil {
+			return rejectedResult(out, ds, err)
+		}
+		out["property_schema"] = schemaSummary(ds, chosen)
+		out["operators_by_type"] = operatorsByType(ds)
 	}
 
 	res, err := t.client.QueryDataSource(ctx, dataSourceID, opts)
@@ -276,32 +379,65 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 		})
 	}
 
-	out["data_source_id"] = dataSourceID
+	out["status"] = statusOK
+	out["matched"] = len(items)
 	out["items"] = items
 	out["has_more"] = res.HasMore
 	out["next_cursor"] = res.NextCursor
 	return out, nil
 }
 
-// pickDataSource decides which data source of a database to list. It returns an
-// empty id plus the reason to report when the choice cannot be made: an id the
-// database does not hold, no data sources at all, or several with none named.
-func pickDataSource(sources []DataSourceRef, args map[string]any) (string, string) {
+// dataSourceOutcome says why a data source could not be named. The three
+// situations call for three different things from the caller, so they cannot
+// share one status: an id the database does not hold is an argument to repair, a
+// choice not made is a choice to make, and a database with no data sources has
+// no rows to find and nothing to fix.
+type dataSourceOutcome int
+
+const (
+	dataSourceChosen dataSourceOutcome = iota
+	dataSourceUnknown
+	dataSourceEmpty
+	dataSourceAmbiguous
+)
+
+// pickDataSource decides which data source of a database to read. It returns an
+// empty id, the reason to report and which situation it was whenever the choice
+// cannot be made.
+func pickDataSource(sources []DataSourceRef, args map[string]any) (string, string, dataSourceOutcome) {
 	if requested, _ := args["data_source_id"].(string); requested != "" {
 		for _, ds := range sources {
 			if ds.ID == requested {
-				return requested, ""
+				return requested, "", dataSourceChosen
 			}
 		}
-		return "", "data_source_id is not one of this database's data sources; pick an id listed under data_sources"
+		return "", "data_source_id is not one of this database's data sources; pick an id listed under data_sources", dataSourceUnknown
 	}
 
 	switch len(sources) {
 	case 0:
-		return "", "this database holds no data sources, so it has no rows to list"
+		return "", "this database holds no data sources, so it has no rows to list", dataSourceEmpty
 	case 1:
-		return sources[0].ID, ""
+		return sources[0].ID, "", dataSourceChosen
 	default:
-		return "", "this database holds several data sources; call again with data_source_id set to one of the ids listed under data_sources"
+		return "", "this database holds several data sources; call again with data_source_id set to one of the ids listed under data_sources", dataSourceAmbiguous
 	}
+}
+
+// statusForOutcome maps a failed data source choice onto what the caller should
+// do about it.
+func statusForOutcome(outcome dataSourceOutcome) string {
+	switch outcome {
+	case dataSourceUnknown:
+		// The caller named a data source this database does not hold, which is
+		// its own argument to correct — not one of the listed ids to choose
+		// between.
+		return statusInvalidRequest
+	case dataSourceEmpty:
+		// A database with no data sources has no rows. That is an answer of
+		// zero, not a request to fix anything: reported as ambiguous, a caller
+		// would keep asking for a data source id that does not exist.
+		return statusOK
+	}
+	return statusDataSourceAmbiguous
 }

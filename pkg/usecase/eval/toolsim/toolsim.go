@@ -54,6 +54,7 @@ const (
 const (
 	recordNotionGetPage         = "notion_get_page"
 	recordNotionGetDatabase     = "notion_get_database"
+	recordNotionGetDataSource   = "notion_get_data_source"
 	recordNotionQueryDataSource = "notion_query_data_source"
 )
 
@@ -311,7 +312,124 @@ func (n *notionSim) GetDatabase(ctx context.Context, databaseID string) (*notion
 	}, nil
 }
 
-func (n *notionSim) QueryDataSource(ctx context.Context, dataSourceID string, _ notiontool.QueryOptions) (*notiontool.QueryResult, error) {
+// notionPropertySchema is the structured shape the simulator asks for so a
+// scenario whose background describes a database's columns can exercise the
+// property filters. Without it every simulated data source would look the same,
+// and a scenario check on "did the agent filter by the right column" would pass
+// or fail for reasons unrelated to the agent.
+type notionPropertySchema struct {
+	Items []struct {
+		Name    string   `json:"name"`
+		Type    string   `json:"type"`
+		Options []string `json:"options"`
+	} `json:"items"`
+}
+
+func notionPropertySchemaShape() *gollem.Parameter {
+	return &gollem.Parameter{
+		Type:        gollem.TypeObject,
+		Description: "The columns of this Notion database.",
+		Properties: map[string]*gollem.Parameter{
+			"items": {
+				Type:        gollem.TypeArray,
+				Description: "One entry per column. Include the row title column first.",
+				Items: &gollem.Parameter{
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"name": {
+							Type:        gollem.TypeString,
+							Description: "The column's name as it appears in Notion.",
+							Required:    true,
+						},
+						"type": {
+							Type:        gollem.TypeString,
+							Description: "The Notion property type of the column.",
+							Required:    true,
+							Enum: []string{
+								"title", "rich_text", "number", "select", "status",
+								"multi_select", "date", "checkbox", "people", "url",
+							},
+						},
+						"options": {
+							Type:        gollem.TypeArray,
+							Description: "The choice names, for a select, status or multi_select column only.",
+							Items:       &gollem.Parameter{Type: gollem.TypeString},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (n *notionSim) GetDataSource(ctx context.Context, dataSourceID string) (*notiontool.DataSource, error) {
+	text, err := generateWithSchema(ctx, n.completer, ToolNotionSearch, n.background, "database columns: "+dataSourceID, notionPropertySchemaShape())
+	if err != nil {
+		return nil, err
+	}
+	n.rec.Record(recordNotionGetDataSource, "sim", map[string]any{"data_source_id": dataSourceID}, text)
+	return &notiontool.DataSource{
+		ID:         dataSourceID,
+		Name:       dataSourceID,
+		Properties: notionPropertiesFrom(text),
+	}, nil
+}
+
+// notionPropertiesFrom converts the simulator's answer into a column schema. A
+// reply that does not parse falls back to a single title column, for the same
+// reason notionHitsFrom falls back to one page: the simulator LLM is not
+// guaranteed to honour the schema, and a scenario that only needs "the agent can
+// list the rows" must keep working when it does not.
+//
+// The first column is forced to the title type when the reply names none. Every
+// Notion data source has exactly one title column, and a keyword search with no
+// explicit target property is written against it.
+func notionPropertiesFrom(text string) []notiontool.PropertySchema {
+	fallback := []notiontool.PropertySchema{{ID: "title", Name: "Name", Type: "title"}}
+
+	var decoded notionPropertySchema
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil || len(decoded.Items) == 0 {
+		return fallback
+	}
+
+	out := make([]notiontool.PropertySchema, 0, len(decoded.Items))
+	hasTitle := false
+	for i, item := range decoded.Items {
+		if item.Name == "" || item.Type == "" {
+			continue
+		}
+		kind := item.Type
+		if kind == "title" {
+			if hasTitle {
+				// Notion allows exactly one title column, so a second one is
+				// demoted rather than dropped.
+				kind = "rich_text"
+			} else {
+				hasTitle = true
+			}
+		}
+		id := fmt.Sprintf("sim-prop-%d", i+1)
+		if kind == "title" {
+			id = "title"
+		}
+		out = append(out, notiontool.PropertySchema{
+			ID:      id,
+			Name:    item.Name,
+			Type:    kind,
+			Options: item.Options,
+		})
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	if !hasTitle {
+		out[0].ID = "title"
+		out[0].Type = "title"
+	}
+	return out
+}
+
+func (n *notionSim) QueryDataSource(ctx context.Context, dataSourceID string, opts notiontool.QueryOptions) (*notiontool.QueryResult, error) {
 	text, err := generate(ctx, n.completer, ToolNotionSearch, n.background, "database rows: "+dataSourceID)
 	if err != nil {
 		return nil, err
@@ -325,8 +443,29 @@ func (n *notionSim) QueryDataSource(ctx context.Context, dataSourceID string, _ 
 			URL:   "https://notion.example/sim-page-1",
 		}}
 	}
-	n.rec.Record(recordNotionQueryDataSource, "sim", map[string]any{"data_source_id": dataSourceID}, text)
+	// The filter is recorded, not applied: the simulated rows come from the
+	// scenario background, so there is nothing to narrow. A check that asks
+	// "did the agent search for the right thing" reads it from the trajectory.
+	n.rec.Record(recordNotionQueryDataSource, "sim", queryRecordArgs(dataSourceID, opts), text)
 	return res, nil
+}
+
+func queryRecordArgs(dataSourceID string, opts notiontool.QueryOptions) map[string]any {
+	args := map[string]any{"data_source_id": dataSourceID}
+	if opts.Filter != nil {
+		args["filter"] = opts.Filter
+	}
+	if len(opts.Sorts) > 0 {
+		args["sorts"] = opts.Sorts
+	}
+	if len(opts.Properties) > 0 {
+		names := make([]string, 0, len(opts.Properties))
+		for _, p := range opts.Properties {
+			names = append(names, p.Name)
+		}
+		args["properties"] = names
+	}
+	return args
 }
 
 // RecordingSlackSearch wraps a real SearchService so live calls are also
@@ -382,13 +521,23 @@ func (r *recordingNotion) GetDatabase(ctx context.Context, databaseID string) (*
 	return res, err
 }
 
+func (r *recordingNotion) GetDataSource(ctx context.Context, dataSourceID string) (*notiontool.DataSource, error) {
+	res, err := r.delegate.GetDataSource(ctx, dataSourceID)
+	n := 0
+	if res != nil {
+		n = len(res.Properties)
+	}
+	r.rec.Record(recordNotionGetDataSource, "live", map[string]any{"data_source_id": dataSourceID}, fmt.Sprintf("%d properties", n))
+	return res, err
+}
+
 func (r *recordingNotion) QueryDataSource(ctx context.Context, dataSourceID string, opts notiontool.QueryOptions) (*notiontool.QueryResult, error) {
 	res, err := r.delegate.QueryDataSource(ctx, dataSourceID, opts)
 	n := 0
 	if res != nil {
 		n = len(res.Items)
 	}
-	r.rec.Record(recordNotionQueryDataSource, "live", map[string]any{"data_source_id": dataSourceID}, fmt.Sprintf("%d rows", n))
+	r.rec.Record(recordNotionQueryDataSource, "live", queryRecordArgs(dataSourceID, opts), fmt.Sprintf("%d rows", n))
 	return res, err
 }
 
