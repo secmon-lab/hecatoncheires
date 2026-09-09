@@ -349,6 +349,7 @@ func TestBuildFilterFromConditions(t *testing.T) {
 			{ID: "rank", Name: "Rank", Type: "number"},
 			{ID: "rel", Name: "Related", Type: "relation"},
 			{ID: "roll", Name: "Rolled up", Type: "rollup"},
+			{ID: "uniq", Name: "Row id", Type: "unique_id"},
 			{ID: "stat", Name: "Status", Type: "select"},
 			{ID: "sumr", Name: "Summary", Type: "rich_text"},
 			{ID: "vrfy", Name: "Verified", Type: "verification"},
@@ -398,6 +399,13 @@ func TestBuildFilterFromConditions(t *testing.T) {
 				name:   "multi_select takes a choice it holds",
 				fields: map[string]any{"property": "Keywords", "operator": "contains", "value": "network"},
 				want:   `{"multi_select":{"contains":"network"},"property":"aikw"}`,
+			},
+			{
+				// Notion's unique_id is a counter, and its conditions take an
+				// integer.
+				name:   "unique_id takes a whole number",
+				fields: map[string]any{"property": "Row id", "operator": "greater_than", "value": "17"},
+				want:   `{"property":"uniq","unique_id":{"greater_than":17}}`,
 			},
 			{
 				name:   "date takes an ISO day",
@@ -611,6 +619,29 @@ func TestBuildFilterFromConditions(t *testing.T) {
 				name:   "a value that is not a number",
 				fields: map[string]any{"property": "Rank", "operator": "equals", "value": "forty-two"},
 				want:   "digits",
+			},
+			{
+				// strconv.ParseFloat accepts these three, and none of them can
+				// be encoded as JSON: letting one through turns a repairable
+				// argument into a request that fails to serialise.
+				name:   "a number that is NaN",
+				fields: map[string]any{"property": "Rank", "operator": "equals", "value": "NaN"},
+				want:   "digits",
+			},
+			{
+				name:   "a number that is positive infinity",
+				fields: map[string]any{"property": "Rank", "operator": "greater_than", "value": "Inf"},
+				want:   "digits",
+			},
+			{
+				name:   "a number that is negative infinity",
+				fields: map[string]any{"property": "Rank", "operator": "less_than", "value": "-Inf"},
+				want:   "digits",
+			},
+			{
+				name:   "a unique_id that is a fraction",
+				fields: map[string]any{"property": "Row id", "operator": "equals", "value": "1.5"},
+				want:   "no decimal point",
 			},
 			{
 				name:   "a value that is not a boolean",

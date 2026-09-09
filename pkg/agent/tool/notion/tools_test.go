@@ -526,6 +526,10 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("data_source_id")
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["data_sources"])).Length(2)
+
+		// A choice the caller has to make, which is what this status means.
+		gt.Value(t, got["status"]).Equal("data_source_ambiguous")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("reports an unknown data_source_id instead of querying it", func(t *testing.T) {
@@ -547,6 +551,13 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Value(t, got["data_source_id"]).Equal("")
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("not one of this database's data sources")
+
+		// An id this database does not hold is an argument to correct, not one
+		// of the listed ids to choose between — so it is not the ambiguous
+		// status, which would send the caller looking through a list its own id
+		// is not in.
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("reports a database that holds no data sources", func(t *testing.T) {
@@ -561,6 +572,12 @@ func TestGetDatabaseTool(t *testing.T) {
 		gt.Array(t, fake.gotDataSourceIDs).Length(0)
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["items"])).Length(0)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("no data sources")
+
+		// A database with no data sources has no rows: an answer of zero, not
+		// something to fix and not a choice to make. Reported as ambiguous, a
+		// caller would keep asking for an id that does not exist.
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(0)
 	})
 
 	t.Run("returns error when database_id is missing", func(t *testing.T) {
@@ -953,6 +970,32 @@ func TestSearchDatabaseTool(t *testing.T) {
 		gt.Map(t, gt.Cast[map[string][]string](t, got["operators_by_type"])).HasKey("select")
 	})
 
+	// A value that cannot be encoded as JSON has to be caught here. Sent on, it
+	// fails when the request body is marshalled, which reaches the agent as an
+	// internal error rather than as an argument it can restate.
+	t.Run("rejects a value that could not be sent as JSON", func(t *testing.T) {
+		fake := schemaFake(rows)
+		fake.dataSource = &notiontool.DataSource{
+			ID: "ds-1",
+			Properties: []notiontool.PropertySchema{
+				{ID: "title", Name: "Name", Type: "title"},
+				{ID: "rank", Name: "Rank", Type: "number"},
+			},
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"filter": map[string]any{"conditions": []any{
+				map[string]any{"property": "Rank", "operator": "greater_than", "value": "NaN"},
+			}},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.String(t, gt.Cast[string](t, got["message"])).Contains("digits")
+	})
+
 	// An argument whose shape is wrong is caught before the schema is even read.
 	t.Run("rejects a malformed argument before calling Notion", func(t *testing.T) {
 		fake := schemaFake(rows)
@@ -993,6 +1036,47 @@ func TestSearchDatabaseTool(t *testing.T) {
 		gt.Value(t, got["matched"]).Equal(0)
 		gt.Array(t, gt.Cast[[]map[string]any](t, got["data_sources"])).Length(2)
 		gt.String(t, gt.Cast[string](t, got["message"])).Contains("data_source_id")
+	})
+
+	// The three ways a data source cannot be named ask three different things
+	// of the caller, so they do not share one status.
+	t.Run("separates an unknown data source from an unmade choice", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			database: &notiontool.Database{
+				ID:          "db-1",
+				DataSources: []notiontool.DataSourceRef{{ID: "ds-1", Name: "Active"}},
+			},
+			queryResult: rows,
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id":    "db-1",
+			"data_source_id": "ds-nope",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSchemaDataSrcID).Length(0)
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("invalid_request")
+		gt.String(t, gt.Cast[string](t, got["message"])).Contains("not one of this database's data sources")
+	})
+
+	t.Run("reports a database with no data sources as zero rows", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			database:    &notiontool.Database{ID: "db-1", Title: "Empty"},
+			queryResult: rows,
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{
+			"database_id": "db-1",
+			"query":       "stuck",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDataSourceIDs).Length(0)
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(0)
+		gt.String(t, gt.Cast[string](t, got["message"])).Contains("no data sources")
 	})
 
 	t.Run("searches the requested data source when several exist", func(t *testing.T) {

@@ -3,6 +3,7 @@ package notiontool
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -435,8 +436,18 @@ func coerceValue(kind valueKind, prop PropertySchema, raw string) (any, error) {
 		return raw, nil
 	case valueNumber:
 		number, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
+		// ParseFloat accepts "NaN", "Inf" and "-Inf". None of them can be
+		// encoded as JSON, so letting one through turns a repairable argument
+		// into a request that fails to serialise — reported as an internal
+		// error rather than as something the caller can restate.
+		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
 			return nil, rejectf("property %q holds a number, so value %q must be written as digits, for example \"42\"", prop.Name, raw)
+		}
+		return number, nil
+	case valueInteger:
+		number, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, rejectf("property %q holds a whole-number id, so value %q must be written as digits with no decimal point, for example \"42\"", prop.Name, raw)
 		}
 		return number, nil
 	case valueBool:
@@ -737,6 +748,10 @@ type valueKind int
 const (
 	valueString valueKind = iota
 	valueNumber
+	// valueInteger is the unique_id column's kind. Notion's unique_id is a
+	// counter, and its filter conditions take an integer — a fraction sent
+	// there is a 400 whose message does not say which argument was wrong.
+	valueInteger
 	valueBool
 	valueDate
 	valueNone
@@ -772,7 +787,7 @@ func conditionKindFor(propType string) (conditionKind, bool) {
 	case propTypeNumber:
 		return conditionKind{key: propTypeNumber, operators: numberOperators, value: valueNumber}, true
 	case propTypeUniqueID:
-		return conditionKind{key: propTypeUniqueID, operators: uniqueIDOperators, value: valueNumber}, true
+		return conditionKind{key: propTypeUniqueID, operators: uniqueIDOperators, value: valueInteger}, true
 	case propTypeCheckbox:
 		return conditionKind{key: propTypeCheckbox, operators: checkboxOperators, value: valueBool}, true
 	case propTypeSelect:

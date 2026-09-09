@@ -413,12 +413,12 @@ func (t *getDatabaseTool) Run(ctx context.Context, args map[string]any) (map[str
 	// An unresolved data source is reported as a result rather than an error: it
 	// is something the model can act on by calling again, and a returned error
 	// would also be filed as a tool failure by the strategies that report them.
-	dataSourceID, reason := pickDataSource(db.DataSources, args)
+	dataSourceID, reason, outcome := pickDataSource(db.DataSources, args)
 	if dataSourceID == "" {
 		out["data_source_id"] = ""
 		out["items"] = []map[string]any{}
 		out["message"] = reason
-		out["status"] = statusDataSourceAmbiguous
+		out["status"] = statusForOutcome(outcome)
 		out["matched"] = 0
 		return out, nil
 	}
@@ -678,7 +678,7 @@ func (t *searchDatabaseTool) Run(ctx context.Context, args map[string]any) (map[
 		"database_title": db.Title,
 	}
 
-	dataSourceID, reason := pickDataSource(db.DataSources, args)
+	dataSourceID, reason, outcome := pickDataSource(db.DataSources, args)
 	if dataSourceID == "" {
 		sources := make([]map[string]any, 0, len(db.DataSources))
 		for _, ds := range db.DataSources {
@@ -688,7 +688,7 @@ func (t *searchDatabaseTool) Run(ctx context.Context, args map[string]any) (map[
 		out["data_sources"] = sources
 		out["items"] = []map[string]any{}
 		out["message"] = reason
-		out["status"] = statusDataSourceAmbiguous
+		out["status"] = statusForOutcome(outcome)
 		out["matched"] = 0
 		return out, nil
 	}
@@ -815,25 +815,57 @@ func conditionCount(keywords []string, spec *filterSpec) int {
 	return count
 }
 
-// pickDataSource decides which data source of a database to list. It returns an
-// empty id plus the reason to report when the choice cannot be made: an id the
-// database does not hold, no data sources at all, or several with none named.
-func pickDataSource(sources []DataSourceRef, args map[string]any) (string, string) {
+// dataSourceOutcome says why a data source could not be named. The three
+// situations call for three different things from the caller, so they cannot
+// share one status: an id the database does not hold is an argument to repair, a
+// choice not made is a choice to make, and a database with no data sources has
+// no rows to find and nothing to fix.
+type dataSourceOutcome int
+
+const (
+	dataSourceChosen dataSourceOutcome = iota
+	dataSourceUnknown
+	dataSourceEmpty
+	dataSourceAmbiguous
+)
+
+// pickDataSource decides which data source of a database to read. It returns an
+// empty id, the reason to report and which situation it was whenever the choice
+// cannot be made.
+func pickDataSource(sources []DataSourceRef, args map[string]any) (string, string, dataSourceOutcome) {
 	if requested, _ := args["data_source_id"].(string); requested != "" {
 		for _, ds := range sources {
 			if ds.ID == requested {
-				return requested, ""
+				return requested, "", dataSourceChosen
 			}
 		}
-		return "", "data_source_id is not one of this database's data sources; pick an id listed under data_sources"
+		return "", "data_source_id is not one of this database's data sources; pick an id listed under data_sources", dataSourceUnknown
 	}
 
 	switch len(sources) {
 	case 0:
-		return "", "this database holds no data sources, so it has no rows to list"
+		return "", "this database holds no data sources, so it has no rows to list", dataSourceEmpty
 	case 1:
-		return sources[0].ID, ""
+		return sources[0].ID, "", dataSourceChosen
 	default:
-		return "", "this database holds several data sources; call again with data_source_id set to one of the ids listed under data_sources"
+		return "", "this database holds several data sources; call again with data_source_id set to one of the ids listed under data_sources", dataSourceAmbiguous
 	}
+}
+
+// statusForOutcome maps a failed data source choice onto what the caller should
+// do about it.
+func statusForOutcome(outcome dataSourceOutcome) string {
+	switch outcome {
+	case dataSourceUnknown:
+		// The caller named a data source this database does not hold, which is
+		// its own argument to correct — not one of the listed ids to choose
+		// between.
+		return statusInvalidRequest
+	case dataSourceEmpty:
+		// A database with no data sources has no rows. That is an answer of
+		// zero, not a request to fix anything: reported as ambiguous, a caller
+		// would keep asking for a data source id that does not exist.
+		return statusOK
+	}
+	return statusDataSourceAmbiguous
 }
