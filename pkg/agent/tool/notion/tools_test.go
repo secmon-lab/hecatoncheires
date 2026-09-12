@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,9 +30,11 @@ type fakeNotionClient struct {
 	gotSchemaDataSrcID []string
 	gotDataSourceIDs   []string
 	gotQueryOptions    []notiontool.QueryOptions
+	gotSearchOptions   []notiontool.SearchOptions
 }
 
-func (f *fakeNotionClient) Search(context.Context, string, notiontool.SearchOptions) (*notiontool.SearchResult, error) {
+func (f *fakeNotionClient) Search(_ context.Context, _ string, opts notiontool.SearchOptions) (*notiontool.SearchResult, error) {
+	f.gotSearchOptions = append(f.gotSearchOptions, opts)
 	if f.searchResult != nil {
 		return f.searchResult, nil
 	}
@@ -68,6 +71,56 @@ func (f *fakeNotionClient) QueryDataSource(_ context.Context, dataSourceID strin
 		return nil, f.queryErr
 	}
 	return f.queryResult, nil
+}
+
+// blockingNotionClient answers a search immediately and then holds every
+// database read until the test releases it or the caller's context is done. It
+// stands in for a Notion that has stopped responding while a search has already
+// succeeded.
+type blockingNotionClient struct {
+	searchResult *notiontool.SearchResult
+	release      chan struct{}
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (b *blockingNotionClient) Search(context.Context, string, notiontool.SearchOptions) (*notiontool.SearchResult, error) {
+	if b.searchResult != nil {
+		return b.searchResult, nil
+	}
+	return &notiontool.SearchResult{}, nil
+}
+
+func (b *blockingNotionClient) GetPageMarkdown(_ context.Context, pageID string) (*notiontool.PageMarkdown, error) {
+	return &notiontool.PageMarkdown{PageID: pageID}, nil
+}
+
+func (b *blockingNotionClient) GetDatabase(ctx context.Context, databaseID string) (*notiontool.Database, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.release:
+		return &notiontool.Database{ID: databaseID, Title: "Some database"}, nil
+	}
+}
+
+func (b *blockingNotionClient) GetDataSource(_ context.Context, dataSourceID string) (*notiontool.DataSource, error) {
+	return &notiontool.DataSource{ID: dataSourceID}, nil
+}
+
+func (b *blockingNotionClient) QueryDataSource(context.Context, string, notiontool.QueryOptions) (*notiontool.QueryResult, error) {
+	return &notiontool.QueryResult{}, nil
+}
+
+func (b *blockingNotionClient) databaseCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }
 
 func findTool(t *testing.T, tools []gollem.Tool, name string) gollem.Tool {
@@ -206,6 +259,247 @@ func TestSearchTool(t *testing.T) {
 		tools := notiontool.New(notiontool.Deps{Client: &fakeNotionClient{}})
 		_, err := findTool(t, tools, "notion__search").Run(context.Background(), map[string]any{})
 		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("names the searching tool on a database hit only", func(t *testing.T) {
+		fake := &fakeNotionClient{searchResult: &notiontool.SearchResult{
+			Items: []notiontool.SearchItem{
+				{ID: "page-1", Type: "page"},
+				{ID: "db-1", Type: "database"},
+			},
+		}}
+
+		tools := notiontool.New(notiontool.Deps{Client: fake})
+		got, err := findTool(t, tools, "notion__search").Run(context.Background(), map[string]any{"query": "runbook"})
+		gt.NoError(t, err).Required()
+
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, items).Length(2).Required()
+		gt.Value(t, items[0]["search_tool"]).Equal("")
+		gt.Value(t, items[1]["search_tool"]).Equal("notion__search_database")
+	})
+
+	t.Run("counts the hits it returned", func(t *testing.T) {
+		fake := &fakeNotionClient{searchResult: &notiontool.SearchResult{
+			Items: []notiontool.SearchItem{{ID: "page-1", Type: "page"}},
+		}}
+
+		tools := notiontool.New(notiontool.Deps{Client: fake})
+		got, err := findTool(t, tools, "notion__search").Run(context.Background(), map[string]any{"query": "runbook"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(1)
+	})
+
+	t.Run("passes the ordering and the cursor through", func(t *testing.T) {
+		fake := &fakeNotionClient{}
+
+		tools := notiontool.New(notiontool.Deps{Client: fake})
+		_, err := findTool(t, tools, "notion__search").Run(context.Background(), map[string]any{
+			"query":               "runbook",
+			"sort_by_last_edited": "descending",
+			"start_cursor":        "cursor-1",
+			"page_size":           float64(50),
+			"filter_type":         "database",
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSearchOptions).Length(1).Required()
+		opts := fake.gotSearchOptions[0]
+		gt.String(t, opts.SortByEdit).Equal("descending")
+		gt.String(t, opts.StartCursor).Equal("cursor-1")
+		gt.Number(t, opts.PageSize).Equal(50)
+		gt.String(t, opts.FilterType).Equal("database")
+	})
+
+	t.Run("asks Notion for no ordering or cursor when neither is given", func(t *testing.T) {
+		fake := &fakeNotionClient{}
+
+		tools := notiontool.New(notiontool.Deps{Client: fake})
+		_, err := findTool(t, tools, "notion__search").Run(context.Background(), map[string]any{"query": "runbook"})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotSearchOptions).Length(1).Required()
+		gt.String(t, fake.gotSearchOptions[0].SortByEdit).Equal("")
+		gt.String(t, fake.gotSearchOptions[0].StartCursor).Equal("")
+	})
+}
+
+func TestSearchToolReportsTheParent(t *testing.T) {
+	newTool := func(c notiontool.Client) gollem.Tool {
+		return findTool(t, notiontool.New(notiontool.Deps{Client: c}), "notion__search")
+	}
+
+	hit := func(id, parentType, parentID string) notiontool.SearchItem {
+		return notiontool.SearchItem{
+			ID:     id,
+			Type:   "page",
+			Parent: notiontool.ParentRef{Type: parentType, ID: parentID},
+		}
+	}
+
+	// Which database a hit came from is what decides whether it may be used as
+	// evidence, and the name is what a citation shows.
+	t.Run("reports the parent and resolves its name", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			searchResult: &notiontool.SearchResult{Items: []notiontool.SearchItem{
+				hit("row-1", "database", "db-1"),
+				hit("child-1", "page", "page-9"),
+				hit("loose-1", "workspace", ""),
+			}},
+			database: &notiontool.Database{ID: "db-1", Title: "Knowledge Base"},
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, items).Length(3).Required()
+
+		gt.Value(t, items[0]["parent_type"]).Equal("database")
+		gt.Value(t, items[0]["parent_id"]).Equal("db-1")
+		gt.Value(t, items[0]["parent_database_name"]).Equal("Knowledge Base")
+
+		// A page parent has an id but no database title to resolve.
+		gt.Value(t, items[1]["parent_type"]).Equal("page")
+		gt.Value(t, items[1]["parent_id"]).Equal("page-9")
+		gt.Value(t, items[1]["parent_database_name"]).Equal("")
+
+		gt.Value(t, items[2]["parent_type"]).Equal("workspace")
+		gt.Value(t, items[2]["parent_id"]).Equal("")
+
+		gt.Array(t, fake.gotDatabaseIDs).Equal([]string{"db-1"})
+	})
+
+	t.Run("resolves a repeated parent once", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			searchResult: &notiontool.SearchResult{Items: []notiontool.SearchItem{
+				hit("row-1", "database", "db-1"),
+				hit("row-2", "database", "db-1"),
+				hit("row-3", "database", "db-1"),
+			}},
+			database: &notiontool.Database{ID: "db-1", Title: "Knowledge Base"},
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDatabaseIDs).Equal([]string{"db-1"})
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		for _, item := range items {
+			gt.Value(t, item["parent_database_name"]).Equal("Knowledge Base")
+		}
+	})
+
+	// Notion rate-limits at roughly three requests a second, so the names run
+	// out before the ids do.
+	t.Run("stops resolving names past the cap but keeps every id", func(t *testing.T) {
+		items := make([]notiontool.SearchItem, 0, 7)
+		for i := 1; i <= 7; i++ {
+			items = append(items, hit(fmt.Sprintf("row-%d", i), "database", fmt.Sprintf("db-%d", i)))
+		}
+		fake := &fakeNotionClient{
+			searchResult: &notiontool.SearchResult{Items: items},
+			database:     &notiontool.Database{Title: "Some database"},
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, fake.gotDatabaseIDs).Length(5)
+
+		hits := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, hits).Length(7).Required()
+		for i, item := range hits {
+			gt.Value(t, item["parent_id"]).Equal(fmt.Sprintf("db-%d", i+1))
+			if i < 5 {
+				gt.Value(t, item["parent_database_name"]).Equal("Some database")
+				continue
+			}
+			gt.Value(t, item["parent_database_name"]).Equal("")
+		}
+	})
+
+	// A label that could not be read is not worth failing a search over.
+	t.Run("keeps the search successful when a name cannot be read", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			searchResult: &notiontool.SearchResult{Items: []notiontool.SearchItem{
+				hit("row-1", "database", "db-1"),
+			}},
+			databaseErr: goerr.New("notion database endpoint returned HTTP 404 (object_not_found)"),
+		}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(1)
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Value(t, items[0]["parent_id"]).Equal("db-1")
+		gt.Value(t, items[0]["parent_database_name"]).Equal("")
+	})
+
+	t.Run("does not retry a parent whose name already failed", func(t *testing.T) {
+		fake := &fakeNotionClient{
+			searchResult: &notiontool.SearchResult{Items: []notiontool.SearchItem{
+				hit("row-1", "database", "db-1"),
+				hit("row-2", "database", "db-1"),
+			}},
+			databaseErr: goerr.New("notion database endpoint returned HTTP 404 (object_not_found)"),
+		}
+
+		_, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+		gt.Array(t, fake.gotDatabaseIDs).Equal([]string{"db-1"})
+	})
+
+	// The count bound does not bound the wait: each lookup is an HTTP request
+	// under the client's own 30-second timeout. The search has already
+	// succeeded by this point, so the labels get a deadline and the answer does
+	// not wait past it.
+	t.Run("stops naming parents when the time budget runs out", func(t *testing.T) {
+		items := make([]notiontool.SearchItem, 0, 3)
+		for i := 1; i <= 3; i++ {
+			items = append(items, hit(fmt.Sprintf("row-%d", i), "database", fmt.Sprintf("db-%d", i)))
+		}
+		fake := &blockingNotionClient{
+			searchResult: &notiontool.SearchResult{Items: items},
+			release:      make(chan struct{}),
+		}
+		defer close(fake.release)
+
+		tool := notiontool.NewSearchToolWithNameBudgetForTest(fake, 20*time.Millisecond)
+		got, err := tool.Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		// The search still answers, with every id and no labels.
+		gt.Value(t, got["status"]).Equal("ok")
+		gt.Value(t, got["matched"]).Equal(3)
+
+		hits := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Array(t, hits).Length(3).Required()
+		for i, item := range hits {
+			gt.Value(t, item["parent_id"]).Equal(fmt.Sprintf("db-%d", i+1))
+			gt.Value(t, item["parent_database_name"]).Equal("")
+		}
+
+		// The deadline stopped the phase rather than letting it work through
+		// every parent.
+		gt.Number(t, fake.databaseCalls()).LessOrEqual(2)
+	})
+
+	t.Run("reports an unknown parent as empty rather than guessing", func(t *testing.T) {
+		fake := &fakeNotionClient{searchResult: &notiontool.SearchResult{Items: []notiontool.SearchItem{
+			{ID: "row-1", Type: "page"},
+		}}}
+
+		got, err := newTool(fake).Run(context.Background(), map[string]any{"query": "outage"})
+		gt.NoError(t, err).Required()
+
+		items := gt.Cast[[]map[string]any](t, got["items"])
+		gt.Value(t, items[0]["parent_type"]).Equal("")
+		gt.Value(t, items[0]["parent_id"]).Equal("")
+		gt.Array(t, fake.gotDatabaseIDs).Length(0)
 	})
 }
 

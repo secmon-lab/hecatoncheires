@@ -32,8 +32,8 @@ This document covers the Notion setup needed for those tools.
    - **Associated workspace**: pick the workspace that owns the pages/databases you want to expose.
    - **Type**: **Internal**.
 4. Under **Capabilities**, enable:
-   - **Read content** — required for both `Search` and the Markdown content endpoint.
-   - The other capabilities (Update content / Insert content / etc.) are **not** required for the agent tools.
+   - **Read content** — required for `Search`, the Markdown content endpoint, the database and data source reads, and the row query. Nothing else in this list is needed for the agent tools: Update content / Insert content / the comment capabilities are **not** required.
+   - **User information** (the *without email addresses* level is enough) — required **only** if you want `people`, `created_by` and `last_edited_by` column values to come back as names. With **No user information**, Notion's own documentation says "User objects will not include any information about the user", so those columns are reported as user ids instead. Nothing breaks either way, and the *including email addresses* level is never needed — no agent tool reads an email address.
 5. Click **Save**.
 6. Copy the **Internal Integration Token** (starts with `secret_…`). This is the value passed via `--notion-api-token` / `HECATONCHEIRES_NOTION_API_TOKEN`.
 
@@ -50,6 +50,8 @@ For each top-level page or database you want the agent to see:
 3. Notion grants the connection access to the page **and all of its descendants**, so it is usually enough to share a small number of root pages.
 
 Pages or child blocks that are **not** shared with the connection will appear as `<unknown>` placeholders in the Markdown output (a documented Notion API limitation).
+
+Sharing a database grants access to its data sources and its rows, so a database an agent is meant to search has to be shared exactly once, at the database. An unshared database is not silently empty: Notion answers `404 object_not_found`, which the tools surface as a failed call rather than as zero rows — see [Telling "nothing matched" apart from "the call did not happen"](#telling-nothing-matched-apart-from-the-call-did-not-happen) for why that distinction matters to a workflow that hands unanswerable requests to a person.
 
 ### 3. Configure the Server
 
@@ -80,7 +82,7 @@ Notion API token not configured, Source features will be limited
 
 | Tool | Endpoint | Notes |
 |------|----------|-------|
-| `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Each hit carries `read_tool`, naming the tool that reads it (`notion__get_page` or `notion__get_database`). Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
+| `notion__search` | `POST /v1/search`, plus up to 5 `GET /v1/databases/{id}` to name the parents | Title-substring match across all pages and databases shared with the integration — one substring, not several keywords, and never page bodies. Each hit carries `read_tool`, naming the tool that reads it (`notion__get_page` or `notion__get_database`), `search_tool` on a database hit, and its parent. Ordering by `last_edited_time` and pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
 | `notion__get_page` | `GET /v1/pages/{page_id}/markdown` | Returns Notion-flavored ("enhanced") Markdown rendered server-side by Notion. Requires `Notion-Version: 2026-03-11` (sent automatically by `pkg/agent/tool/notion/client.go`). |
 | `notion__get_database` | `GET /v1/databases/{database_id}`, `GET /v1/data_sources/{data_source_id}`, then `POST /v1/data_sources/{data_source_id}/query` | Three calls, because Notion's 2025-09-03 API split moved a database's rows into data sources: the first reports the data sources, the second reports the column schema, the third lists one data source's rows. The schema call is skipped when paging through a listing (`start_cursor` set) unless `describe_properties` asks for choices. All send `Notion-Version: 2026-03-11`. |
 | `notion__search_database` | The same three, with `filter` / `sorts` in the query body and `filter_properties` in its query string | Notion has no parent-scoped search endpoint — its own documentation says to use the data source query for that — so searching one database means filtering its rows here. The schema is read on every call, because the conditions are written against property names and types. |
@@ -90,6 +92,20 @@ Notion API token not configured, Source features will be limited
 `notion__search` reports databases alongside pages, but `notion__get_page` reads pages only — Notion answers a database id there with `400 validation_error: … is a database, not a page`. `notion__get_database` is what closes that gap: it returns the database's rows as `id` / `title` / `url` entries, and the agent then opens whichever row it needs with `notion__get_page`. Each search hit also carries `read_tool` naming the tool that reads it, so the routing is data the agent can follow rather than only prose in the tool descriptions.
 
 Since Notion's 2025-09-03 API version, a database does not hold its rows directly; it holds one or more **data sources** that do. Almost every database has exactly one, and the tool queries it without being asked. When a database has several, the tool returns no rows and reports the `data_sources` list instead, so the agent can call again with `data_source_id` set to the one it wants.
+
+#### Which database a search hit came from
+
+`POST /v1/search` takes no parent filter — Notion's documentation says to use the data source query for that — so a workspace-wide search returns hits from everywhere the integration can see. To make those hits usable when only one database counts as evidence, each one carries:
+
+- `parent_type` — `database`, `page`, `block`, `workspace`, or empty when Notion reported a kind this code does not model.
+- `parent_id` — the parent's id, always present except for a workspace-level page. This is what an agent compares against the database it cares about.
+- `parent_database_name` — the parent database's title, when the parent is a database.
+
+Notion does not include the parent's title in a search result, so each name is one extra `GET /v1/databases/{id}`. Distinct parents are resolved once each and **capped at 5 per search**, because Notion rate-limits at roughly three requests a second: past the cap, and for a parent whose read fails, the id is still reported and the name is left empty. A name that cannot be read is logged (through `errutil.Handle`) and never fails the search — the hit remains usable through its id.
+
+The whole naming phase also has a **5-second deadline**. The count alone does not bound the wait: each lookup runs under the client's own 30-second timeout and a rate-limited one waits and retries on top of that, so a few unresponsive parents could otherwise hold back a search that has already succeeded. When the deadline passes, the remaining parents keep their ids and lose only their labels, and the timeout is not reported as a failure.
+
+The search endpoint stays pinned to `Notion-Version: 2022-06-28`, which is the response shape the decoder is written against. That is also why a row's parent arrives as `database_id` rather than the `data_source_id` of Notion's 2025-09-03 split.
 
 #### Searching one database's rows
 
