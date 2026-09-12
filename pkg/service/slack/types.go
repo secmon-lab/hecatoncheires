@@ -56,7 +56,7 @@ type Service interface {
 	// AddBookmark adds a link bookmark to a Slack channel
 	AddBookmark(ctx context.Context, channelID, title, link string) error
 
-	// GetTeamURL retrieves the Slack workspace URL (e.g., "https://ubie.enterprise.slack.com/")
+	// GetTeamURL retrieves the Slack workspace URL (e.g., "https://example.enterprise.slack.com/")
 	// The result is cached for the lifetime of the service instance.
 	GetTeamURL(ctx context.Context) (string, error)
 

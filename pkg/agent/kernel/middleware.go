@@ -341,9 +341,9 @@ func (e *toolArgsFeedbackError) Unwrap() error { return e.cause }
 // goerr.Values. The diagnostic half of a tool failure lives there: a rejected
 // Jira search reaches the model as "Jira API returned non-2xx", while the reason
 // Jira gave — "Error in the JQL Query: Expecting either 'OR' or 'AND' but got
-// '...'" — sits in a `body` value the model never sees (ARGUS-96). A model told
-// only that its search failed re-emits the same broken query, exactly as the
-// unattributed argument rejection did in ARGUS-8S.
+// '...'" — sits in a `body` value the model never sees. A model told only that
+// its search failed re-emits the same broken query, exactly as the unattributed
+// argument rejection did.
 //
 // An argument rejection is deliberately left alone: toolArgsFeedbackMiddleware
 // already supplies that error's missing half, and the only value agentkit
