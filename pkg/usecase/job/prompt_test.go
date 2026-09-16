@@ -791,8 +791,9 @@ func newThreadModeWorkspace(t *testing.T) *model.WorkspaceEntry {
 }
 
 func TestBuildSystemPrompt_CaseState(t *testing.T) {
-	t.Run("a thread-mode case reports the board status it currently sits on", func(t *testing.T) {
+	t.Run("a thread-bound case reports the board status it currently sits on", func(t *testing.T) {
 		c := newCase(7)
+		c.SlackThreadTS = "1748000000.000100"
 		c.BoardStatus = "triage"
 		got, err := job.BuildSystemPrompt(job.PromptInputs{
 			Job:       caseCreatedJob(),
@@ -807,8 +808,24 @@ func TestBuildSystemPrompt_CaseState(t *testing.T) {
 		mustContain(t, got, "- status: OPEN")
 	})
 
-	t.Run("a channel-mode case omits the board status line entirely", func(t *testing.T) {
-		// A channel-mode Case has no board, so there is no column to name and a
+	t.Run("a thread-bound case with no board status still renders the line", func(t *testing.T) {
+		// A thread-bound case whose board status is empty is a real state —
+		// validate --check-db reports it as an inconsistency — so the line must
+		// say so rather than disappear, which would read as "not shown".
+		c := newCase(7)
+		c.SlackThreadTS = "1748000000.000100"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newThreadModeWorkspace(t),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- board_status: (empty)")
+	})
+
+	t.Run("a channel-bound case omits the board status line entirely", func(t *testing.T) {
+		// A channel-bound Case has no board, so there is no column to name and a
 		// placeholder would invent one.
 		got, err := job.BuildSystemPrompt(job.PromptInputs{
 			Job:       caseCreatedJob(),

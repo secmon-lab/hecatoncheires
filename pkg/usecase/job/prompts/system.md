@@ -58,7 +58,7 @@ the case already sits on the status you would move it to.
 - description: {{ .Description }}
 {{- end }}
 - status: {{ .Status }}
-{{- if .BoardStatus }}
+{{- if .IsThreadBound }}
 - board_status: {{ .BoardStatus }}
 {{- end }}
 - is_test: {{ .IsTest }}

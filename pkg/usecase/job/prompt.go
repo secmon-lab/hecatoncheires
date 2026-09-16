@@ -224,13 +224,18 @@ type systemPromptCase struct {
 	// Status is the LIFECYCLE status (DRAFT / OPEN / CLOSED), not the board
 	// column. BoardStatus below carries the column.
 	Status string
-	// BoardStatus is the case's current workflow column id, for thread-mode
-	// cases only. Channel-mode cases have no board, so it is empty there and the
-	// template omits the line rather than printing a placeholder for a concept
-	// that does not apply.
+	// BoardStatus is the case's current workflow column id, or emptyPlaceholder
+	// when it has none. It is rendered only for a thread-bound case, gated on
+	// IsThreadBound rather than on the value: a channel-bound case has no board,
+	// so a placeholder there would name a concept that does not apply, while a
+	// thread-bound case with no board status is a real and reportable state
+	// (checkCaseStatuses in pkg/usecase/validate.go flags it) that must not
+	// look like a line the prompt withheld.
 	BoardStatus string
-	IsTest      bool
-	IsPrivate   bool
+	// IsThreadBound gates the board_status line. See BoardStatus.
+	IsThreadBound bool
+	IsTest        bool
+	IsPrivate     bool
 	// ArchivedAt is the RFC3339 archive timestamp, or emptyPlaceholder when the
 	// case is not archived.
 	ArchivedAt  string
@@ -469,7 +474,8 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 			Title:                 c.Title,
 			Description:           c.Description,
 			Status:                c.Status.String(),
-			BoardStatus:           c.BoardStatus,
+			BoardStatus:           orEmptyPlaceholder(c.BoardStatus),
+			IsThreadBound:         c.IsThreadBound(),
 			IsTest:                c.IsTest,
 			IsPrivate:             c.IsPrivate,
 			ArchivedAt:            emptyPlaceholder,

@@ -655,7 +655,10 @@ func TestUpdateCaseStatusTool_Spec(t *testing.T) {
 }
 
 func TestUpdateCaseStatusTool(t *testing.T) {
-	uc := &fakeCaseUC{statusResp: &model.Case{ID: 42, Status: types.CaseStatusClosed, BoardStatus: "done"}}
+	uc := &fakeCaseUC{
+		statusResp:      &model.Case{ID: 42, Status: types.CaseStatusClosed, BoardStatus: "done"},
+		prevBoardStatus: "doing",
+	}
 	tl := newStatusTool(t, uc)
 
 	out, err := tl.Run(context.Background(), map[string]any{"case_id": int64(42), "status": "done"})
@@ -666,6 +669,26 @@ func TestUpdateCaseStatusTool(t *testing.T) {
 	gt.Number(t, out["id"].(int64)).Equal(int64(42))
 	gt.String(t, out["status"].(string)).Equal(types.CaseStatusClosed.String())
 	gt.String(t, out["board_status"].(string)).Equal("done")
+	gt.String(t, out["previous_board_status"].(string)).Equal("doing")
+	gt.Bool(t, out["changed"].(bool)).True()
+}
+
+func TestUpdateCaseStatusTool_ReportsANoOp(t *testing.T) {
+	// This tool builds its own result map, separate from the case-bound
+	// casewriter tool, so the no-op report has to be pinned on both. The usecase
+	// announces a board status change in the Slack thread only when the status
+	// actually changed, so the result is the only place a no-op shows up.
+	uc := &fakeCaseUC{
+		statusResp:      &model.Case{ID: 42, Status: types.CaseStatusOpen, BoardStatus: "doing"},
+		prevBoardStatus: "doing",
+	}
+	tl := newStatusTool(t, uc)
+
+	out, err := tl.Run(context.Background(), map[string]any{"case_id": int64(42), "status": "doing"})
+	gt.NoError(t, err).Required()
+	gt.String(t, out["board_status"].(string)).Equal("doing")
+	gt.String(t, out["previous_board_status"].(string)).Equal("doing")
+	gt.Bool(t, out["changed"].(bool)).False()
 }
 
 func TestUpdateCaseStatusTool_InvalidArguments(t *testing.T) {
