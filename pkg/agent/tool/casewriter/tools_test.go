@@ -28,7 +28,11 @@ type mockCaseUC struct {
 	unassignCalls []assignCall
 	closeCalls    int
 	resp          *model.Case
-	err           error
+	// prevBoardStatus is what UpdateCaseStatus reports as the status held before
+	// the write. Setting it equal to resp.BoardStatus models a call that moved
+	// nothing.
+	prevBoardStatus string
+	err             error
 }
 
 func (m *mockCaseUC) UpdateCase(ctx context.Context, workspaceID string, id int64, patch casewriter.CaseUpdate) (*model.Case, error) {
@@ -39,12 +43,12 @@ func (m *mockCaseUC) UpdateCase(ctx context.Context, workspaceID string, id int6
 	return m.resp, nil
 }
 
-func (m *mockCaseUC) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
+func (m *mockCaseUC) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error) {
 	m.statusCalls = append(m.statusCalls, statusCall{boardStatus: boardStatus})
 	if m.err != nil {
-		return nil, m.err
+		return nil, "", m.err
 	}
-	return m.resp, nil
+	return m.resp, m.prevBoardStatus, nil
 }
 
 func (m *mockCaseUC) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
@@ -397,6 +401,44 @@ func TestStatusTool_BuiltWithStatusSet(t *testing.T) {
 		_, err := statusTool.Run(context.Background(), map[string]any{})
 		gt.Error(t, err)
 		gt.Array(t, uc.statusCalls).Length(0)
+	})
+}
+
+func TestStatusTool_ReportsWhetherTheCallMovedTheCase(t *testing.T) {
+	// The tool's result is the only signal a no-op leaves: the usecase announces
+	// a board status change in the Slack thread only when the status actually
+	// changed, so a call that re-set the status the case already had produces
+	// nothing anywhere else for the agent to read.
+	t.Run("re-setting the status the case already has reports no change", func(t *testing.T) {
+		uc := &mockCaseUC{
+			resp:            &model.Case{ID: 5, Status: types.CaseStatusOpen, BoardStatus: "in_progress"},
+			prevBoardStatus: "in_progress",
+		}
+		tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 5, StatusSet: testStatusSet(t)})
+		statusTool := toolByName(t, tools, "case__update_case_status")
+		gt.Value(t, statusTool).NotNil().Required()
+
+		out, err := statusTool.Run(context.Background(), map[string]any{"status": "in_progress"})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, out["changed"].(bool)).False()
+		gt.String(t, out["previous_board_status"].(string)).Equal("in_progress")
+		gt.String(t, out["board_status"].(string)).Equal("in_progress")
+	})
+
+	t.Run("a real move reports the status held before the write", func(t *testing.T) {
+		uc := &mockCaseUC{
+			resp:            &model.Case{ID: 5, Status: types.CaseStatusClosed, BoardStatus: "closed"},
+			prevBoardStatus: "in_progress",
+		}
+		tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 5, StatusSet: testStatusSet(t)})
+		statusTool := toolByName(t, tools, "case__update_case_status")
+		gt.Value(t, statusTool).NotNil().Required()
+
+		out, err := statusTool.Run(context.Background(), map[string]any{"status": "closed"})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, out["changed"].(bool)).True()
+		gt.String(t, out["previous_board_status"].(string)).Equal("in_progress")
+		gt.String(t, out["board_status"].(string)).Equal("closed")
 	})
 }
 

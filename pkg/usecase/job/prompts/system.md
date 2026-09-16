@@ -41,7 +41,10 @@ do not assume any other value for "now".
 
 You may move the case to a different status with the `case__update_case_status`
 tool, passing one of these status ids. A status marked (closed) will close the
-case, so pick it only when the work is genuinely resolved.
+case, so pick it only when the work is genuinely resolved. This list is the set
+of ids you may choose from, NOT the case's current status: the current one is
+the `board_status` line in the `# Case` section below. Do not call the tool when
+the case already sits on the status you would move it to.
 {{- range .BoardStatuses }}
 - {{ .ID }}{{ if .Name }} — {{ .Name }}{{ end }}{{ if .Closed }} (closed){{ end }}{{ if .Description }}: {{ .Description }}{{ end }}
 {{- end }}
@@ -55,12 +58,19 @@ case, so pick it only when the work is genuinely resolved.
 - description: {{ .Description }}
 {{- end }}
 - status: {{ .Status }}
+{{- if .BoardStatus }}
+- board_status: {{ .BoardStatus }}
+{{- end }}
+- is_test: {{ .IsTest }}
+- is_private: {{ .IsPrivate }}
+- archived_at: {{ .ArchivedAt }}
 {{- if .ReporterID }}
 - reporter: {{ .ReporterID }}
 {{- end }}
 {{- if .AssigneeIDs }}
 - assignees: {{ join .AssigneeIDs ", " }}
 {{- end }}
+- channel_user_ids: {{ .ChannelUserIDs }}
 {{- if .SlackChannelID }}
 - slack_channel_id: {{ .SlackChannelID }}
 {{- end }}

@@ -112,8 +112,10 @@ type CaseUsecase interface {
 	CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 	// UpdateCaseStatus is invoked by case__update_case_status (thread-mode
 	// workspaces only). Board-status validation and the private-case access
-	// check both live in the usecase implementation.
-	UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error)
+	// check both live in the usecase implementation. The second return value is
+	// the board status the case held immediately before the write, which is what
+	// lets the tool report whether the call moved anything.
+	UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error)
 }
 
 // CaseUpdate mirrors the partial-update shape of usecase.CaseUpdate (compare
@@ -921,7 +923,10 @@ func (t *updateCaseStatusTool) Spec() gollem.ToolSpec {
 		Description: "Move a case to a different board status (workflow column). " +
 			"Transitioning to a status configured as closed will close the case, " +
 			"so only do this when the work is genuinely resolved. Choose one of the " +
-			"status ids listed below.",
+			"status ids listed below.\n\n" +
+			"Do not call this tool to set the status a case already has. The result " +
+			"reports previous_board_status and changed, so a call that moved nothing " +
+			"is recognisable as such afterwards.",
 		Parameters: map[string]*gollem.Parameter{
 			"case_id": {
 				Type:        gollem.TypeInteger,
@@ -957,7 +962,7 @@ func (t *updateCaseStatusTool) Run(ctx context.Context, args map[string]any) (ma
 
 	tool.Update(ctx, fmt.Sprintf("Updating status of case #%d...", caseID))
 
-	updated, err := t.deps.CaseUC.UpdateCaseStatus(ctx, t.deps.WorkspaceID, caseID, status)
+	updated, previous, err := t.deps.CaseUC.UpdateCaseStatus(ctx, t.deps.WorkspaceID, caseID, status)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update case status",
 			goerr.V("workspace_id", t.deps.WorkspaceID),
@@ -966,9 +971,14 @@ func (t *updateCaseStatusTool) Run(ctx context.Context, args map[string]any) (ma
 	}
 
 	return map[string]any{
-		"id":           updated.ID,
-		"status":       updated.Status.String(),
-		"board_status": updated.BoardStatus,
+		"id":     updated.ID,
+		"status": updated.Status.String(),
+		// See the casewriter tool: board_status holds the post-write value either
+		// way, so previous_board_status and changed are what make a no-op call
+		// recognisable afterwards.
+		"board_status":          updated.BoardStatus,
+		"previous_board_status": previous,
+		"changed":               previous != updated.BoardStatus,
 	}, nil
 }
 

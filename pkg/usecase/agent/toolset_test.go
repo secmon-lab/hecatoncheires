@@ -30,8 +30,8 @@ type stubCaseMutator struct{}
 func (stubCaseMutator) UpdateCase(context.Context, string, int64, casewriter.CaseUpdate) (*model.Case, error) {
 	return &model.Case{}, nil
 }
-func (stubCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) (*model.Case, error) {
-	return &model.Case{}, nil
+func (stubCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) (*model.Case, string, error) {
+	return &model.Case{}, "", nil
 }
 func (stubCaseMutator) CloseCase(context.Context, string, int64) (*model.Case, error) {
 	return &model.Case{}, nil

@@ -64,7 +64,10 @@ type fakeCaseUC struct {
 
 	statusCalls []updateStatusCall
 	statusResp  *model.Case
-	statusErr   error
+	// prevBoardStatus is what UpdateCaseStatus reports as the status held before
+	// the write.
+	prevBoardStatus string
+	statusErr       error
 }
 
 type updateStatusCall struct {
@@ -131,12 +134,12 @@ func (f *fakeCaseUC) CloseCase(_ context.Context, _ string, id int64) (*model.Ca
 	return f.closeResp, nil
 }
 
-func (f *fakeCaseUC) UpdateCaseStatus(_ context.Context, _ string, id int64, boardStatus string) (*model.Case, error) {
+func (f *fakeCaseUC) UpdateCaseStatus(_ context.Context, _ string, id int64, boardStatus string) (*model.Case, string, error) {
 	f.statusCalls = append(f.statusCalls, updateStatusCall{id: id, boardStatus: boardStatus})
 	if f.statusErr != nil {
-		return nil, f.statusErr
+		return nil, "", f.statusErr
 	}
-	return f.statusResp, nil
+	return f.statusResp, f.prevBoardStatus, nil
 }
 
 type createActionCall struct {

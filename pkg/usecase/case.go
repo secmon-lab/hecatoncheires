@@ -2039,27 +2039,34 @@ func (uc *CaseUseCase) MaterializeThreadCase(ctx context.Context, workspaceID st
 // case). It is the single entry point for both the Kanban drag-and-drop and
 // the agent's `close` decision; CaseLifecycleClosed is published only on the
 // open→closed edge so Jobs fire once.
-func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
+//
+// The second return value is the board status the case held immediately before
+// the write, read under the same load that produced the written case. It is
+// what lets a caller tell a real move from a re-assignment of the status the
+// case already had — a distinction the returned *model.Case cannot carry, since
+// it holds only the post-write value. Only the usecase sees the two together,
+// which is why it is returned rather than left to the caller to read back.
+func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error) {
 	set := uc.caseStatusSetForWorkspace(workspaceID)
 	if set == nil {
-		return nil, goerr.New("workspace has no case status set (not thread mode)",
+		return nil, "", goerr.New("workspace has no case status set (not thread mode)",
 			goerr.V("workspace_id", workspaceID))
 	}
 	if !set.IsValid(boardStatus) {
-		return nil, goerr.New("invalid board status id",
+		return nil, "", goerr.New("invalid board status id",
 			goerr.V("workspace_id", workspaceID), goerr.V("board_status", boardStatus))
 	}
 
 	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// The guard is on "is archived", not on "is the target column open": an
 	// archived case must not take board writes at all, so moving it between
 	// closed columns is rejected too. Unarchive it first.
 	if existing.IsArchived() {
-		return nil, goerr.Wrap(ErrCaseArchived, "archived case cannot change board status; unarchive it first", goerr.V(CaseIDKey, id))
+		return nil, "", goerr.Wrap(ErrCaseArchived, "archived case cannot change board status; unarchive it first", goerr.V(CaseIDKey, id))
 	}
 
 	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed
@@ -2070,7 +2077,7 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to update case status", goerr.V(CaseIDKey, id))
+		return nil, "", goerr.Wrap(err, "failed to update case status", goerr.V(CaseIDKey, id))
 	}
 
 	if !wasClosed && updated.Status.Normalize() == types.CaseStatusClosed {
@@ -2095,7 +2102,7 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 			i18n.T(ctx, i18n.MsgCaseChangeStatus, actor, label(beforeStatus), label(updated.BoardStatus)))
 	}
 
-	return updated, nil
+	return updated, beforeStatus, nil
 }
 
 // ListDrafts returns every draft case in the workspace. Drafts are

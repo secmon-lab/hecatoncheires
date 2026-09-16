@@ -78,7 +78,7 @@ func (a *caseMultiCaseAdapter) CloseCase(ctx context.Context, workspaceID string
 	return a.uc.CloseCase(ctx, workspaceID, id)
 }
 
-func (a *caseMultiCaseAdapter) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
+func (a *caseMultiCaseAdapter) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error) {
 	return a.uc.UpdateCaseStatus(ctx, workspaceID, id, boardStatus)
 }
 

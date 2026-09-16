@@ -37,7 +37,7 @@ func (a *caseToolAdapter) UpdateCase(ctx context.Context, workspaceID string, id
 	return a.uc.UpdateCase(ctx, workspaceID, id, in)
 }
 
-func (a *caseToolAdapter) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
+func (a *caseToolAdapter) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error) {
 	return a.uc.UpdateCaseStatus(ctx, workspaceID, id, boardStatus)
 }
 
