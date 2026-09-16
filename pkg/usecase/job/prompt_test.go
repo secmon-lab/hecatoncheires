@@ -749,14 +749,18 @@ func TestBuildSystemPrompt_BoardStatuses(t *testing.T) {
 		gt.NoError(t, err).Required()
 		mustContain(t, got, "# Board Statuses")
 		mustContain(t, got, "case__update_case_status")
+		// The list is a vocabulary, not a current value. Saying so here is what
+		// keeps it from being read as the case's present column.
+		mustContain(t, got, "NOT the case's current status")
+		mustContain(t, got, "`board_status` line in the `# Case` section")
 		// Each status surfaces id, name, and the reasoning-hint description.
 		mustContain(t, got, "- triage — Triage: Awaiting first assessment")
 		mustContain(t, got, "- resolved — Resolved (closed): Investigation is complete")
 		// The first status item must start on its own line, not glued onto the
 		// trailing instruction sentence ({{- range}} trims the blank line before
 		// it, but the range body's own leading newline still separates them).
-		mustContain(t, got, "genuinely resolved.\n- triage")
-		mustNotContain(t, got, "resolved.- triage")
+		mustContain(t, got, "you would move it to.\n- triage")
+		mustNotContain(t, got, "move it to.- triage")
 	})
 
 	t.Run("board statuses section is omitted when no status set is defined", func(t *testing.T) {
@@ -768,6 +772,244 @@ func TestBuildSystemPrompt_BoardStatuses(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 		mustNotContain(t, got, "# Board Statuses")
+	})
+}
+
+// newThreadModeWorkspace returns a thread-mode workspace with a two-status case
+// board, the configuration under which a Case carries a BoardStatus.
+func newThreadModeWorkspace(t *testing.T) *model.WorkspaceEntry {
+	t.Helper()
+	statusSet, err := model.NewActionStatusSet("triage", []string{"resolved"}, []model.ActionStatusDefinition{
+		{ID: "triage", Name: "Triage", Description: "Awaiting first assessment"},
+		{ID: "resolved", Name: "Resolved", Description: "Investigation is complete"},
+	})
+	gt.NoError(t, err).Required()
+	ws := newWorkspace("ws", "WS")
+	ws.CaseMode = model.CaseModeThread
+	ws.CaseStatusSet = statusSet
+	return ws
+}
+
+func TestBuildSystemPrompt_CaseState(t *testing.T) {
+	t.Run("a thread-bound case reports the board status it currently sits on", func(t *testing.T) {
+		c := newCase(7)
+		c.SlackThreadTS = "1748000000.000100"
+		c.BoardStatus = "triage"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newThreadModeWorkspace(t),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- board_status: triage")
+		// The lifecycle status is a separate line and keeps its own value; the
+		// two must not be conflated.
+		mustContain(t, got, "- status: OPEN")
+	})
+
+	t.Run("a thread-bound case with no board status still renders the line", func(t *testing.T) {
+		// A thread-bound case whose board status is empty is a real state —
+		// validate --check-db reports it as an inconsistency — so the line must
+		// say so rather than disappear, which would read as "not shown".
+		c := newCase(7)
+		c.SlackThreadTS = "1748000000.000100"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newThreadModeWorkspace(t),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- board_status: (empty)")
+	})
+
+	t.Run("a channel-bound case omits the board status line entirely", func(t *testing.T) {
+		// A channel-bound Case has no board, so there is no column to name and a
+		// placeholder would invent one.
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "- board_status:")
+		mustContain(t, got, "- status: OPEN")
+	})
+
+	t.Run("is_test and is_private are rendered even when false", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- is_test: false")
+		mustContain(t, got, "- is_private: false")
+	})
+
+	t.Run("is_test and is_private report true when set", func(t *testing.T) {
+		c := newCase(7)
+		c.IsTest = true
+		c.IsPrivate = true
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- is_test: true")
+		mustContain(t, got, "- is_private: true")
+	})
+
+	t.Run("an archived case is distinguishable from a live one", func(t *testing.T) {
+		live, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, live, "- archived_at: (empty)")
+
+		c := newCase(7)
+		archivedAt := time.Date(2026, 6, 1, 8, 30, 0, 0, time.UTC)
+		c.ArchivedAt = &archivedAt
+		archived, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, archived, "- archived_at: 2026-06-01T08:30:00Z")
+	})
+
+	t.Run("channel members are joined onto one line", func(t *testing.T) {
+		c := newCase(7)
+		c.ChannelUserIDs = []string{"U-M1", "U-M2"}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- channel_user_ids: U-M1, U-M2")
+	})
+
+	t.Run("a case with no channel members still renders the line", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- channel_user_ids: (empty)")
+	})
+
+	t.Run("runtime-only and bookkeeping fields stay out of the prompt", func(t *testing.T) {
+		c := newCase(7)
+		c.AccessDenied = true
+		c.RequestKey = "8e0b1f2c-request-key"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "access_denied")
+		mustNotContain(t, got, "8e0b1f2c-request-key")
+	})
+}
+
+func TestBuildSystemPrompt_CaseFieldValueCoverage(t *testing.T) {
+	t.Run("every schema field gets a line, in schema order, whether or not it holds a value", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- field_values:\n"+
+			"  - severity: high (High)\n"+
+			"  - affected_systems: (empty)\n"+
+			"  - notes: (empty)\n")
+	})
+
+	t.Run("the section renders for a case with no values at all", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- field_values:\n"+
+			"  - severity: (empty)\n"+
+			"  - affected_systems: (empty)\n"+
+			"  - notes: (empty)\n")
+	})
+
+	t.Run("a stored value whose field the schema no longer declares is still rendered", func(t *testing.T) {
+		// Left over from a configuration change: dropping the line would hide
+		// data the case still carries.
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"retired_owner": {FieldID: "retired_owner", Type: types.FieldTypeText, Value: "U-OWNER"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		// Schema fields come first, in schema order; the orphan follows.
+		mustContain(t, got, "- field_values:\n"+
+			"  - severity: (empty)\n"+
+			"  - affected_systems: (empty)\n"+
+			"  - notes: (empty)\n"+
+			"  - retired_owner: U-OWNER\n")
+	})
+
+	t.Run("a workspace with no field schema renders only the stored values", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"b_field": {FieldID: "b_field", Type: types.FieldTypeText, Value: "second"},
+			"a_field": {FieldID: "a_field", Type: types.FieldTypeText, Value: "first"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- field_values:\n"+
+			"  - a_field: first\n"+
+			"  - b_field: second\n")
+	})
+
+	t.Run("the section is omitted when there is neither a schema nor a stored value", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "- field_values:")
 	})
 }
 

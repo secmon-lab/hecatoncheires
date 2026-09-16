@@ -210,13 +210,40 @@ type systemPromptKV struct {
 	Value string
 }
 
+// emptyPlaceholder stands in for a value that is genuinely unset. The Job agent
+// has no tool to read its case back, so a line omitted because the value is
+// empty is indistinguishable to it from a line the prompt never renders; the
+// placeholder keeps "no value" and "not shown" apart. Matches the placeholder
+// the thread-mode mention prompt uses (pkg/usecase/agent/threadcase/prompt.go).
+const emptyPlaceholder = "(empty)"
+
 type systemPromptCase struct {
-	ID                    int64
-	Title                 string
-	Description           string
-	Status                string
-	ReporterID            string
-	AssigneeIDs           []string
+	ID          int64
+	Title       string
+	Description string
+	// Status is the LIFECYCLE status (DRAFT / OPEN / CLOSED), not the board
+	// column. BoardStatus below carries the column.
+	Status string
+	// BoardStatus is the case's current workflow column id, or emptyPlaceholder
+	// when it has none. It is rendered only for a thread-bound case, gated on
+	// IsThreadBound rather than on the value: a channel-bound case has no board,
+	// so a placeholder there would name a concept that does not apply, while a
+	// thread-bound case with no board status is a real and reportable state
+	// (checkCaseStatuses in pkg/usecase/validate.go flags it) that must not
+	// look like a line the prompt withheld.
+	BoardStatus string
+	// IsThreadBound gates the board_status line. See BoardStatus.
+	IsThreadBound bool
+	IsTest        bool
+	IsPrivate     bool
+	// ArchivedAt is the RFC3339 archive timestamp, or emptyPlaceholder when the
+	// case is not archived.
+	ArchivedAt  string
+	ReporterID  string
+	AssigneeIDs []string
+	// ChannelUserIDs is the case's channel members, already joined into one
+	// comma-separated line, or emptyPlaceholder when there are none.
+	ChannelUserIDs        string
 	SlackChannelID        string
 	SlackThreadTS         string
 	CreatedAt             string
@@ -312,6 +339,12 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 	// in sync.
 	fieldMetaByID := map[string]fieldMeta{}
 
+	// fieldOrder is the workspace schema's declaration order. The Case section
+	// renders one field_values line per entry here, whether or not the case
+	// carries a value for it, so the order is part of the rendered output and
+	// not just a lookup key set.
+	var fieldOrder []string
+
 	if ws := in.Workspace; ws != nil {
 		data.Workspace = systemPromptWorkspace{
 			ID:          ws.Workspace.ID,
@@ -341,6 +374,7 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 					})
 				}
 				fieldMetaByID[f.ID] = meta
+				fieldOrder = append(fieldOrder, f.ID)
 				data.Workspace.Fields = append(data.Workspace.Fields, field)
 			}
 		}
@@ -440,33 +474,27 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 			Title:                 c.Title,
 			Description:           c.Description,
 			Status:                c.Status.String(),
+			BoardStatus:           orEmptyPlaceholder(c.BoardStatus),
+			IsThreadBound:         c.IsThreadBound(),
+			IsTest:                c.IsTest,
+			IsPrivate:             c.IsPrivate,
+			ArchivedAt:            emptyPlaceholder,
 			ReporterID:            c.ReporterID,
 			AssigneeIDs:           append([]string(nil), c.AssigneeIDs...),
+			ChannelUserIDs:        orEmptyPlaceholder(strings.Join(c.ChannelUserIDs, ", ")),
 			SlackChannelID:        c.SlackChannelID,
 			SlackThreadTS:         c.SlackThreadTS,
 			AgentAdditionalPrompt: c.AgentAdditionalPrompt,
+			FieldValues:           caseFieldValues(c.FieldValues, fieldOrder, fieldMetaByID),
+		}
+		if c.ArchivedAt != nil {
+			cs.ArchivedAt = c.ArchivedAt.UTC().Format(time.RFC3339)
 		}
 		if !c.CreatedAt.IsZero() {
 			cs.CreatedAt = c.CreatedAt.UTC().Format(time.RFC3339)
 		}
 		if !c.UpdatedAt.IsZero() {
 			cs.UpdatedAt = c.UpdatedAt.UTC().Format(time.RFC3339)
-		}
-		if len(c.FieldValues) > 0 {
-			keys := make([]string, 0, len(c.FieldValues))
-			for k := range c.FieldValues {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				v := c.FieldValues[k]
-				meta := fieldMetaByID[k]
-				cs.FieldValues = append(cs.FieldValues, systemPromptFieldValue{
-					ID:       k,
-					Value:    formatFieldValue(meta.fieldType, v.Value),
-					Resolved: resolveFieldValueOptions(meta, v.Value),
-				})
-			}
 		}
 		data.Case = cs
 	}
@@ -572,6 +600,58 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 	}
 
 	return data
+}
+
+// orEmptyPlaceholder substitutes emptyPlaceholder for an empty string so an
+// always-rendered line never reads as a blank value.
+func orEmptyPlaceholder(s string) string {
+	if s == "" {
+		return emptyPlaceholder
+	}
+	return s
+}
+
+// caseFieldValues renders one line per field the workspace schema declares, in
+// schema order, followed by any stored value whose field id the schema no
+// longer declares (left over from a configuration change), sorted by id so the
+// prompt is stable across runs.
+//
+// A field with no stored value is rendered as emptyPlaceholder rather than
+// skipped. Walking the stored map instead — which is what this used to do —
+// emits no line at all for an unset field, and the agent has no tool to read
+// the case back, so it cannot tell an unset field from one the prompt withheld.
+func caseFieldValues(stored map[string]model.FieldValue, order []string, metaByID map[string]fieldMeta) []systemPromptFieldValue {
+	out := make([]systemPromptFieldValue, 0, len(order)+len(stored))
+	declared := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		declared[id] = struct{}{}
+		out = append(out, caseFieldValue(id, stored, metaByID))
+	}
+
+	orphans := make([]string, 0, len(stored))
+	for id := range stored {
+		if _, ok := declared[id]; !ok {
+			orphans = append(orphans, id)
+		}
+	}
+	sort.Strings(orphans)
+	for _, id := range orphans {
+		out = append(out, caseFieldValue(id, stored, metaByID))
+	}
+	return out
+}
+
+func caseFieldValue(id string, stored map[string]model.FieldValue, metaByID map[string]fieldMeta) systemPromptFieldValue {
+	v, ok := stored[id]
+	if !ok {
+		return systemPromptFieldValue{ID: id, Value: emptyPlaceholder}
+	}
+	meta := metaByID[id]
+	return systemPromptFieldValue{
+		ID:       id,
+		Value:    orEmptyPlaceholder(formatFieldValue(meta.fieldType, v.Value)),
+		Resolved: resolveFieldValueOptions(meta, v.Value),
+	}
 }
 
 // fieldMeta is the small lookup shape buildSystemPromptData uses to

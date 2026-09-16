@@ -3445,7 +3445,7 @@ func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
 		c, err := uc.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REP", "t", "b", nil, "")
 		gt.NoError(t, err).Required()
 
-		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "in_review")
+		updated, _, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "in_review")
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.BoardStatus).Equal("in_review")
 		gt.Value(t, updated.Status).Equal(types.CaseStatusOpen)
@@ -3458,7 +3458,7 @@ func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
 		c, err := uc.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000200", "U-REP", "t", "b", nil, "")
 		gt.NoError(t, err).Required()
 
-		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		updated, _, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.BoardStatus).Equal("done")
 		gt.Value(t, updated.Status).Equal(types.CaseStatusClosed)
@@ -3470,7 +3470,7 @@ func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
 		c, err := uc.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000300", "U-REP", "t", "b", nil, "")
 		gt.NoError(t, err).Required()
 
-		_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "bogus")
+		_, _, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "bogus")
 		gt.Error(t, err)
 	})
 
@@ -3483,7 +3483,7 @@ func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
 		created, err := repo.Case().Create(ctx, "chan", &model.Case{ReporterID: "U", Title: "x", SlackChannelID: "C1"})
 		gt.NoError(t, err).Required()
 
-		_, err = uc.UpdateCaseStatus(ctx, "chan", created.ID, "anything")
+		_, _, err = uc.UpdateCaseStatus(ctx, "chan", created.ID, "anything")
 		gt.Error(t, err)
 	})
 }
@@ -4711,7 +4711,7 @@ func TestCaseUseCase_ArchiveCase_SlackNotification(t *testing.T) {
 
 		// A thread-mode case closes by moving to a closed board status; drive
 		// the real path so the case reaches CLOSED the way production does.
-		closed, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		closed, _, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.NoError(t, err).Required()
 		gt.Value(t, closed.Status).Equal(types.CaseStatusClosed)
 		slackMock.threadCalls = nil
@@ -4732,7 +4732,7 @@ func TestCaseUseCase_ArchiveCase_SlackNotification(t *testing.T) {
 		ctx := archiveTestCtx()
 		uc, slackMock, created, _ := newThreadNotifyCase(t, ctx)
 
-		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		_, _, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.NoError(t, err).Required()
 		_, err = uc.ArchiveCase(ctx, "support", created.ID)
 		gt.NoError(t, err).Required()
@@ -4777,7 +4777,7 @@ func TestCaseUseCase_ArchiveCase_SlackNotification(t *testing.T) {
 		ctx := archiveTestCtx()
 		uc, slackMock, created, repo := newThreadNotifyCase(t, ctx)
 
-		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		_, _, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.NoError(t, err).Required()
 		slackMock.threadCalls = nil
 		slackMock.postThreadErr = errors.New("slack is down")
@@ -5044,12 +5044,12 @@ func TestCaseUseCase_ArchivedCaseCannotReturnToOpen(t *testing.T) {
 		ctx := archiveTestCtx()
 		uc, _, created, repo := newThreadNotifyCase(t, ctx)
 
-		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		_, _, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.NoError(t, err).Required()
 		_, err = uc.ArchiveCase(ctx, "support", created.ID)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "triage")
+		_, _, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "triage")
 		gt.Error(t, err).Is(usecase.ErrCaseArchived)
 
 		stored, getErr := repo.Case().Get(ctx, "support", created.ID)
@@ -5064,12 +5064,12 @@ func TestCaseUseCase_ArchivedCaseCannotReturnToOpen(t *testing.T) {
 		ctx := archiveTestCtx()
 		uc, _, created, repo := newThreadNotifyCase(t, ctx)
 
-		_, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		_, _, err := uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.NoError(t, err).Required()
 		_, err = uc.ArchiveCase(ctx, "support", created.ID)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
+		_, _, err = uc.UpdateCaseStatus(ctx, "support", created.ID, "done")
 		gt.Error(t, err).Is(usecase.ErrCaseArchived)
 
 		stored, getErr := repo.Case().Get(ctx, "support", created.ID)
@@ -5391,20 +5391,75 @@ func TestCaseUseCase_ThreadChangeNotification(t *testing.T) {
 		ctx := tokenCtx()
 		uc, slackMock, c, _ := newThreadNotifyCase(t, ctx)
 
-		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		updated, previous, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.BoardStatus).Equal("done")
 		gt.Value(t, updated.Status).Equal(types.CaseStatusClosed)
+		// The reported previous status is the one the announcement was derived
+		// from, so a caller can reconstruct the same decision the thread line made.
+		gt.Value(t, previous).Equal("triage")
 
 		gt.Array(t, slackMock.threadCalls).Length(1).Required()
 		assertThreadContextLine(t, slackMock.threadCalls[0], "C-MONITOR", c.SlackThreadTS,
 			i18n.T(ctx, i18n.MsgCaseChangeStatus, actor, "Triage", "Done"))
 
-		// Setting the same status again is not a change.
+		// Setting the same status again is not a change. The returned previous
+		// status now equals the written one, which is the only signal such a call
+		// leaves — nothing is announced in the thread.
 		slackMock.threadCalls = nil
-		_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		reset, previous, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
 		gt.NoError(t, err).Required()
 		gt.Array(t, slackMock.threadCalls).Length(0)
+		gt.Value(t, previous).Equal("done")
+		gt.Value(t, reset.BoardStatus).Equal("done")
+	})
+
+	t.Run("re-setting the same board status leaves UpdatedAt where it was", func(t *testing.T) {
+		// The home dashboard derives its stalled flag and two orderings from
+		// UpdatedAt, so a scheduled Job re-setting the same status every morning
+		// must not keep the case looking freshly worked on.
+		ctx := tokenCtx()
+		uc, _, c, _ := newThreadNotifyCase(t, ctx)
+
+		moved, _, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		movedAt := moved.UpdatedAt
+		gt.Bool(t, movedAt.After(c.UpdatedAt)).True()
+
+		again, previous, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, previous).Equal("done")
+		gt.Bool(t, again.UpdatedAt.Equal(movedAt)).True()
+
+		// A real move after the no-op still advances it.
+		reopened, _, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "triage")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, reopened.UpdatedAt.After(movedAt)).True()
+	})
+
+	t.Run("a lifecycle status that drifted from the board status is repaired and stamped", func(t *testing.T) {
+		// validate --check-db reports this state as lifecycle_mismatch and never
+		// repairs it. Re-setting the board status the case already holds is a
+		// real change here, so UpdatedAt moves even though the column did not.
+		ctx := tokenCtx()
+		uc, _, c, repo := newThreadNotifyCase(t, ctx)
+
+		drifted, _, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, drifted.Status).Equal(types.CaseStatusClosed)
+		stampedAt := drifted.UpdatedAt
+
+		// Write the inconsistent state directly: no usecase path produces it.
+		drifted.Status = types.CaseStatusOpen
+		_, err = repo.Case().Update(ctx, "support", drifted)
+		gt.NoError(t, err).Required()
+
+		repaired, previous, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, previous).Equal("done")
+		gt.Value(t, repaired.BoardStatus).Equal("done")
+		gt.Value(t, repaired.Status).Equal(types.CaseStatusClosed)
+		gt.Bool(t, repaired.UpdatedAt.After(stampedAt)).True()
 	})
 
 	t.Run("an empty board status renders as a dash and an unknown one as its raw id", func(t *testing.T) {
@@ -5426,7 +5481,7 @@ func TestCaseUseCase_ThreadChangeNotification(t *testing.T) {
 				_, err = repo.Case().Update(ctx, "support", stored)
 				gt.NoError(t, err).Required()
 
-				_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+				_, _, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
 				gt.NoError(t, err).Required()
 
 				gt.Array(t, slackMock.threadCalls).Length(1).Required()
@@ -5442,7 +5497,7 @@ func TestCaseUseCase_ThreadChangeNotification(t *testing.T) {
 
 		// The agent tool path dispatches with no auth token.
 		agentCtx := context.Background()
-		_, err := uc.UpdateCaseStatus(agentCtx, "support", c.ID, "done")
+		_, _, err := uc.UpdateCaseStatus(agentCtx, "support", c.ID, "done")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, slackMock.threadCalls).Length(1).Required()

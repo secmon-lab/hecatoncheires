@@ -678,7 +678,9 @@ func (r *mutationResolver) BulkUnarchiveCases(ctx context.Context, workspaceID s
 
 // UpdateCaseStatus is the resolver for the updateCaseStatus field.
 func (r *mutationResolver) UpdateCaseStatus(ctx context.Context, workspaceID string, input graphql1.UpdateCaseStatusInput) (*graphql1.Case, error) {
-	updated, err := r.UseCases.Case.UpdateCaseStatus(ctx, workspaceID, int64(input.ID), input.Status)
+	// The usecase also reports the board status held before the write; the
+	// GraphQL Case type carries only the current state, so it is discarded here.
+	updated, _, err := r.UseCases.Case.UpdateCaseStatus(ctx, workspaceID, int64(input.ID), input.Status)
 	if err != nil {
 		return nil, err
 	}
