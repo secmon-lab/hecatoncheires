@@ -2041,11 +2041,11 @@ func (uc *CaseUseCase) MaterializeThreadCase(ctx context.Context, workspaceID st
 // open→closed edge so Jobs fire once.
 //
 // The second return value is the board status the case held immediately before
-// the write, read under the same load that produced the written case. It is
+// the write. It is computed inside the transaction against the very state the
+// write is applied to, so it describes exactly what was persisted — which is
 // what lets a caller tell a real move from a re-assignment of the status the
-// case already had — a distinction the returned *model.Case cannot carry, since
-// it holds only the post-write value. Only the usecase sees the two together,
-// which is why it is returned rather than left to the caller to read back.
+// case already had, a distinction the returned *model.Case cannot carry since
+// it holds only the post-write value.
 func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, string, error) {
 	set := uc.caseStatusSetForWorkspace(workspaceID)
 	if set == nil {
@@ -2057,25 +2057,54 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 			goerr.V("workspace_id", workspaceID), goerr.V("board_status", boardStatus))
 	}
 
-	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
-	if err != nil {
+	// Fail fast through the shared read gate, the same way AssignCase does: it is
+	// what turns a missing case into ErrCaseNotFound and a private case into
+	// ErrAccessDenied, which callers (GraphQL error mapping, agent tools)
+	// discriminate on. The transaction below re-checks access on the state it
+	// actually writes, so this read is never the basis for anything persisted or
+	// announced.
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id); err != nil {
 		return nil, "", err
 	}
 
-	// The guard is on "is archived", not on "is the target column open": an
-	// archived case must not take board writes at all, so moving it between
-	// closed columns is rejected too. Unarchive it first.
-	if existing.IsArchived() {
-		return nil, "", goerr.Wrap(ErrCaseArchived, "archived case cannot change board status; unarchive it first", goerr.V(CaseIDKey, id))
-	}
+	actorID, checkAccess := tokenActor(ctx)
+	var beforeStatus string
+	var wasClosed bool
+	updated, err := uc.repo.Case().Transact(ctx, workspaceID, id, func(c *model.Case) error {
+		// Reset: Firestore may re-run this closure, and leftover values from a
+		// previous attempt would announce a transition this attempt did not make.
+		beforeStatus = ""
+		wasClosed = false
+		if err := assertCaseWriteAccess(c, actorID, checkAccess); err != nil {
+			return err
+		}
+		// The guard is on "is archived", not on "is the target column open": an
+		// archived case must not take board writes at all, so moving it between
+		// closed columns is rejected too. Unarchive it first.
+		if c.IsArchived() {
+			return goerr.Wrap(ErrCaseArchived, "archived case cannot change board status; unarchive it first", goerr.V(CaseIDKey, id))
+		}
 
-	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed
-	beforeStatus := existing.BoardStatus
-	existing.BoardStatus = boardStatus
-	existing.SyncLifecycleFromBoardStatus(set)
-	existing.UpdatedAt = time.Now().UTC()
+		beforeStatus = c.BoardStatus
+		wasClosed = c.Status.Normalize() == types.CaseStatusClosed
+		beforeLifecycle := c.Status
+		c.BoardStatus = boardStatus
+		c.SyncLifecycleFromBoardStatus(set)
 
-	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+		// UpdatedAt moves only when this write actually changed the case.
+		// Re-assigning the status a case already holds must leave it looking
+		// untouched: the home dashboard derives its "stalled" flag and two
+		// orderings from this field, so a scheduled Job re-setting the same status
+		// every morning would otherwise keep the case looking freshly worked on
+		// forever. The lifecycle half of the condition covers the repair case — a
+		// case whose board status is right but whose lifecycle status drifted
+		// (what validate --check-db reports as lifecycle_mismatch) is genuinely
+		// changed by this write, so it is stamped.
+		if beforeStatus != c.BoardStatus || beforeLifecycle != c.Status {
+			c.UpdatedAt = time.Now().UTC()
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, "", goerr.Wrap(err, "failed to update case status", goerr.V(CaseIDKey, id))
 	}
@@ -2084,6 +2113,9 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 		uc.publishLifecycle(ctx, workspaceID, updated, model.CaseLifecycleClosed)
 	}
 
+	// beforeStatus was captured inside the transaction against the very state
+	// that was written, so a concurrent move of the same case cannot make this
+	// announce a transition it did not make.
 	if beforeStatus != updated.BoardStatus {
 		actor := i18n.T(ctx, i18n.MsgChangeActorSystem)
 		if tok, terr := auth.TokenFromContext(ctx); terr == nil && tok.Sub != "" {
