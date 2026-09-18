@@ -112,6 +112,8 @@ Required fields you cannot infer may be left out — the review UI blocks submit
 The user has switched the active workspace on an existing draft. Produce the draft for the new workspace from the conversation already in your context — do not investigate further and do not ask again for content the user has already given you. You SHOULD still call `get_workspace` for the new workspace so the field values match its schema.
 {{- end }}
 
+{{ .SlackFormat }}
+
 ## Workspaces (choose one)
 
 {{ if .Workspaces -}}

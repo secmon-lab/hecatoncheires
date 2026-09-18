@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/gt"
 	slackgo "github.com/slack-go/slack"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 )
 
@@ -143,6 +144,17 @@ func TestPostToCaseChannel_NoChannelParameter(t *testing.T) {
 	gt.Bool(t, hasChannel).False()
 	_, hasChannel2 := spec.Parameters["channel"]
 	gt.Bool(t, hasChannel2).False()
+}
+
+func TestPostToCaseChannel_TextArgumentStatesTheSlackSyntax(t *testing.T) {
+	// The Job agent composes this argument itself, and the text goes to Slack
+	// unchanged. Without the rules on the argument, a model that writes Markdown
+	// puts headings and pipe tables into the channel as literal characters.
+	p := &mockPoster{}
+	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: "C"})
+	text := tools[0].Spec().Parameters["text"]
+	gt.Value(t, text).NotNil().Required()
+	gt.String(t, text.Description).Contains(slackfmt.ToolHint())
 }
 
 func TestPostToCaseChannel_PropagatesError(t *testing.T) {

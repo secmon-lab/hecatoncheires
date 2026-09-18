@@ -14,6 +14,7 @@ import (
 
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
@@ -46,6 +47,11 @@ type durablePromptInput struct {
 	// different workspace, which is answered from the conversation rather than by
 	// investigating again.
 	WorkspaceSwitch bool
+	// SlackFormat is the shared Slack message formatting section
+	// (slackfmt.Section()). This host's terminal output is a draft rather than a
+	// message, but the question it may ask instead is posted to the thread: the
+	// reason line renders as mrkdwn, and the per-item labels render as plain_text.
+	SlackFormat string
 }
 
 // renderDurablePrompt builds the persona prompt for one turn.
@@ -61,6 +67,7 @@ func renderDurablePrompt(registry *model.WorkspaceRegistry, wsSwitch bool) (stri
 	if err := durablePromptTmpl.Execute(&buf, durablePromptInput{
 		Workspaces:      workspacePromptEntries(registry),
 		WorkspaceSwitch: wsSwitch,
+		SlackFormat:     slackfmt.Section(),
 	}); err != nil {
 		return "", goerr.Wrap(err, "render the case-draft prompt")
 	}

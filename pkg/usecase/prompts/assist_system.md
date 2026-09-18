@@ -37,15 +37,7 @@ Next Steps: {{.NextSteps}}{{end}}
 
 {{if .Language}}## Language
 You MUST respond and write all messages in {{.Language}}.
-{{end}}## User Instructions
-{{.AssistPrompt}}
+{{end}}{{ .SlackFormat }}
 
-## Formatting
-When posting messages to Slack, use Slack's mrkdwn format:
-- Bold: *bold text*
-- Italic: _italic text_
-- Code inline: `code`
-- Code block: ```code block```
-- Blockquote: > quoted text
-- Links: <https://example.com|display text>
-- Do NOT use Markdown headers (#), bold (**), or [link](url) syntax.
+## User Instructions
+{{.AssistPrompt}}

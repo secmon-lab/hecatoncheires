@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -151,6 +152,33 @@ func TestBuildSystemPrompt_CreateInstruction(t *testing.T) {
 	mention := threadcase.BuildSystemPromptForTest(c, ws, threadcase.ModeMention, instruction)
 	gt.Bool(t, strings.Contains(mention, "# Trigger context")).False()
 	gt.Bool(t, strings.Contains(mention, instruction)).False()
+}
+
+// A reply, and every question this host asks, are posted to the Slack thread, so
+// the shared Slack formatting rules have to reach the run in every mode. They sit
+// before the operator-supplied sections, which stay the last word of the prompt.
+func TestBuildSystemPrompt_SlackFormatInEveryMode(t *testing.T) {
+	ws := newThreadWorkspace()
+	ws.CaseCreatePrompt = "Ask for the affected region."
+
+	for _, tc := range []struct {
+		name string
+		c    *model.Case
+		mode threadcase.Mode
+	}{
+		{"mention", newThreadCase(), threadcase.ModeMention},
+		{"materialize", newThreadCase(), threadcase.ModeMaterialize},
+		{"create", nil, threadcase.ModeCreate},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := threadcase.BuildSystemPromptForTest(tc.c, ws, tc.mode, "")
+			gt.String(t, prompt).Contains(slackfmt.Section())
+		})
+	}
+
+	// The workspace-supplied create instructions stay after the shared section.
+	created := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, "")
+	gt.Bool(t, strings.Index(created, slackfmt.Section()) < strings.Index(created, ws.CaseCreatePrompt)).True()
 }
 
 // The ModeCreate field-schema block must give the planner the hints it needs to

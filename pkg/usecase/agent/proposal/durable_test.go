@@ -18,6 +18,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -693,6 +694,22 @@ func TestDurableStartsATriggerlessWorkspaceSwitch(t *testing.T) {
 	res, err := h.agent.StartTurn(ctx, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(proposal.StatusStarted)
+}
+
+// This host's terminal output is a draft, but the question it may ask instead is
+// posted into the Slack thread: the reason line renders as mrkdwn and the item
+// labels render as plain_text, so the shared Slack formatting rules have to reach
+// the run here too.
+func TestDurablePromptCarriesTheSlackFormatting(t *testing.T) {
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(draftWorkspace())
+
+	for _, wsSwitch := range []bool{false, true} {
+		got, err := proposal.RenderDurablePromptForTest(registry, wsSwitch)
+		gt.NoError(t, err).Required()
+		gt.String(t, got).Contains(slackfmt.Section())
+		gt.Bool(t, strings.Contains(got, "{{")).False()
+	}
 }
 
 func TestNewDurableRejectsMissingDependencies(t *testing.T) {

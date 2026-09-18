@@ -17,6 +17,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/budget"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -506,8 +507,24 @@ func TestBuildSystemPrompt_CaseAndFieldValues(t *testing.T) {
 	gt.String(t, prompt).Contains("Severity Level")
 	gt.String(t, prompt).Contains("high")
 	gt.String(t, prompt).Contains("alice: Hello")
-	gt.String(t, prompt).Contains("Slack's mrkdwn format")
-	gt.String(t, prompt).Contains("Do NOT use Markdown headers")
+	// This agent's answer is posted to the thread verbatim, so the shared Slack
+	// formatting rules have to reach it.
+	gt.String(t, prompt).Contains(slackfmt.Section())
+	gt.Bool(t, strings.Contains(prompt, "{{")).False()
+}
+
+// buildSystemPrompt swallows a template failure and returns a one-line fallback,
+// so a broken template would silently drop the case context and the Slack
+// formatting rules at once. Pin that the real template still renders, including
+// with no workspace entry to read a schema from.
+func TestBuildSystemPrompt_SlackFormatSurvivesWithoutWorkspaceEntry(t *testing.T) {
+	c := &model.Case{Title: "Test Case", Status: types.CaseStatusOpen}
+	now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
+
+	prompt := casebound.BuildSystemPromptForTest(c, nil, "C0123ABC", "1700000000.000100", now, nil, nil, nil)
+
+	gt.Bool(t, strings.HasPrefix(prompt, "You are an AI assistant. Case:")).False()
+	gt.String(t, prompt).Contains(slackfmt.Section())
 }
 
 func TestBuildSystemPrompt_ChannelIDAndTime(t *testing.T) {

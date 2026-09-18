@@ -15,6 +15,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/react"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -418,6 +419,9 @@ type assistPromptData struct {
 	AssistLogs   []assistPromptAssistLog
 	AssistPrompt string
 	Language     string
+	// SlackFormat is the shared Slack message formatting section
+	// (slackfmt.Section()). The assist agent posts its own messages to Slack.
+	SlackFormat string
 }
 
 func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *model.WorkspaceEntry, c *model.Case, opts AssistOption) (string, error) {
@@ -428,6 +432,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 		Case:         c,
 		AssistPrompt: entry.AssistPrompt,
 		Language:     entry.AssistLanguage,
+		SlackFormat:  slackfmt.Section(),
 	}
 
 	// Build field values

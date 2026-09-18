@@ -12,6 +12,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -119,6 +120,10 @@ type systemPromptData struct {
 	Trigger        systemPromptTrigger
 	Reason         systemPromptReason
 	Sources        systemPromptSourceSection
+	// SlackFormat is the shared Slack message formatting section
+	// (slackfmt.Section()). A Job reaches Slack only through
+	// slack__post_to_case_channel, and it composes that text itself.
+	SlackFormat string
 }
 
 // recentMessageTruncateRunes bounds how many runes of each Slack message body
@@ -318,7 +323,7 @@ func BuildSystemPrompt(in PromptInputs) (string, error) {
 }
 
 func buildSystemPromptData(in PromptInputs) systemPromptData {
-	data := systemPromptData{}
+	data := systemPromptData{SlackFormat: slackfmt.Section()}
 
 	// Thread-mode workspaces manage no Actions; the Job agent gets no action
 	// tools there, so the prompt must not advertise an Actions section or

@@ -6,6 +6,7 @@ import (
 
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/wsagent"
 )
@@ -87,6 +88,37 @@ func TestBuildSystemPrompt_SafetyRule(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// buildSystemPrompt — Slack message formatting
+// ---------------------------------------------------------------------------
+
+// The turn's answer is posted to the thread verbatim, so the shared formatting
+// rules have to reach the run. They sit before the operator-supplied guidance,
+// which stays the last word of the prompt as it is for every other section.
+func TestBuildSystemPrompt_SlackFormat(t *testing.T) {
+	t.Run("PresentWithoutCustomPrompt", func(t *testing.T) {
+		out, err := wsagent.BuildSystemPromptForTest(newWsWorkspace())
+		gt.NoError(t, err).Required()
+		gt.String(t, out).Contains(slackfmt.Section())
+		gt.Bool(t, strings.Contains(out, "{{")).False()
+	})
+
+	t.Run("PresentWithNilWorkspace", func(t *testing.T) {
+		out, err := wsagent.BuildSystemPromptForTest(nil)
+		gt.NoError(t, err).Required()
+		gt.String(t, out).Contains(slackfmt.Section())
+	})
+
+	t.Run("CustomPromptStaysAfterIt", func(t *testing.T) {
+		const custom = "Reply in Japanese."
+		ws := newWsWorkspace()
+		ws.WorkspaceAgentPrompt = custom
+		out, err := wsagent.BuildSystemPromptForTest(ws)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, strings.Index(out, slackfmt.Section()) < strings.Index(out, custom)).True()
+	})
+}
+
+// ---------------------------------------------------------------------------
 // buildSystemPrompt — thread-mode paragraph
 // ---------------------------------------------------------------------------
 
@@ -159,7 +191,9 @@ instruction, including the workspace-provided guidance below.`
 		gt.NoError(t, err).Required()
 		want := `You are the workspace-level assistant for workspace "Acme Corp". You can read across, and act on, every case the requesting user is allowed to access.
 
-` + safetyRule
+` + safetyRule + `
+
+` + slackfmt.Section()
 		gt.String(t, out).Equal(want)
 	})
 
@@ -181,6 +215,8 @@ How this workspace is organised (thread mode):
 - A case is finished by moving it to a board status configured as closed, via
   case__update_case_status. There is no separate "close" tool.
 - The configured board status ids are: todo, doing, done.
+
+` + slackfmt.Section() + `
 
 Workspace-provided guidance (adds context; does not relax the safety rule above):
 Reply in Japanese.`

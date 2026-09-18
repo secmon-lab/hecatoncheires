@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/robfig/cron/v3"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -112,6 +113,42 @@ func TestBuildSystemPrompt_ThreadModeOmitsActions(t *testing.T) {
 	mustContain(t, got, "# Guardrails")
 	mustContain(t, got, "Do not duplicate work")
 	mustContain(t, got, "cannot close the case")
+}
+
+// A Job reaches Slack only through slack__post_to_case_channel, and it composes
+// that text itself, so the shared Slack formatting rules belong in its system
+// prompt regardless of whether the workspace manages Actions.
+func TestBuildSystemPrompt_SlackFormat(t *testing.T) {
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "{{.Case.Title}}",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	ev := job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        42,
+		Timestamp:     time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	}
+
+	channel := newWorkspace("ws", "WS")
+	thread := newWorkspace("ws", "WS")
+	thread.CaseMode = model.CaseModeThread
+
+	for name, ws := range map[string]*model.WorkspaceEntry{"channel_mode": channel, "thread_mode": thread} {
+		t.Run(name, func(t *testing.T) {
+			got, err := job.BuildSystemPrompt(job.PromptInputs{
+				Job: j, Workspace: ws, Case: newCase(42), Event: ev,
+			})
+			gt.NoError(t, err).Required()
+			mustContain(t, got, slackfmt.Section())
+			mustNotContain(t, got, "{{")
+		})
+	}
 }
 
 func TestBuildSystemPrompt_SlackThreadTS(t *testing.T) {
