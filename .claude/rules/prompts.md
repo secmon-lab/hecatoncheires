@@ -38,3 +38,28 @@ paths:
      regressions are caught at CI time.
 - When updating a prompt, edit the `.md` file and adjust the input
   struct + test — do not patch the rendered string in Go code.
+
+## Text that is posted to Slack
+
+- An agent host whose run can post text to Slack MUST carry
+  `slackfmt.Section()` (`pkg/agent/slackfmt`) in its system prompt.
+  Slack renders mrkdwn, not Markdown: a heading, a pipe table, a
+  horizontal rule or `**bold**` reaches the thread as literal
+  characters. That is what happened on every host that had no such
+  section — the rules existed only as hand-written copies in two of
+  them.
+- Put it in the fixed part of the prompt. Where a host ends its prompt
+  with an operator-supplied one (`wsagent`'s
+  `[slack.workspace_agent]` prompt, `threadcase`'s
+  `[case.prompts].create`, `assist`'s assist prompt), the section goes
+  BEFORE it so the operator's text stays the last word. Where the
+  operator's text sits mid-prompt with fixed sections after it (the
+  Job prompt's per-case operator notes, which its own Guardrails
+  section already follows), append the section at the end with the
+  other fixed sections.
+- Do NOT write the rules out again in a prompt file, and do not put
+  them into `planexec` or `react`: both strategies pass the host's
+  system prompt to the terminal call and to the direct-reply child, so
+  a host that carries the section covers every path its text can take.
+- A tool that posts to Slack states the same rules on the argument the
+  model writes, through `slackfmt.ToolHint()`.

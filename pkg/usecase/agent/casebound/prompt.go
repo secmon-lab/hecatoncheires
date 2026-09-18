@@ -7,6 +7,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -92,6 +93,9 @@ type promptData struct {
 	CurrentAction *promptCurrentAction
 	Actions       []promptAction
 	Messages      []promptMessage
+	// SlackFormat is the shared Slack message formatting section
+	// (slackfmt.Section()). This agent's answer is posted to the thread verbatim.
+	SlackFormat string
 }
 
 // buildSystemPrompt renders the casebound system prompt.
@@ -103,10 +107,11 @@ type promptData struct {
 // actions list is rendered as a title-only summary.
 func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID, threadTS string, now time.Time, currentAction *model.Action, actions []*model.Action, messages []ConversationMessage) string {
 	data := promptData{
-		ChannelID: channelID,
-		ThreadTS:  threadTS,
-		Now:       now.UTC().Format(time.RFC3339),
-		Case:      c,
+		ChannelID:   channelID,
+		ThreadTS:    threadTS,
+		Now:         now.UTC().Format(time.RFC3339),
+		Case:        c,
+		SlackFormat: slackfmt.Section(),
 	}
 
 	if entry != nil && entry.FieldSchema != nil && len(c.FieldValues) > 0 {

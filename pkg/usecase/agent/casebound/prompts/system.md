@@ -61,14 +61,4 @@ The following are recent messages from the Slack conversation (oldest first):
 - If you don't have enough information to answer, say so clearly.
 - Respond in the same language as the user's message.
 
-## Formatting
-Your response will be rendered in Slack. Use Slack's mrkdwn format:
-- Bold: *bold text*
-- Italic: _italic text_
-- Strikethrough: ~strikethrough~
-- Code inline: `code`
-- Code block: ```code block```
-- Blockquote: > quoted text
-- Bulleted list: use bullet characters (•) or dashes
-- Links: <https://example.com|display text>
-- Do NOT use Markdown headers (#), bold (**), or [link](url) syntax — these do not render in Slack.
+{{ .SlackFormat }}

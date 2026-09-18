@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -103,6 +104,16 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, creat
 			fmt.Fprintf(&b, "# Closed status ids (for close): %s\n\n", strings.Join(closed, ", "))
 		}
 	}
+
+	// How to write anything that goes to Slack. Placed before the operator-supplied
+	// sections below so the operator's text stays the last word, as it is for every
+	// other host. It is rendered in every mode, not just ModeMention: a create or
+	// materialize turn asks the user questions through Slack too (AllowQuestion is
+	// unconditional in Durable.StartTurn), and the section states its own scope —
+	// the case title, description and field values it produces are stored records
+	// and are explicitly excluded from it.
+	b.WriteString(slackfmt.Section())
+	b.WriteString("\n\n")
 
 	// Workspace-specific instructions configured via TOML [case.prompts].create.
 	// Applies to the ModeCreate flow (case initialization).

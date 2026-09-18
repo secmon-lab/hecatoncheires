@@ -8,6 +8,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -31,6 +32,11 @@ type systemPromptInput struct {
 	// BoardStatuses lists the configured case board status ids. Non-empty only
 	// in thread mode.
 	BoardStatuses []string
+	// SlackFormat is the shared Slack message formatting section
+	// (slackfmt.Section()). The turn's reply is posted to Slack verbatim, so the
+	// rules have to reach the run; the terminal call and the direct child both
+	// carry this prompt.
+	SlackFormat string
 	// CustomPrompt is the operator-supplied [slack.workspace_agent] prompt. The
 	// template appends it last so it cannot relax the safety rule above it.
 	CustomPrompt string
@@ -53,7 +59,7 @@ func buildSystemPrompt(ws *model.WorkspaceEntry) (string, error) {
 		return "", goerr.Wrap(systemPromptErr, "parse workspace-agent system prompt template")
 	}
 
-	input := systemPromptInput{}
+	input := systemPromptInput{SlackFormat: slackfmt.Section()}
 	if ws != nil {
 		input.WorkspaceName = ws.Workspace.Name
 		if input.WorkspaceName == "" {

@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	slackgo "github.com/slack-go/slack"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 )
 
@@ -59,7 +60,7 @@ func (t *postToCaseChannelTool) Spec() gollem.ToolSpec {
 		Parameters: map[string]*gollem.Parameter{
 			"text": {
 				Type:        gollem.TypeString,
-				Description: "Message text. Slack mrkdwn formatting is supported.",
+				Description: "Message text. " + slackfmt.ToolHint(),
 				Required:    true,
 			},
 			"thread_ts": {

@@ -244,3 +244,5 @@ Manually triggered by {{ .Reason.Actor }} for case #{{ .Reason.CaseID }} at {{ .
 {{- else }}
 - You cannot read your own past traces. Determine idempotency from the current case state and Slack history.
 {{- end }}
+
+{{ .SlackFormat }}

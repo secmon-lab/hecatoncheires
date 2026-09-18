@@ -16,6 +16,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	agentkernel "github.com/secmon-lab/hecatoncheires/pkg/agent/kernel"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/slackfmt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
@@ -67,6 +68,15 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "Update firewall")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Due: 2026-03-15")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Check deadlines and follow up on pending items.")).Equal(true)
+
+		// The assist agent posts its own messages to Slack, so it carries the
+		// shared formatting rules rather than a copy of its own. The
+		// operator-supplied instructions stay after them, as the last word.
+		gt.String(t, prompt).Contains(slackfmt.Section())
+		gt.Bool(t, strings.Contains(prompt, "When posting messages to Slack, use Slack's mrkdwn format:")).False()
+		gt.Bool(t, strings.Contains(prompt, "{{")).False()
+		gt.Bool(t, strings.Index(prompt, slackfmt.Section()) <
+			strings.Index(prompt, "Check deadlines and follow up on pending items.")).True()
 	})
 
 	t.Run("renders template with no actions or messages", func(t *testing.T) {
