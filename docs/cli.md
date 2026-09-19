@@ -455,6 +455,12 @@ They are **not detected** — which is different from not implemented:
   at request time; no stored entity records that decision or any value derived
   from the policy. Changing the policy therefore cannot leave persisted data
   inconsistent, and there is nothing for `--check-db` to reconcile.
+- **The workspace ids recorded on a home-screen greeting.** Each stored greeting
+  keeps the workspaces its user could access when it was generated, and it is
+  reused only while that set matches the user's current access exactly. A
+  workspace removed or renamed in the config therefore just makes the greeting
+  stop matching, and a new one is generated. The stale id is never read as a
+  reference, so there is no inconsistency to report.
 - **Whether a referenced Case may be referenced.** `case_ref_missing` checks
   existence only. Privacy and draft state gate references when they are written;
   applying that here would flag references that were legitimate at write time.

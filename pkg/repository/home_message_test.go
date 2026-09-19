@@ -26,11 +26,12 @@ func runHomeMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		mk := func(msg string, offset time.Duration) model.HomeMessageID {
 			id := model.NewHomeMessageID()
 			gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
-				ID:        id,
-				UserID:    userID,
-				Message:   msg,
-				Lang:      "en",
-				CreatedAt: base.Add(offset),
+				ID:           id,
+				UserID:       userID,
+				Message:      msg,
+				Lang:         "en",
+				WorkspaceIDs: []string{"ws-a", "ws-b"},
+				CreatedAt:    base.Add(offset),
 			})).Required()
 			return id
 		}
@@ -45,6 +46,8 @@ func runHomeMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.Value(t, got[0].ID).Equal(newestID)
 		gt.String(t, got[0].Message).Equal("newest")
 		gt.String(t, got[0].Lang).Equal("en")
+		gt.Value(t, got[0].UserID).Equal(userID)
+		gt.Value(t, got[0].WorkspaceIDs).Equal([]string{"ws-a", "ws-b"})
 		gt.Bool(t, got[0].CreatedAt.Equal(base.Add(2*time.Second))).True()
 		gt.String(t, got[1].Message).Equal("middle")
 
@@ -55,6 +58,19 @@ func runHomeMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.String(t, all[0].Message).Equal("newest")
 		gt.String(t, all[1].Message).Equal("middle")
 		gt.String(t, all[2].Message).Equal("oldest")
+	})
+
+	t.Run("a message stored without WorkspaceIDs reads back with none", func(t *testing.T) {
+		ctx := context.Background()
+		userID := fmt.Sprintf("U-%d", time.Now().UnixNano())
+		gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
+			ID: model.NewHomeMessageID(), UserID: userID, Message: "no set", Lang: "en", CreatedAt: time.Now().UTC(),
+		})).Required()
+
+		got, err := repo.HomeMessage().ListRecent(ctx, userID, 5)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Number(t, len(got[0].WorkspaceIDs)).Equal(0)
 	})
 
 	t.Run("ListRecent for unknown user is empty", func(t *testing.T) {

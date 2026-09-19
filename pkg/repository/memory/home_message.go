@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 
@@ -23,6 +24,7 @@ func newHomeMessageRepository() *homeMessageRepository {
 
 func copyHomeMessage(m *model.HomeMessage) *model.HomeMessage {
 	copied := *m
+	copied.WorkspaceIDs = slices.Clone(m.WorkspaceIDs)
 	return &copied
 }
 

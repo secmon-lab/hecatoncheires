@@ -292,6 +292,111 @@ func TestDashboardUseCase_GenerateHomeMessage_GeneratesAndCaches(t *testing.T) {
 	gt.Array(t, recent).Length(1).Required()
 	gt.String(t, recent[0].Message).Equal("good morning")
 	gt.String(t, recent[0].Lang).Equal("en")
+	gt.Value(t, recent[0].WorkspaceIDs).Equal([]string{"ws-1"})
+}
+
+// greetingPromptCapture records the prompt text of every generate call.
+func greetingPromptCapture(t *testing.T, json string, prompts *[]string) gollem.LLMClient {
+	t.Helper()
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							*prompts = append(*prompts, string(txt))
+						}
+					}
+					return &gollem.Response{Texts: []string{json}}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// A greeting generated while the user could access a workspace may name it.
+// Once the policy revokes that workspace, the greeting is neither reused nor
+// handed to the model as history, so the revoked name cannot reach the user.
+func TestDashboardUseCase_GenerateHomeMessage_AccessChangeInvalidatesStored(t *testing.T) {
+	t.Parallel()
+	repo := memory.New()
+	ctx := dashCtx(dashTestUser)
+	reg := dashTestRegistry("ws-1", "ws-2")
+
+	// Fresh, same language, generated while both workspaces were accessible.
+	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
+		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "busy day in name-ws-2",
+		Lang: "en", WorkspaceIDs: []string{"ws-1", "ws-2"}, CreatedAt: time.Now(),
+	})).Required()
+
+	var prompts []string
+	llm := greetingPromptCapture(t, `{"message":"fresh line"}`, &prompts)
+	uc := usecase.New(repo, reg,
+		usecase.WithHomeMessageLLMClient(llm),
+		usecase.WithWorkspaceAccess(denyingAccess(t, reg, "ws-2")))
+
+	msg, err := uc.Dashboard.GenerateHomeMessage(ctx, time.Now(), "en")
+	gt.NoError(t, err).Required()
+	gt.String(t, msg).Equal("fresh line")
+	gt.Array(t, prompts).Length(1).Required()
+	gt.Bool(t, strings.Contains(prompts[0], "busy day in name-ws-2")).False()
+	gt.Bool(t, strings.Contains(prompts[0], "name-ws-2")).False()
+
+	recent, err := repo.HomeMessage().ListRecent(ctx, dashTestUser, 5)
+	gt.NoError(t, err).Required()
+	gt.Array(t, recent).Length(2).Required()
+	gt.Value(t, recent[0].Message).Equal("fresh line")
+	gt.Value(t, recent[0].WorkspaceIDs).Equal([]string{"ws-1"})
+}
+
+// A message stored before the accessible set was recorded says nothing about
+// what it may name, so it is regenerated once rather than reused.
+func TestDashboardUseCase_GenerateHomeMessage_UnrecordedAccessIsRegenerated(t *testing.T) {
+	t.Parallel()
+	repo := memory.New()
+	ctx := dashCtx(dashTestUser)
+	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
+		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "legacy line",
+		Lang: "en", CreatedAt: time.Now(),
+	})).Required()
+
+	var calls int32
+	llm := mockGreetingLLM(t, `{"message":"regenerated line"}`, &calls)
+	uc := usecase.New(repo, dashTestRegistry("ws-1"), usecase.WithHomeMessageLLMClient(llm))
+
+	msg, err := uc.Dashboard.GenerateHomeMessage(ctx, time.Now(), "en")
+	gt.NoError(t, err).Required()
+	gt.String(t, msg).Equal("regenerated line")
+	gt.Number(t, atomic.LoadInt32(&calls)).Equal(int32(1))
+
+	// The regenerated message records the set, so the next call reuses it.
+	msg, err = uc.Dashboard.GenerateHomeMessage(ctx, time.Now(), "en")
+	gt.NoError(t, err).Required()
+	gt.String(t, msg).Equal("regenerated line")
+	gt.Number(t, atomic.LoadInt32(&calls)).Equal(int32(1))
+}
+
+// When the access decision fails the greeting is not served from storage: the
+// error reaches the caller instead of a message that may be out of date.
+func TestDashboardUseCase_GenerateHomeMessage_AccessDecisionErrorPropagates(t *testing.T) {
+	t.Parallel()
+	repo := memory.New()
+	ctx := dashCtx(dashTestUser)
+	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
+		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "cached line",
+		Lang: "en", WorkspaceIDs: []string{"ws-1"}, CreatedAt: time.Now(),
+	})).Required()
+
+	access := newAccessFixture(t, time.Minute, map[string]string{"ws-1": policyAllowAll}, "ws-1")
+	access.users.failing.Store(true)
+	var calls int32
+	uc := usecase.New(repo, access.reg,
+		usecase.WithHomeMessageLLMClient(mockGreetingLLM(t, `{"message":"unused"}`, &calls)),
+		usecase.WithWorkspaceAccess(access.uc))
+
+	_, err := uc.Dashboard.GenerateHomeMessage(ctx, time.Now(), "en")
+	gt.Error(t, err).Is(errUserStoreDown)
+	gt.Number(t, atomic.LoadInt32(&calls)).Equal(int32(0))
 }
 
 func TestDashboardUseCase_GenerateHomeMessage_ReusesFresh(t *testing.T) {
@@ -302,7 +407,7 @@ func TestDashboardUseCase_GenerateHomeMessage_ReusesFresh(t *testing.T) {
 	// Seed a fresh message; the LLM must NOT be called.
 	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
 		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "cached line",
-		Lang: "en", CreatedAt: time.Now(),
+		Lang: "en", WorkspaceIDs: []string{"ws-1"}, CreatedAt: time.Now(),
 	})).Required()
 
 	var calls int32
@@ -324,7 +429,7 @@ func TestDashboardUseCase_GenerateHomeMessage_RegeneratesOnStale(t *testing.T) {
 	// Stale (2h old) message -> must regenerate.
 	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
 		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "old line",
-		Lang: "en", CreatedAt: time.Now().Add(-2 * time.Hour),
+		Lang: "en", WorkspaceIDs: []string{"ws-1"}, CreatedAt: time.Now().Add(-2 * time.Hour),
 	})).Required()
 
 	var calls int32
@@ -346,7 +451,7 @@ func TestDashboardUseCase_GenerateHomeMessage_RegeneratesOnLangMismatch(t *testi
 	// English cache must not be reused.
 	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
 		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "english line",
-		Lang: "en", CreatedAt: time.Now(),
+		Lang: "en", WorkspaceIDs: []string{"ws-1"}, CreatedAt: time.Now(),
 	})).Required()
 
 	var calls int32
@@ -369,7 +474,7 @@ func TestDashboardUseCase_GenerateHomeMessage_UnknownLangReusesDefaultBucket(t *
 	// the cache-bypass via arbitrary lang strings.
 	gt.NoError(t, repo.HomeMessage().Add(ctx, &model.HomeMessage{
 		ID: model.NewHomeMessageID(), UserID: dashTestUser, Message: "english line",
-		Lang: "en", CreatedAt: time.Now(),
+		Lang: "en", WorkspaceIDs: []string{"ws-1"}, CreatedAt: time.Now(),
 	})).Required()
 
 	var calls int32

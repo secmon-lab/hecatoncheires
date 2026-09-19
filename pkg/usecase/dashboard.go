@@ -390,10 +390,19 @@ func (uc *DashboardUseCase) GenerateHomeMessage(ctx context.Context, clientTime 
 	}
 	lang = normalizeHomeMessageLang(lang)
 
-	recent, err := uc.repo.HomeMessage().ListRecent(ctx, token.Sub, homeMessageHistorySize)
+	accessible, err := uc.accessibleWorkspaceIDs(ctx, token.Sub)
+	if err != nil {
+		return "", err
+	}
+
+	stored, err := uc.repo.HomeMessage().ListRecent(ctx, token.Sub, homeMessageHistorySize)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to list recent home messages")
 	}
+	// A stored message may name a workspace the user has since lost access to,
+	// so neither reuse nor the anti-repetition history may see one generated
+	// under a different set of workspaces.
+	recent := sameAccessMessages(stored, accessible)
 	// Reuse the newest message for this language when it is still fresh. The
 	// history is language-mixed, so scan for the most recent same-language entry
 	// rather than only inspecting index 0.
@@ -436,11 +445,12 @@ func (uc *DashboardUseCase) GenerateHomeMessage(ctx context.Context, clientTime 
 	}
 
 	rec := &model.HomeMessage{
-		ID:        model.NewHomeMessageID(),
-		UserID:    token.Sub,
-		Message:   msg,
-		Lang:      lang,
-		CreatedAt: time.Now(),
+		ID:           model.NewHomeMessageID(),
+		UserID:       token.Sub,
+		Message:      msg,
+		Lang:         lang,
+		WorkspaceIDs: accessible,
+		CreatedAt:    time.Now(),
 	}
 	if err := uc.repo.HomeMessage().Add(ctx, rec); err != nil {
 		// Non-fatal: the freshly generated message is still returned; only the
@@ -448,6 +458,35 @@ func (uc *DashboardUseCase) GenerateHomeMessage(ctx context.Context, clientTime 
 		errutil.Handle(ctx, goerr.Wrap(err, "failed to append home message"), "append home message")
 	}
 	return msg, nil
+}
+
+// accessibleWorkspaceIDs returns the ids of the workspaces userID may access,
+// sorted ascending so two sets compare with slices.Equal.
+func (uc *DashboardUseCase) accessibleWorkspaceIDs(ctx context.Context, userID string) ([]string, error) {
+	entries, err := uc.workspaceAccess.FilterAccessible(ctx, uc.registry.List(), userID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "filter accessible workspaces for home message")
+	}
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		ids = append(ids, e.Workspace.ID)
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+// sameAccessMessages keeps the messages generated under exactly the accessible
+// set. A message with no recorded set is dropped even when the user now has no
+// workspace at all: it predates the record, so what it names is unknown.
+func sameAccessMessages(stored []*model.HomeMessage, accessible []string) []*model.HomeMessage {
+	kept := make([]*model.HomeMessage, 0, len(stored))
+	for _, m := range stored {
+		if len(m.WorkspaceIDs) == 0 || !slices.Equal(m.WorkspaceIDs, accessible) {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept
 }
 
 // freshSameLangMessage returns the newest message matching lang that is still

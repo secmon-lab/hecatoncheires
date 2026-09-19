@@ -1477,7 +1477,10 @@ workspace:
 - **Web UI / GraphQL** — the workspace list shows only permitted workspaces,
   and every operation that names a denied workspace is answered with the
   `FORBIDDEN` error code. `GET /api/workspaces` requires a signed-in session
-  when authentication is enabled and lists only permitted workspaces.
+  when authentication is enabled and lists only permitted workspaces. The
+  home-screen greeting is reused (for up to an hour) only while the user's
+  permitted workspaces are exactly those it was generated for, so a revoked
+  workspace stops appearing in it as soon as the decision below expires.
 - **Slack** — mentions, messages, reactions, slash commands, modals, buttons
   and select menus in a denied workspace are not processed. The user is told so
   in a message only they can see (an ephemeral message, or a modal when the
