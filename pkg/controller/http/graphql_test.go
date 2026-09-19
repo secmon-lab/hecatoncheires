@@ -5905,3 +5905,206 @@ func TestGraphQLHandler_CaseRefWrite(t *testing.T) {
 		gt.Number(t, len(resp.Errors)).Greater(0)
 	})
 }
+
+// errorCodes returns the extensions.code of every error in resp.
+func errorCodes(resp *graphQLResponse) []string {
+	codes := make([]string, 0, len(resp.Errors))
+	for _, e := range resp.Errors {
+		code, _ := e.Extensions["code"].(string)
+		codes = append(codes, code)
+	}
+	return codes
+}
+
+// TestGraphQLHandler_WorkspaceAccessControl drives the per-workspace policy
+// through the same wiring serve.go uses: the field middleware plus the
+// usecases that read across workspaces. ws-b's policy allows nobody.
+func TestGraphQLHandler_WorkspaceAccessControl(t *testing.T) {
+	const (
+		wsA  = "ws-a"
+		wsB  = "ws-b"
+		user = "U0ALICE"
+	)
+	repo := memory.New()
+	ctx := context.Background()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsA, Name: "Workspace A"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "ref_field", Name: "Related Case", Type: types.FieldTypeCaseRef, ReferenceWorkspace: wsB},
+			},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: wsB, Name: "Workspace B"}})
+
+	groups := model.NewWorkspaceGroupRegistry()
+	groups.Register(&model.WorkspaceGroup{ID: "mixed", Name: "Mixed", MemberIDs: []string{wsA, wsB}})
+	groups.Register(&model.WorkspaceGroup{ID: "only-b", Name: "Only B", MemberIDs: []string{wsB}})
+
+	access := newDenyingWorkspaceAccess(t, registry, wsB)
+	uc := usecase.New(repo, registry, usecase.WithWorkspaceAccess(access), usecase.WithWorkspaceGroups(groups))
+	srv := handler.NewDefaultServer(gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: gqlctrl.NewResolver(repo, uc)}))
+	srv.AroundFields(gqlctrl.WorkspaceAccessMiddleware(uc.WorkspaceAccess))
+	srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
+		gqlErr := graphql.DefaultErrorPresenter(ctx, err)
+		if gqlErr.Extensions == nil {
+			gqlErr.Extensions = map[string]any{}
+		}
+		maps.Copy(gqlErr.Extensions, gqlctrl.ErrorExtensions(err))
+		return gqlErr
+	})
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := gqlctrl.WithDataLoaders(r.Context(), gqlctrl.NewDataLoaders(repo, nil))
+		srv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	h, err := httpctrl.New(gqlHandler)
+	gt.NoError(t, err).Required()
+
+	now := time.Now().UTC()
+	caseA, err := repo.Case().Create(ctx, wsA, &model.Case{
+		ReporterID: user, CreatedAt: now, UpdatedAt: now, Title: "Case in A",
+		Status: types.CaseStatusOpen, AssigneeIDs: []string{user},
+	})
+	gt.NoError(t, err).Required()
+	caseB, err := repo.Case().Create(ctx, wsB, &model.Case{
+		ReporterID: user, CreatedAt: now, UpdatedAt: now, Title: "Case in B",
+		Status: types.CaseStatusOpen, AssigneeIDs: []string{user},
+	})
+	gt.NoError(t, err).Required()
+	_, err = repo.Action().Create(ctx, wsA, &model.Action{CaseID: caseA.ID, Title: "Action in A", AssigneeID: user})
+	gt.NoError(t, err).Required()
+	_, err = repo.Action().Create(ctx, wsB, &model.Action{CaseID: caseB.ID, Title: "Action in B", AssigneeID: user})
+	gt.NoError(t, err).Required()
+
+	casesQuery := `query($workspaceId: String!) { cases(workspaceId: $workspaceId) { id title } }`
+
+	t.Run("denied workspace query is FORBIDDEN, allowed one succeeds", func(t *testing.T) {
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, casesQuery, map[string]any{"workspaceId": wsB}, user))
+		gt.Value(t, errorCodes(resp)).Equal([]string{gqlctrl.ErrCodeForbidden})
+
+		resp = parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, casesQuery, map[string]any{"workspaceId": wsA}, user))
+		gt.Array(t, resp.Errors).Length(0)
+		var data struct {
+			Cases []struct {
+				Title string `json:"title"`
+			} `json:"cases"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &data)).Required()
+		gt.Array(t, data.Cases).Length(1).Required()
+		gt.Value(t, data.Cases[0].Title).Equal("Case in A")
+	})
+
+	t.Run("denied workspace mutation is FORBIDDEN and writes nothing", func(t *testing.T) {
+		before, err := repo.Case().List(ctx, wsB)
+		gt.NoError(t, err).Required()
+		mutation := `mutation($workspaceId: String!, $input: CreateCaseInput!) {
+			createCase(workspaceId: $workspaceId, input: $input) { id }
+		}`
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, mutation, map[string]any{
+			"workspaceId": wsB,
+			"input":       map[string]any{"title": "Should not exist"},
+		}, user))
+		gt.Value(t, errorCodes(resp)).Equal([]string{gqlctrl.ErrCodeForbidden})
+		after, err := repo.Case().List(ctx, wsB)
+		gt.NoError(t, err).Required()
+		gt.Value(t, len(after)).Equal(len(before))
+	})
+
+	t.Run("workspaces and groups hide the denied workspace", func(t *testing.T) {
+		query := `query { workspaces { id } workspaceGroups { id workspaces { id } } }`
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, query, nil, user))
+		gt.Array(t, resp.Errors).Length(0)
+		var data struct {
+			Workspaces []struct {
+				ID string `json:"id"`
+			} `json:"workspaces"`
+			WorkspaceGroups []struct {
+				ID         string `json:"id"`
+				Workspaces []struct {
+					ID string `json:"id"`
+				} `json:"workspaces"`
+			} `json:"workspaceGroups"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &data)).Required()
+		gt.Array(t, data.Workspaces).Length(1).Required()
+		gt.Value(t, data.Workspaces[0].ID).Equal(wsA)
+		gt.Array(t, data.WorkspaceGroups).Length(1).Required()
+		gt.Value(t, data.WorkspaceGroups[0].ID).Equal("mixed")
+		gt.Array(t, data.WorkspaceGroups[0].Workspaces).Length(1).Required()
+		gt.Value(t, data.WorkspaceGroups[0].Workspaces[0].ID).Equal(wsA)
+	})
+
+	t.Run("dashboard excludes the denied workspace", func(t *testing.T) {
+		query := `query {
+			myOpenCases { workspaceId case { title } }
+			myDueActions { workspaceId action { title } }
+		}`
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, query, nil, user))
+		gt.Array(t, resp.Errors).Length(0)
+		var data struct {
+			MyOpenCases []struct {
+				WorkspaceID string `json:"workspaceId"`
+				Case        struct {
+					Title string `json:"title"`
+				} `json:"case"`
+			} `json:"myOpenCases"`
+			MyDueActions []struct {
+				WorkspaceID string `json:"workspaceId"`
+				Action      struct {
+					Title string `json:"title"`
+				} `json:"action"`
+			} `json:"myDueActions"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &data)).Required()
+		gt.Array(t, data.MyOpenCases).Length(1).Required()
+		gt.Value(t, data.MyOpenCases[0].WorkspaceID).Equal(wsA)
+		gt.Value(t, data.MyOpenCases[0].Case.Title).Equal("Case in A")
+		gt.Array(t, data.MyDueActions).Length(1).Required()
+		gt.Value(t, data.MyDueActions[0].WorkspaceID).Equal(wsA)
+		gt.Value(t, data.MyDueActions[0].Action.Title).Equal("Action in A")
+	})
+
+	t.Run("favorites hide and refuse the denied workspace", func(t *testing.T) {
+		gt.NoError(t, repo.UserPreference().Set(ctx, &model.UserPreference{
+			UserID: user, FavoriteWorkspaceIDs: []string{wsA, wsB}, CreatedAt: now, UpdatedAt: now,
+		})).Required()
+
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, `query { favoriteWorkspaceIds }`, nil, user))
+		gt.Array(t, resp.Errors).Length(0)
+		var data struct {
+			FavoriteWorkspaceIDs []string `json:"favoriteWorkspaceIds"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &data)).Required()
+		gt.Value(t, data.FavoriteWorkspaceIDs).Equal([]string{wsA})
+
+		mutation := `mutation($ids: [String!]!) { setFavoriteWorkspaces(workspaceIds: $ids) }`
+		resp = parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, mutation, map[string]any{"ids": []string{wsA, wsB}}, user))
+		gt.Value(t, errorCodes(resp)).Equal([]string{gqlctrl.ErrCodeForbidden})
+	})
+
+	t.Run("a case_ref into the denied workspace cannot be written", func(t *testing.T) {
+		mutation := `mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+			updateCase(workspaceId: $workspaceId, input: $input) { id }
+		}`
+		resp := parseGraphQLResponse(t, executeGraphQLRequestWithAuth(t, h, mutation, map[string]any{
+			"workspaceId": wsA,
+			"input": map[string]any{
+				"id":     caseA.ID,
+				"fields": []map[string]any{{"fieldId": "ref_field", "value": fmt.Sprintf("%d", caseB.ID)}},
+			},
+		}, user))
+		gt.Value(t, errorCodes(resp)).Equal([]string{gqlctrl.ErrCodeForbidden})
+		stored, err := repo.Case().Get(ctx, wsA, caseA.ID)
+		gt.NoError(t, err).Required()
+		_, hasRef := stored.FieldValues["ref_field"]
+		gt.Bool(t, hasRef).False()
+	})
+
+	t.Run("a context without a token is not checked", func(t *testing.T) {
+		resp := parseGraphQLResponse(t, executeGraphQLRequest(t, h, casesQuery, map[string]any{"workspaceId": wsB}))
+		gt.Array(t, resp.Errors).Length(0)
+	})
+}

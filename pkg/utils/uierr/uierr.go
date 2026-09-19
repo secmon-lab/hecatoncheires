@@ -121,6 +121,18 @@ func SlackError(code string) (UserFacing, bool) {
 	}
 }
 
+// WorkspaceAccessDenied is the classification of a workspace [authz] policy
+// denial. It lives here so the usecase classifier and packages that cannot
+// import it (the Job runner) render the same message.
+func WorkspaceAccessDenied() UserFacing {
+	return UserFacing{
+		Kind:        KindPermission,
+		What:        i18n.MsgUIErrWorkspaceAccessDeniedWhat,
+		Detail:      i18n.MsgUIErrWorkspaceAccessDeniedDetail,
+		Remediation: i18n.MsgUIErrWorkspaceAccessDeniedFix,
+	}
+}
+
 // Render builds the 3-part Slack mrkdwn text for uf. ref is the correlation id
 // shown to the user and logged alongside the error; an empty ref omits the
 // line. The What message already carries its own ⚠️ prefix.

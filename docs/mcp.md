@@ -74,6 +74,12 @@ Every tool call is evaluated against the Rego entrypoint **`data.auth.mcp`**.
 The policy receives an `input` document and must return an object with an
 `allow` boolean and an optional `user` string.
 
+This is the only authorization MCP applies. A workspace's `[authz]` policy
+(see [configuration.md § Authorization Section](./configuration.md#authorization-section-authz))
+is **not** evaluated for MCP requests, including for the `user` this policy
+acts as. To restrict an MCP client to certain workspaces, check
+`input.tool.workspace_id` in this policy.
+
 ### Policy input
 
 ```json

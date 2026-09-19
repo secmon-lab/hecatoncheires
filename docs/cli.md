@@ -398,6 +398,14 @@ The Job-to-model cross-check needs both documents: the Jobs come from `--config`
 and the definitions from `--global-config`, so it runs only when both are given.
 It is the same check `serve` performs at startup, available without deploying.
 
+A workspace's `[authz]` policy is compiled and trial-evaluated here exactly as
+`serve` does at startup (see
+[configuration.md § Authorization Section](./configuration.md#authorization-section-authz)):
+a policy that does not compile, or that errors on either sample input, fails
+validation. `POST /api/validate/db` does not read policy files — a submitted
+document has no directory of its own — so over HTTP only the shape of
+`[authz] policy` (at least one non-empty path) is checked.
+
 ### What `--check-db` checks
 
 The DB consistency check answers one question: has a configuration change left
@@ -443,6 +451,10 @@ They are **not detected** — which is different from not implemented:
   reported by `hecatoncheires validate` itself (without `--check-db`) and refused
   at startup. A run record naming a model the configuration no longer declares is
   a historical fact about that run, not an inconsistency.
+- **`[authz]` workspace policies.** A policy decides who may access a workspace
+  at request time; no stored entity records that decision or any value derived
+  from the policy. Changing the policy therefore cannot leave persisted data
+  inconsistent, and there is nothing for `--check-db` to reconcile.
 - **Whether a referenced Case may be referenced.** `case_ref_missing` checks
   existence only. Privacy and draft state gate references when they are written;
   applying that here would flag references that were legitimate at write time.

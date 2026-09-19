@@ -23,6 +23,7 @@ type SlackUseCases struct {
 	agent           *AgentUseCase
 	slackService    slacksvc.Service
 	mentionProposal *MentionProposalUseCase
+	workspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance. agent and
@@ -34,6 +35,7 @@ func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegis
 		agent:           agent,
 		mentionProposal: mentionProposal,
 		slackService:    slackService,
+		workspaceAccess: allowAllWorkspaces(),
 	}
 }
 
@@ -115,8 +117,11 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	}
 
 	if appMention, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok {
-		if uc.isCaseBoundChannel(ctx, appMention.Channel) {
+		if caseWS, isCaseBound := uc.caseBoundWorkspace(ctx, appMention.Channel); isCaseBound {
 			if uc.agent == nil {
+				return nil
+			}
+			if !uc.eventActorAllowed(ctx, caseWS, appMention.User, appMention.BotID, appMention.Channel) {
 				return nil
 			}
 			if err := uc.agent.HandleAgentMention(ctx, msg); err != nil {
@@ -133,6 +138,9 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		// cross-case workspace agent, not the draft-proposal flow.
 		if wsEntry, isWSChannel := uc.registry.FindByWorkspaceChannel(appMention.Channel); isWSChannel {
 			if uc.agent == nil {
+				return nil
+			}
+			if !uc.eventActorAllowed(ctx, wsEntry.Workspace.ID, appMention.User, appMention.BotID, appMention.Channel) {
 				return nil
 			}
 			ctx = uc.contextWithUserLang(ctx, appMention.User)
@@ -239,11 +247,11 @@ func (uc *SlackUseCases) shouldResumeOnReply(ctx context.Context, ev *slackevent
 	return true
 }
 
-// isCaseBoundChannel reports whether the given channel ID is associated with
-// a Case in any registered workspace.
-func (uc *SlackUseCases) isCaseBoundChannel(ctx context.Context, channelID string) bool {
+// caseBoundWorkspace reports whether the given channel ID is associated with a
+// Case in any registered workspace, returning that workspace's ID.
+func (uc *SlackUseCases) caseBoundWorkspace(ctx context.Context, channelID string) (string, bool) {
 	if channelID == "" || uc.registry == nil {
-		return false
+		return "", false
 	}
 	for _, entry := range uc.registry.List() {
 		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, channelID)
@@ -252,10 +260,10 @@ func (uc *SlackUseCases) isCaseBoundChannel(ctx context.Context, channelID strin
 			continue
 		}
 		if c != nil {
-			return true
+			return entry.Workspace.ID, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // threadModeEntry reports whether channelID is the monitored channel of a
@@ -309,6 +317,9 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 			if c != nil {
 				// Mention inside an existing case thread → investigation agent
 				// (both modes).
+				if !uc.eventActorAllowed(ctx, wsID, appMention.User, appMention.BotID, appMention.Channel) {
+					return
+				}
 				ctx = uc.contextWithUserLang(ctx, appMention.User)
 				if err := uc.agent.HandleThreadCaseMention(ctx, msg, entry, c); err != nil {
 					errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention",
@@ -339,7 +350,8 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 				// A bot-authored mention is dropped here rather than falling
 				// through: this thread is the agent's, so turning it into a Case
 				// would contradict the routing the Session records.
-				if isHumanMention(appMention) && uc.isAllowedMentionActor(ctx, appMention, entry) {
+				if isHumanMention(appMention) && uc.isAllowedMentionActor(ctx, appMention, entry) &&
+					uc.eventActorAllowed(ctx, wsID, appMention.User, appMention.BotID, appMention.Channel) {
 					uc.startWorkspaceAgentMention(ctx, appMention, msg, entry)
 				}
 				return
@@ -352,7 +364,8 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 			// predates the bot). The whole thread seeds the create agent. The
 			// bot-authored / accept_bot and self-mention gate still applies via
 			// isAllowedMentionActor.
-			if uc.isAllowedMentionActor(ctx, appMention, entry) {
+			if uc.isAllowedMentionActor(ctx, appMention, entry) &&
+				uc.eventActorAllowed(ctx, wsID, appMention.User, appMention.BotID, appMention.Channel) {
 				uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
 			}
 			return
@@ -361,6 +374,9 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 		// Channel-root mention. In instant mode the accompanying message event
 		// drives case creation, so acting here too would double-handle it; ignore.
 		if !mentionTrigger || !uc.isAllowedMentionActor(ctx, appMention, entry) {
+			return
+		}
+		if !uc.eventActorAllowed(ctx, wsID, appMention.User, appMention.BotID, appMention.Channel) {
 			return
 		}
 		// In mention mode a root mention used to start a case — a human one now
@@ -389,7 +405,8 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 		}
 		// Instant mode: only a channel-root post starts a case. Replies inside a
 		// thread (case thread or not) carry no creation semantics and are ignored.
-		if uc.isThreadCaseCreationTrigger(ctx, msgEv, entry) {
+		if uc.isThreadCaseCreationTrigger(ctx, msgEv, entry) &&
+			uc.eventActorAllowed(ctx, wsID, msgEv.User, msgEv.BotID, msgEv.Channel) {
 			ctx = uc.contextWithUserLang(ctx, msgEv.User)
 			if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
 				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case creation",

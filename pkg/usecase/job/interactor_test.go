@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem/trace"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 
@@ -32,10 +33,46 @@ type updatedForm struct {
 }
 
 type fakeQuestionPoster struct {
-	posts     []postedForm
-	updates   []updatedForm
-	returnTS  string
-	returnErr error
+	posts      []postedForm
+	updates    []updatedForm
+	ephemerals []ephemeralPost
+	returnTS   string
+	returnErr  error
+}
+
+type ephemeralPost struct {
+	channelID string
+	userID    string
+	text      string
+}
+
+func (f *fakeQuestionPoster) PostEphemeral(_ context.Context, channelID, userID, text string) error {
+	f.ephemerals = append(f.ephemerals, ephemeralPost{channelID: channelID, userID: userID, text: text})
+	return nil
+}
+
+// workspaceAccessStub allows every workspace except denied.
+type workspaceAccessStub struct {
+	denied string
+}
+
+func (s workspaceAccessStub) Authorize(_ context.Context, workspaceID, _ string) error {
+	if workspaceID == s.denied {
+		return goerr.Wrap(model.ErrWorkspaceAccessDenied, "denied by stub")
+	}
+	return nil
+}
+
+func (s workspaceAccessStub) AuthorizeCurrentUser(ctx context.Context, workspaceID string) error {
+	return s.Authorize(ctx, workspaceID, "")
+}
+
+func (s workspaceAccessStub) FilterAccessible(_ context.Context, entries []*model.WorkspaceEntry, _ string) ([]*model.WorkspaceEntry, error) {
+	return entries, nil
+}
+
+func (s workspaceAccessStub) FilterAccessibleForCurrentUser(_ context.Context, entries []*model.WorkspaceEntry) ([]*model.WorkspaceEntry, error) {
+	return entries, nil
 }
 
 func (f *fakeQuestionPoster) PostThreadMessage(_ context.Context, channelID, threadTS string, blocks []goslack.Block, text string, _ ...slacksvc.PostThreadOption) (string, error) {
@@ -62,6 +99,58 @@ func newRunningLog(key model.JobRunKey, runID string, started time.Time) *model.
 		StartedAt:    started,
 		ExecutorKind: "planexec",
 	}
+}
+
+// An answer from a user the Job's workspace policy denies is not delivered:
+// the run stays suspended and only the answering user is told why.
+func TestHandleQuestionSubmit_WorkspaceAccessDenied(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	key := jobKey("denied")
+	now := time.Now().UTC()
+	suspended := newRunningLog(key, "RUN-1", now)
+	suspended.Stage = model.JobRunStageAwaitingInput
+	suspended.PendingInteraction = &model.PendingInteraction{
+		PostedChannelID: "C-CASE",
+		PostedMessageTS: "FORM-TS-1",
+		Reason:          "r",
+		Items:           []model.PendingInteractionItem{{ID: "env", Text: "Which environment?", Type: "select", Options: []string{"prod", "stg"}}},
+	}
+	gt.NoError(t, repo.JobRunLog().Create(ctx, suspended)).Required()
+
+	poster := &fakeQuestionPoster{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:              repo,
+		Registry:          model.NewWorkspaceRegistry(),
+		InteractionPoster: poster,
+		WorkspaceAccess:   workspaceAccessStub{denied: key.WorkspaceID},
+	})
+	refValue, err := job.EncodeJobQuestionRefForTest(key, "RUN-1")
+	gt.NoError(t, err).Required()
+	callback := &goslack.InteractionCallback{}
+	callback.Channel.ID = "C-CASE"
+	callback.Message.Timestamp = "FORM-TS-1"
+	callback.User.ID = "U0MALLORY"
+
+	gt.NoError(t, runner.HandleQuestionSubmit(ctx, callback, &goslack.BlockAction{Value: refValue})).Required()
+
+	got, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, got.Stage).Equal(model.JobRunStageAwaitingInput)
+	gt.Array(t, poster.updates).Length(0)
+	gt.Array(t, poster.ephemerals).Length(1).Required()
+	gt.Value(t, poster.ephemerals[0].channelID).Equal("C-CASE")
+	gt.Value(t, poster.ephemerals[0].userID).Equal("U0MALLORY")
+	gt.String(t, poster.ephemerals[0].text).NotEqual("")
+}
+
+func TestHandleQuestionSubmit_RequiresWorkspaceAccess(t *testing.T) {
+	key := jobKey("unwired")
+	refValue, err := job.EncodeJobQuestionRefForTest(key, "RUN-1")
+	gt.NoError(t, err).Required()
+	runner := job.NewJobRunner(job.RunnerDeps{Repo: memory.New(), Registry: model.NewWorkspaceRegistry()})
+
+	gt.Error(t, runner.HandleQuestionSubmit(context.Background(), &goslack.InteractionCallback{}, &goslack.BlockAction{Value: refValue}))
 }
 
 func jobKey(suffix string) model.JobRunKey {

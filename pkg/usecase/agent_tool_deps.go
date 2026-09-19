@@ -45,6 +45,7 @@ func (uc *UseCases) AgentToolDeps() agentkernel.ToolDeps {
 		MemoUC:            NewMemoToolAdapter(uc.Memo),
 		KnowledgeAccessor: NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
 		KnowledgeMutator:  NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
+		WorkspaceAccess:   uc.WorkspaceAccess,
 	}
 }
 

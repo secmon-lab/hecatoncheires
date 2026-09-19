@@ -56,12 +56,15 @@ func classifyUserError(err error) (uierr.UserFacing, bool) {
 			Cause:       missingFieldNames(err),
 		}, true
 
+	case errors.Is(err, model.ErrWorkspaceAccessDenied):
+		return uierr.WorkspaceAccessDenied(), true
+
 	case errors.Is(err, ErrNoAccessibleWorkspace):
 		return uierr.UserFacing{
 			Kind:        uierr.KindPermission,
-			What:        i18n.MsgUIErrConfigWhat,
-			Detail:      i18n.MsgUIErrConfigDetail,
-			Remediation: i18n.MsgUIErrConfigFix,
+			What:        i18n.MsgUIErrNoAccessibleWorkspaceWhat,
+			Detail:      i18n.MsgUIErrNoAccessibleWorkspaceDetail,
+			Remediation: i18n.MsgUIErrNoAccessibleWorkspaceFix,
 		}, true
 	}
 

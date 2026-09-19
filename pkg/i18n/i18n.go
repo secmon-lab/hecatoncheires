@@ -242,7 +242,14 @@ const (
 	MsgUIErrAccessDeniedWhat // caller not permitted (private case)
 	MsgUIErrAccessDeniedDetail
 	MsgUIErrAccessDeniedFix
-	MsgUIErrFieldValidationWhat // required/invalid case fields
+	MsgUIErrWorkspaceAccessDeniedWhat // workspace [authz] policy denied the caller
+	MsgUIErrWorkspaceAccessDeniedDetail
+	MsgUIErrWorkspaceAccessDeniedFix
+	MsgUIErrNoAccessibleWorkspaceWhat // no workspace configured, or none allows the caller
+	MsgUIErrNoAccessibleWorkspaceDetail
+	MsgUIErrNoAccessibleWorkspaceFix
+	MsgWorkspaceAccessDeniedModalTitle // Title of the modal a denied view_submission is replaced with.
+	MsgUIErrFieldValidationWhat        // required/invalid case fields
 	MsgUIErrFieldValidationDetail
 	MsgUIErrFieldValidationFix
 	MsgUIErrAgentNoConclusionWhat // planner exhausted budget / gave up

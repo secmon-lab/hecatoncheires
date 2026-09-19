@@ -1627,3 +1627,172 @@ func TestSlackUseCases_WorkspaceChannelMentionRouting(t *testing.T) {
 		gt.Array(t, slackMock.postedMessages).Length(0)
 	})
 }
+
+// TestSlackUseCases_WorkspaceAccessDenied drives every Slack event path that
+// acts on a workspace with an actor the workspace's policy denies: nothing is
+// started, and the actor alone is told why. A bot-authored trigger has no human
+// actor and is not checked.
+func TestSlackUseCases_WorkspaceAccessDenied(t *testing.T) {
+	const (
+		monitor     = "C-MONITOR"
+		caseChannel = "C-CASE-DENIED"
+		wsChannel   = "C-WS-DENIED"
+		denied      = "U-DENIED"
+	)
+
+	type wired struct {
+		uc         *usecase.SlackUseCases
+		repo       *memory.Memory
+		slack      *agentTestSlackService
+		llmInvoked *atomic.Bool
+		caseUC     *usecase.CaseUseCase
+	}
+	wire := func(t *testing.T, mentionTrigger, acceptBot bool) wired {
+		t.Helper()
+		repo := memory.New()
+		reg := newThreadWorkspaceRegistry()
+		if e, err := reg.Get("support"); err == nil {
+			if mentionTrigger {
+				e.CaseTrigger = model.CaseTriggerMention
+			}
+			e.AcceptBot = acceptBot
+		}
+		reg.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "channel-ws", Name: "Channel WS"}, SlackWorkspaceChannelID: wsChannel})
+		slackMock := &agentTestSlackService{}
+		caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+		var llmInvoked atomic.Bool
+		probe := &mockLLMClient{
+			newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+				llmInvoked.Store(true)
+				return &mockLLMSession{
+					generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+						return nil, errors.New("planner generate not scripted in access test")
+					},
+				}, nil
+			},
+		}
+		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+			Repo: repo, Registry: reg, LLM: probe,
+			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+			SlackService: slackMock, CaseUC: caseUC,
+		})
+		startAgentRuntime(t, agentRuntimeDeps{UC: agentUC, Repo: repo, Registry: reg, LLM: probe, CaseUC: caseUC})
+		slackUC := usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock)
+		usecase.SetSlackWorkspaceAccessForTest(slackUC, denyingAccess(t, reg, "support", "channel-ws"))
+		return wired{uc: slackUC, repo: repo, slack: slackMock, llmInvoked: &llmInvoked, caseUC: caseUC}
+	}
+
+	mention := func(channel, user, botID, ts, threadTS string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.AppMention),
+				Data: &slackevents.AppMentionEvent{
+					Type: "app_mention", User: user, BotID: botID, Text: "<@UBOT001> help",
+					TimeStamp: ts, ThreadTimeStamp: threadTS, Channel: channel, EventTimeStamp: ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+	rootPost := func(user, botID, ts string) *slackevents.EventsAPIEvent {
+		subType := ""
+		if botID != "" {
+			subType = "bot_message"
+		}
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.Message),
+				Data: &slackevents.MessageEvent{
+					Type: "message", SubType: subType, User: user, BotID: botID, Text: "please look",
+					TimeStamp: ts, Channel: monitor, EventTimeStamp: ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+	assertDenied := func(t *testing.T, w wired, channel string) {
+		t.Helper()
+		async.Wait()
+		gt.Bool(t, w.llmInvoked.Load()).False()
+		eph := w.slack.ephemerals()
+		gt.Array(t, eph).Length(1).Required()
+		gt.Value(t, eph[0].ChannelID).Equal(channel)
+		gt.Value(t, eph[0].UserID).Equal(denied)
+		gt.String(t, eph[0].Text).NotEqual("")
+	}
+
+	t.Run("S6 instant root post", func(t *testing.T) {
+		w := wire(t, false, false)
+		gt.NoError(t, w.uc.HandleSlackEvent(context.Background(), rootPost(denied, "", "1700500000.000001"))).Required()
+		assertDenied(t, w, monitor)
+		ssn, err := w.repo.Session().GetByThread(context.Background(), monitor, "1700500000.000001")
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
+	t.Run("S6 bot root post under accept_bot is not checked", func(t *testing.T) {
+		w := wire(t, false, true)
+		gt.NoError(t, w.uc.HandleSlackEvent(context.Background(), rootPost("", "B-FORMBOT", "1700500001.000001"))).Required()
+		async.Wait()
+		waitForLLMFlag(t, w.llmInvoked)
+		gt.Array(t, w.slack.ephemerals()).Length(0)
+	})
+
+	t.Run("S4 mention in a case-less thread", func(t *testing.T) {
+		w := wire(t, false, false)
+		gt.NoError(t, w.uc.HandleSlackEvent(context.Background(), mention(monitor, denied, "", "1700500002.000002", "1700500002.000001"))).Required()
+		assertDenied(t, w, monitor)
+	})
+
+	t.Run("S5 channel-root mention in mention mode", func(t *testing.T) {
+		w := wire(t, true, false)
+		gt.NoError(t, w.uc.HandleSlackEvent(context.Background(), mention(monitor, denied, "", "1700500003.000001", ""))).Required()
+		assertDenied(t, w, monitor)
+	})
+
+	t.Run("S2 mention in an existing case thread", func(t *testing.T) {
+		w := wire(t, false, false)
+		ctx := context.Background()
+		const threadTS = "1700500004.000001"
+		_, err := w.caseUC.CreateThreadBoundCaseForTest(ctx, "support", monitor, threadTS, "U-REPORTER", "Existing", "body", nil, "req-s2")
+		gt.NoError(t, err).Required()
+		gt.NoError(t, w.uc.HandleSlackEvent(ctx, mention(monitor, denied, "", "1700500004.000002", threadTS))).Required()
+		assertDenied(t, w, monitor)
+	})
+
+	t.Run("S3 follow-up mention in a workspace-agent thread", func(t *testing.T) {
+		w := wire(t, true, false)
+		ctx := context.Background()
+		const threadTS = "1700500005.000001"
+		gt.NoError(t, w.repo.Session().Put(ctx, &model.Session{
+			ID: "ssn-s3", ChannelID: monitor, ThreadTS: threadTS, WorkspaceID: "support",
+			Kind: model.SessionKindWorkspaceAgent, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		})).Required()
+		gt.NoError(t, w.uc.HandleSlackEvent(ctx, mention(monitor, denied, "", "1700500005.000002", threadTS))).Required()
+		assertDenied(t, w, monitor)
+	})
+
+	t.Run("S7 mention in a case channel", func(t *testing.T) {
+		w := wire(t, false, false)
+		ctx := context.Background()
+		_, err := w.repo.Case().Create(ctx, "channel-ws", &model.Case{
+			ReporterID: "U-REPORTER", Title: "Channel case", Status: types.CaseStatusOpen, SlackChannelID: caseChannel,
+		})
+		gt.NoError(t, err).Required()
+		gt.NoError(t, w.uc.HandleSlackEvent(ctx, mention(caseChannel, denied, "", "1700500006.000001", ""))).Required()
+		assertDenied(t, w, caseChannel)
+	})
+
+	t.Run("S8 mention in a workspace channel", func(t *testing.T) {
+		w := wire(t, false, false)
+		gt.NoError(t, w.uc.HandleSlackEvent(context.Background(), mention(wsChannel, denied, "", "1700500007.000001", ""))).Required()
+		assertDenied(t, w, wsChannel)
+		ssn, err := w.repo.Session().GetByThread(context.Background(), wsChannel, "1700500007.000001")
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+}

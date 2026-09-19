@@ -44,6 +44,12 @@ func DecodeJobQuestionRefForTest(value string) (workspaceID string, caseID int64
 	return ref.WorkspaceID, ref.CaseID, ref.JobID, ref.RunID, nil
 }
 
+// EncodeJobQuestionRefForTest builds the Submit-button value for a run, the
+// way the posted form does.
+func EncodeJobQuestionRefForTest(key model.JobRunKey, runID string) (string, error) {
+	return jobQuestionRef{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID, JobID: key.JobID, RunID: runID}.encode()
+}
+
 // JobQuestionPosterForTest exposes the narrow poster interface so tests can
 // supply a fake.
 type JobQuestionPosterForTest = jobQuestionPoster

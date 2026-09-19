@@ -8,6 +8,7 @@ package wsmeta
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gollem-dev/gollem"
@@ -28,23 +29,30 @@ type Deps struct {
 	// external sources. Optional: when nil, get_workspace returns an empty
 	// `sources` array (the planner can still drive question / materialize).
 	SourceRepo interfaces.SourceRepository
+	// Access limits both tools to the workspaces the run's actor may access,
+	// read from the auth token the claim middleware puts on the context. Nil
+	// filters nothing, which matches a deployment with no workspace policy;
+	// every production host passes UseCases.WorkspaceAccess.
+	Access interfaces.WorkspaceAuthorizer
 }
 
 // New builds the planner-side workspace metadata tools: list_workspaces and
 // get_workspace. Both are read-only and never touch repository write methods.
 func New(deps Deps) []gollem.Tool {
 	return []gollem.Tool{
-		&listWorkspacesTool{registry: deps.Registry},
-		&getWorkspaceTool{registry: deps.Registry, sourceRepo: deps.SourceRepo},
+		&listWorkspacesTool{registry: deps.Registry, access: deps.Access},
+		&getWorkspaceTool{registry: deps.Registry, sourceRepo: deps.SourceRepo, access: deps.Access},
 	}
 }
 
-// listWorkspacesTool reports id / name / description for every registered
-// workspace. The system prompt already advertises this list, so the planner
-// usually does not need to call this tool — it exists as a backup when the
-// prompt was truncated or the planner wants to verify the registry state.
+// listWorkspacesTool reports id / name / description for every workspace the
+// run's actor may access. The system prompt already advertises this list, so
+// the planner usually does not need to call this tool — it exists as a backup
+// when the prompt was truncated or the planner wants to verify the registry
+// state.
 type listWorkspacesTool struct {
 	registry *model.WorkspaceRegistry
+	access   interfaces.WorkspaceAuthorizer
 }
 
 func (t *listWorkspacesTool) Spec() gollem.ToolSpec {
@@ -61,6 +69,13 @@ func (t *listWorkspacesTool) Run(ctx context.Context, _ map[string]any) (map[str
 		return map[string]any{"workspaces": []map[string]any{}}, nil
 	}
 	entries := t.registry.List()
+	if t.access != nil {
+		filtered, err := t.access.FilterAccessibleForCurrentUser(ctx, entries)
+		if err != nil {
+			return nil, goerr.Wrap(err, "filter accessible workspaces")
+		}
+		entries = filtered
+	}
 	items := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
 		if e == nil {
@@ -83,6 +98,7 @@ func (t *listWorkspacesTool) Run(ctx context.Context, _ map[string]any) (map[str
 type getWorkspaceTool struct {
 	registry   *model.WorkspaceRegistry
 	sourceRepo interfaces.SourceRepository
+	access     interfaces.WorkspaceAuthorizer
 }
 
 func (t *getWorkspaceTool) Spec() gollem.ToolSpec {
@@ -111,6 +127,16 @@ func (t *getWorkspaceTool) Run(ctx context.Context, args map[string]any) (map[st
 	entry, err := t.registry.Get(wsID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "lookup workspace", goerr.V("workspace_id", wsID))
+	}
+	if t.access != nil {
+		if err := t.access.AuthorizeCurrentUser(ctx, wsID); err != nil {
+			if errors.Is(err, model.ErrWorkspaceAccessDenied) {
+				// Answered like an unknown id: the model is told nothing about a
+				// workspace the requester cannot see, not even that it exists.
+				return nil, goerr.Wrap(model.ErrWorkspaceNotFound, "lookup workspace", goerr.V("workspace_id", wsID))
+			}
+			return nil, goerr.Wrap(err, "authorize workspace lookup", goerr.V("workspace_id", wsID))
+		}
 	}
 
 	out := map[string]any{

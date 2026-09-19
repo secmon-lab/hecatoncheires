@@ -3874,6 +3874,33 @@ func TestCaseUseCase_GetReferenceableCases(t *testing.T) {
 	gt.Value(t, cases[0].Title).Equal("Public")
 }
 
+// A reference into a workspace the caller may not access is omitted like a
+// private one, while a context without a token (a Job, the agent with no
+// actor) still resolves it.
+func TestCaseUseCase_GetReferenceableCases_DeniedWorkspace(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: testWorkspaceID, Name: "Main"}})
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: refWorkspaceID, Name: "Referenced"}})
+	access, err := usecase.NewWorkspaceAccessUseCase(registry,
+		map[string]interfaces.PolicyClient{refWorkspaceID: compileAuthzPolicy(t, policyDenyAll)},
+		repo.SlackUser(), usecase.WorkspaceAccessCacheConfig{TTL: time.Minute, Size: 16})
+	gt.NoError(t, err).Required()
+	uc := usecase.New(repo, registry, usecase.WithWorkspaceAccess(access))
+
+	pub := seedRefCase(t, repo, refWorkspaceID, "Public", types.CaseStatusOpen, false)
+
+	userCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U0ALICE"})
+	cases, err := uc.Case.GetReferenceableCases(userCtx, refWorkspaceID, []int64{pub})
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(0)
+
+	cases, err = uc.Case.GetReferenceableCases(context.Background(), refWorkspaceID, []int64{pub})
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].ID).Equal(pub)
+}
+
 func TestCaseUseCase_ReferenceWorkspaceForField(t *testing.T) {
 	uc, _ := newCaseRefUC(t)
 

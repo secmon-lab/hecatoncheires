@@ -153,6 +153,13 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 	// Check if the channel is linked to an existing case
 	if channelID != "" {
 		if existingCase, wsID, schema := uc.findCaseByChannelID(ctx, channelID); existingCase != nil {
+			allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), wsID, userID, channelID)
+			if err != nil {
+				return goerr.Wrap(err, "authorize slash command in case channel")
+			}
+			if !allowed {
+				return nil
+			}
 			// Check access control for private cases
 			if !model.IsCaseAccessible(existingCase, userID) {
 				if err := uc.slackService.PostEphemeral(ctx, channelID, userID, i18n.T(ctx, i18n.MsgErrCaseNotAccessible)); err != nil {
@@ -184,17 +191,36 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 			return goerr.Wrap(err, "invalid workspace ID",
 				goerr.V("workspace_id", workspaceID))
 		}
+		allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), workspaceID, userID, channelID)
+		if err != nil {
+			return goerr.Wrap(err, "authorize slash command for workspace")
+		}
+		if !allowed {
+			return nil
+		}
 		return uc.openCaseCreationModal(ctx, triggerID, workspaceID, channelID, sourceTeamID, entry.FieldSchema)
 	}
 
-	workspaces := uc.registry.Workspaces()
-	switch len(workspaces) {
-	case 0:
+	all := uc.registry.List()
+	if len(all) == 0 {
 		return goerr.New("no workspaces configured")
+	}
+	entries, err := uc.workspaceAccess.FilterAccessible(ctx, all, userID)
+	if err != nil {
+		return goerr.Wrap(err, "filter workspaces for slash command")
+	}
+	switch len(entries) {
+	case 0:
+		postWorkspaceAccessDenied(ctx, uc.ephemeralPoster(), channelID, userID,
+			goerr.Wrap(ErrNoAccessibleWorkspace, "no workspace is accessible to the slash command user"))
+		return nil
 	case 1:
-		entry, _ := uc.registry.Get(workspaces[0].ID)
-		return uc.openCaseCreationModal(ctx, triggerID, workspaces[0].ID, channelID, sourceTeamID, entry.FieldSchema)
+		return uc.openCaseCreationModal(ctx, triggerID, entries[0].Workspace.ID, channelID, sourceTeamID, entries[0].FieldSchema)
 	default:
+		workspaces := make([]model.Workspace, len(entries))
+		for i, e := range entries {
+			workspaces[i] = e.Workspace
+		}
 		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, sourceTeamID, workspaces)
 	}
 }
@@ -224,6 +250,12 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 	var meta commandMetadata
 	if err := json.Unmarshal([]byte(callback.View.PrivateMetadata), &meta); err != nil {
 		return nil, goerr.Wrap(err, "failed to parse private_metadata")
+	}
+
+	// The picker only listed accessible workspaces, but access may have been
+	// revoked since it was opened.
+	if denied, err := uc.deniedModalFor(ctx, workspaceID, callback.User.ID); err != nil || denied != nil {
+		return denied, err
 	}
 
 	// Get field schema for the selected workspace
@@ -269,6 +301,14 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	var meta commandMetadata
 	if err := json.Unmarshal([]byte(callback.View.PrivateMetadata), &meta); err != nil {
 		return goerr.Wrap(err, "failed to parse private_metadata")
+	}
+
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), meta.WorkspaceID, callback.User.ID, meta.ChannelID)
+	if err != nil {
+		return goerr.Wrap(err, "authorize case creation submit")
+	}
+	if !allowed {
+		return nil
 	}
 
 	// Extract custom field values from the view state
@@ -996,6 +1036,14 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 		return goerr.Wrap(err, "failed to parse edit private_metadata")
 	}
 
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), meta.WorkspaceID, callback.User.ID, meta.ChannelID)
+	if err != nil {
+		return goerr.Wrap(err, "authorize case edit submit")
+	}
+	if !allowed {
+		return nil
+	}
+
 	fieldValues := extractFieldValues(blockValues)
 	userID := callback.User.ID
 
@@ -1357,6 +1405,11 @@ func (uc *SlackUseCases) HandleCommandChoiceSubmit(ctx context.Context, callback
 		return nil, goerr.Wrap(err, "failed to parse command choice private_metadata")
 	}
 
+	// Access may have been revoked between opening the modal and submitting it.
+	if denied, err := uc.deniedModalFor(ctx, meta.WorkspaceID, callback.User.ID); err != nil || denied != nil {
+		return denied, err
+	}
+
 	existingCase, err := uc.repo.Case().Get(ctx, meta.WorkspaceID, meta.CaseID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to load case for command choice",
@@ -1563,6 +1616,14 @@ func (uc *SlackUseCases) HandleActionCreationSubmit(ctx context.Context, actionU
 	var meta actionCreateMetadata
 	if err := json.Unmarshal([]byte(callback.View.PrivateMetadata), &meta); err != nil {
 		return goerr.Wrap(err, "failed to parse action create private_metadata")
+	}
+
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), meta.WorkspaceID, callback.User.ID, meta.ChannelID)
+	if err != nil {
+		return goerr.Wrap(err, "authorize action creation submit")
+	}
+	if !allowed {
+		return nil
 	}
 
 	if _, err := actionUC.CreateAction(ctx, meta.WorkspaceID, meta.CaseID, title, description, assigneeID, "", status, dueDate); err != nil {

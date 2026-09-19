@@ -125,11 +125,12 @@ type UpdateActionInput struct {
 }
 
 type ActionUseCase struct {
-	repo         interfaces.Repository
-	registry     *model.WorkspaceRegistry
-	slackService slack.Service
-	baseURL      string
-	slotCoord    *notificationSlotCoordinator
+	repo            interfaces.Repository
+	registry        *model.WorkspaceRegistry
+	slackService    slack.Service
+	baseURL         string
+	slotCoord       *notificationSlotCoordinator
+	workspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 // NewActionUseCase constructs the ActionUseCase. slotCoord may be nil; when
@@ -137,11 +138,12 @@ type ActionUseCase struct {
 // notifications fall back to the legacy reply_broadcast path on each post.
 func NewActionUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string, slotCoord *notificationSlotCoordinator) *ActionUseCase {
 	return &ActionUseCase{
-		repo:         repo,
-		registry:     registry,
-		slackService: slackService,
-		baseURL:      baseURL,
-		slotCoord:    slotCoord,
+		repo:            repo,
+		registry:        registry,
+		slackService:    slackService,
+		baseURL:         baseURL,
+		slotCoord:       slotCoord,
+		workspaceAccess: allowAllWorkspaces(),
 	}
 }
 
@@ -349,6 +351,17 @@ func (uc *ActionUseCase) postSlackMessageForAction(ctx context.Context, workspac
 // (GraphQL/WebUI, Slack interactivity, internal callers) funnel through this
 // method; Slack side-effects are controlled by in.SlackSync and in.Actor.
 func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, in UpdateActionInput) (*model.Action, error) {
+	// Resolve the acting user from the auth token or the Slack Actor. The
+	// workspace gate runs before anything is loaded, so a denied actor learns
+	// nothing about which actions exist; the Slack select/assignee controls
+	// reach here without passing the GraphQL field middleware.
+	actorID, checkAccess := actorForAccess(ctx, in.Actor)
+	if checkAccess {
+		if err := uc.workspaceAccess.Authorize(ctx, workspaceID, actorID); err != nil {
+			return nil, goerr.Wrap(err, "cannot update action", goerr.V(ActionIDKey, in.ID))
+		}
+	}
+
 	existing, err := uc.repo.Action().Get(ctx, workspaceID, in.ID)
 	if err != nil {
 		return nil, goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, in.ID))
@@ -358,9 +371,7 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
 	}
-	// Resolve the acting user from the auth token or the Slack Actor, then run
-	// the shared Case write access gate (see actorForAccess / assertCaseWriteAccess).
-	actorID, checkAccess := actorForAccess(ctx, in.Actor)
+	// Run the shared Case write access gate (see actorForAccess / assertCaseWriteAccess).
 	if err := assertCaseWriteAccess(parentCase, actorID, checkAccess); err != nil {
 		return nil, goerr.Wrap(err, "cannot update action", goerr.V(ActionIDKey, in.ID))
 	}

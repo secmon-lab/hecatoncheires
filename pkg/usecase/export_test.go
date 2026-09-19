@@ -15,6 +15,24 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 )
 
+// SetMentionProposalWorkspaceAccessForTest replaces the authorizer a directly
+// constructed MentionProposalUseCase holds (New wires it in production).
+func SetMentionProposalWorkspaceAccessForTest(uc *MentionProposalUseCase, a interfaces.WorkspaceAuthorizer) {
+	uc.workspaceAccess = a
+}
+
+// MentionProposalWorkspaceAccessForTest returns the authorizer the usecase
+// holds, so a test can hand the durable host the same one.
+func MentionProposalWorkspaceAccessForTest(uc *MentionProposalUseCase) interfaces.WorkspaceAuthorizer {
+	return uc.workspaceAccess
+}
+
+// SetSlackWorkspaceAccessForTest replaces the authorizer a directly
+// constructed SlackUseCases holds.
+func SetSlackWorkspaceAccessForTest(uc *SlackUseCases, a interfaces.WorkspaceAuthorizer) {
+	uc.workspaceAccess = a
+}
+
 // ThreadcaseAskQuestionForTest drives the thread-mode host's question delivery —
 // the completion-handler path a durable run takes when its planner asks the user.
 func ThreadcaseAskQuestionForTest(uc *AgentUseCase, ctx context.Context,

@@ -223,6 +223,12 @@ type RunnerDeps struct {
 	// flag (the question is a deliberate agent interaction, not a log).
 	InteractionPoster jobQuestionPoster
 
+	// WorkspaceAccess decides whether the Slack user answering an interactive
+	// Job's question may act on the Job's workspace. Required for
+	// HandleQuestionSubmit, which refuses to run without it rather than let
+	// an answer through unchecked.
+	WorkspaceAccess interfaces.WorkspaceAuthorizer
+
 	// UnansweredTimeout bounds how long a run may stay suspended awaiting
 	// user input before Run treats the suspension as stale and recovers it
 	// (so the Job is not blocked forever by an unanswered question). 0 →

@@ -191,6 +191,27 @@ func TestReaction_UnsupportedEmoji_NoOp(t *testing.T) {
 	gt.Array(t, slackMock.postedChannelIDs).Length(0)
 }
 
+// A reactor the workspace's policy denies creates no case and is told why in
+// the channel where they reacted.
+func TestReaction_WorkspaceAccessDenied(t *testing.T) {
+	slackUC, _, repo, slackMock := newReactionSetup(t, newScriptedClient([]string{}))
+	usecase.SetSlackWorkspaceAccessForTest(slackUC, denyingAccess(t, newReactionWorkspaceRegistry(), "support"))
+	ctx := context.Background()
+
+	ev := reactionEvent("incident", "U-DENIED", "U-AUTHOR", "C-OTHER", "1700000000.000700")
+	gt.NoError(t, slackUC.HandleSlackEvent(ctx, ev)).Required()
+	async.Wait()
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-OTHER", "1700000000.000700")
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).Nil()
+	gt.Array(t, slackMock.posts()).Length(0)
+	eph := slackMock.ephemerals()
+	gt.Array(t, eph).Length(1).Required()
+	gt.Value(t, eph[0].ChannelID).Equal("C-OTHER")
+	gt.Value(t, eph[0].UserID).Equal("U-DENIED")
+}
+
 // B6: our own reaction, or a reaction on our own message, never triggers.
 func TestReaction_BotLoopGuards_NoOp(t *testing.T) {
 	ctx := context.Background()

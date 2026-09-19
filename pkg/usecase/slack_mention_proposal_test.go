@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -105,7 +106,8 @@ func bindDraftRuntimeWithoutWorker(
 	locator, err := agentkernel.NewLocator(procRepo)
 	gt.NoError(t, err).Required()
 
-	d, err := proposal.NewDurable(repo, registry, uc.DurableDraftHost(), locator, models)
+	d, err := proposal.NewDurable(repo, registry, usecase.MentionProposalWorkspaceAccessForTest(uc),
+		uc.DurableDraftHost(), locator, models)
 	gt.NoError(t, err).Required()
 	gt.NoError(t, d.Register(reg, taskAgent, nil,
 		testAgentRootBudget.Limiter(models.Resolve), history)).Required()
@@ -383,6 +385,80 @@ func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.
 	gt.Number(t, len(slackMock.updates())).GreaterOrEqual(1)
 }
 
+// newTwoWorkspaceRegistry registers "ws-denied" (which denyingAccess refuses)
+// and "ws-open" with the same schema.
+func newTwoWorkspaceRegistry() *model.WorkspaceRegistry {
+	registry := model.NewWorkspaceRegistry()
+	for _, id := range []string{"ws-denied", "ws-open"} {
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: id, Name: "Name " + id},
+			FieldSchema: schemaWithSeverity(),
+		})
+	}
+	return registry
+}
+
+// The preview's workspace selector offers only what the mentioning user may
+// access, so a denied workspace never reaches the choice.
+func TestMentionDraftUseCase_HandleAppMention_OffersOnlyAccessibleWorkspaces(t *testing.T) {
+	repo := memory.New()
+	registry := newTwoWorkspaceRegistry()
+	slackMock := newCollectorOnlyMockSlack()
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
+	usecase.SetMentionProposalWorkspaceAccessForTest(uc, denyingAccess(t, registry, "ws-denied"))
+	bindDraftRuntime(t, uc, repo, registry, newScriptedClient(stubDraftScript("ws-open")), slackMock)
+
+	ev := &slackevents.AppMentionEvent{
+		Channel: "C-ACCESS", User: "U-USER", Text: "<@BOT> please open a case", TimeStamp: "1700000040.000000",
+	}
+	gt.NoError(t, uc.HandleAppMention(context.Background(), ev)).Required()
+	waitForDraftSessionEnd(t, repo, "C-ACCESS", "1700000040.000000", model.SessionEndedWithMaterialize)
+
+	preview := waitForPreviewPost(t, slackMock)
+	raw, err := json.Marshal(preview.rawBlocks)
+	gt.NoError(t, err).Required()
+	gt.String(t, string(raw)).Contains("ws-open")
+	gt.Bool(t, strings.Contains(string(raw), "ws-denied")).False()
+}
+
+// A user no workspace allows gets the no-workspace notice and no turn.
+func TestMentionDraftUseCase_HandleAppMention_AllWorkspacesDenied(t *testing.T) {
+	repo := memory.New()
+	registry := newTwoWorkspaceRegistry()
+	slackMock := newCollectorOnlyMockSlack()
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
+	usecase.SetMentionProposalWorkspaceAccessForTest(uc, denyingAccess(t, registry, "ws-denied", "ws-open"))
+	locator := bindDraftRuntime(t, uc, repo, registry, newScriptedClient(nil), slackMock)
+
+	ev := &slackevents.AppMentionEvent{
+		Channel: "C-NONE", User: "U-USER", Text: "<@BOT> hi", TimeStamp: "1700000050.000000",
+	}
+	gt.NoError(t, uc.HandleAppMention(context.Background(), ev)).Required()
+
+	gt.Array(t, slackMock.texts()).Length(1).Required()
+	gt.String(t, slackMock.texts()[0]).Contains("No workspace is available to you")
+	pid, err := locator.ByTrigger(context.Background(),
+		agentkernel.TriggerKey("C-NONE", "1700000050.000000", "1700000050.000000"))
+	gt.NoError(t, err).Required()
+	gt.Value(t, pid).Equal(agentkit.ProcessID(""))
+}
+
+// A reply that would resume a draft turn re-resolves the user's workspaces; when
+// none is left, the thread is told and no turn is started.
+func TestDispatcher_ThreadReply_NoAccessibleWorkspace(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
+	usecase.SetMentionProposalWorkspaceAccessForTest(f.mentionProposal, denyingAccess(t, registry, "ws-1"))
+
+	ev := newMessageEvent("C-OPEN", "U1", "user follow-up answer", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	async.Wait()
+
+	f.assertNoTurn(t, "1700000020.000000")
+	gt.Array(t, f.slackMock.texts()).Length(1).Required()
+	gt.String(t, f.slackMock.texts()[0]).Contains("No workspace is available to you")
+}
+
 func TestSlackUseCases_AppMention_DispatchesToMentionProposal(t *testing.T) {
 	repo := memory.New()
 	schema := &config.FieldSchema{Fields: []config.FieldDefinition{
@@ -475,12 +551,13 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeProposal(t *testi
 // dispatcherFixture wires a SlackUseCases for thread-reply tests with a
 // pre-seeded Session in the requested state.
 type dispatcherFixture struct {
-	uc        *usecase.SlackUseCases
-	repo      interfaces.Repository
-	slackMock *collectorOnlyMockSlack
-	locator   agentkernel.Locator
-	channelID string
-	threadTS  string
+	uc              *usecase.SlackUseCases
+	mentionProposal *usecase.MentionProposalUseCase
+	repo            interfaces.Repository
+	slackMock       *collectorOnlyMockSlack
+	locator         agentkernel.Locator
+	channelID       string
+	threadTS        string
 }
 
 // assertNoTurn asserts the dispatcher dropped the reply: the trigger started no
@@ -523,7 +600,7 @@ func newDispatcherWithOpenSession(t *testing.T, channelID, threadTS string, last
 	})).Required()
 
 	return &dispatcherFixture{
-		uc: slackUC, repo: repo, slackMock: slackMock, locator: locator,
+		uc: slackUC, mentionProposal: mentionProposal, repo: repo, slackMock: slackMock, locator: locator,
 		channelID: channelID, threadTS: threadTS,
 	}
 }
@@ -682,6 +759,8 @@ type collectorOnlyMockSlack struct {
 	thread              []slacksvc.ConversationMessage
 	history             []slacksvc.ConversationMessage
 	ephemeralText       string
+	ephemeralChannelID  string
+	ephemeralUserID     string
 	ephemeralBlockPosts []ephemeralBlockPost
 	threadTexts         []string
 	threadReplies       []string // texts posted via PostThreadReply
@@ -748,11 +827,20 @@ func (m *collectorOnlyMockSlack) GetConversationHistory(_ context.Context, _ str
 func (m *collectorOnlyMockSlack) GetPermalink(_ context.Context, channelID, ts string) (string, error) {
 	return "https://slack/" + channelID + "/" + ts, nil
 }
-func (m *collectorOnlyMockSlack) PostEphemeral(_ context.Context, _ string, _ string, text string) error {
+func (m *collectorOnlyMockSlack) PostEphemeral(_ context.Context, channelID string, userID string, text string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ephemeralText = text
+	m.ephemeralChannelID = channelID
+	m.ephemeralUserID = userID
 	return nil
+}
+
+// ephemeral returns the last plain ephemeral message: channel, user, text.
+func (m *collectorOnlyMockSlack) ephemeral() (string, string, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ephemeralChannelID, m.ephemeralUserID, m.ephemeralText
 }
 func (m *collectorOnlyMockSlack) PostEphemeralBlocks(_ context.Context, channelID string, userID string, blocks []goslack.Block, _ string) (string, error) {
 	m.mu.Lock()

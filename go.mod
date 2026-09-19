@@ -17,6 +17,7 @@ require (
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0
 	github.com/graph-gophers/dataloader/v7 v7.2.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jomei/notionapi v1.13.3
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/m-mizutani/clog v0.2.1
@@ -144,7 +145,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-getter v1.8.6 // indirect
 	github.com/hashicorp/go-version v1.8.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/k0kubun/pp/v3 v3.5.2 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect

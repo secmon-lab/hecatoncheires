@@ -21,6 +21,10 @@ type Workspace struct {
 // ErrWorkspaceNotFound is returned when a workspace is not found in the registry
 var ErrWorkspaceNotFound = goerr.New("workspace not found")
 
+// ErrWorkspaceAccessDenied is returned when a workspace's authorization policy
+// does not allow the acting Slack user.
+var ErrWorkspaceAccessDenied = goerr.New("workspace access denied")
+
 // WorkspaceEntry holds workspace identity and its field schema
 type WorkspaceEntry struct {
 	Workspace            Workspace

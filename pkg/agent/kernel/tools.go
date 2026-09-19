@@ -68,6 +68,10 @@ type ToolDeps struct {
 
 	KnowledgeAccessor knowledgetool.KnowledgeAccessor
 	KnowledgeMutator  knowledgetool.KnowledgeMutator
+
+	// WorkspaceAccess limits the workspace metadata tools to what the run's
+	// actor may access. Optional: nil filters nothing.
+	WorkspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 // Validate enforces the required-field contract.
@@ -277,7 +281,7 @@ func buildToolSetDeps(d ToolDeps, sc Scope, entry *model.WorkspaceEntry, target 
 		// The workspace-metadata tools read the registry, not one workspace, which
 		// is exactly why the case-draft flow needs them: it has not chosen a
 		// workspace yet.
-		WSMeta: wsmeta.Deps{Registry: d.Registry, SourceRepo: d.Repo.Source()},
+		WSMeta: wsmeta.Deps{Registry: d.Registry, SourceRepo: d.Repo.Source(), Access: d.WorkspaceAccess},
 	}
 
 	if entry != nil {

@@ -19,6 +19,9 @@ import (
 // RegistryHasInteractiveJobForTest exposes registryHasInteractiveJob.
 var RegistryHasInteractiveJobForTest = registryHasInteractiveJob
 
+// BuildWorkspaceAccessForTest exposes buildWorkspaceAccess.
+var BuildWorkspaceAccessForTest = buildWorkspaceAccess
+
 // InProcessExecutorsForTest exposes inProcessExecutors so a test can pin which
 // deployments still get one without standing up a server.
 var InProcessExecutorsForTest = inProcessExecutors

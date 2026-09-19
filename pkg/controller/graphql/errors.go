@@ -86,7 +86,8 @@ func ErrorCode(err error) string {
 		errors.Is(err, usecase.ErrJobNotFound),
 		errors.Is(err, model.ErrWorkspaceNotFound):
 		return ErrCodeNotFound
-	case errors.Is(err, usecase.ErrAccessDenied):
+	case errors.Is(err, usecase.ErrAccessDenied),
+		errors.Is(err, model.ErrWorkspaceAccessDenied):
 		return ErrCodeForbidden
 	case errors.Is(err, usecase.ErrCaseAlreadyClosed),
 		errors.Is(err, usecase.ErrCaseAlreadyOpen),

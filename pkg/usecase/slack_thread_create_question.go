@@ -198,6 +198,14 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 	wsID := entry.Workspace.ID
 
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess(), uc.deps.SlackService, wsID, callback.User.ID, uiChannel)
+	if err != nil {
+		return goerr.Wrap(err, "authorize thread case question submit")
+	}
+	if !allowed {
+		return nil
+	}
+
 	// If the case is already created, the form is stale.
 	if c, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, caseChannel, caseTS); err != nil {
 		return goerr.Wrap(err, "look up case for question submit")

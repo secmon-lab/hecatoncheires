@@ -244,3 +244,33 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		gt.Number(t, len(slackMock.updateViewCalls)).Equal(1)
 	})
 }
+
+// A user the workspace's policy denies saves no draft and is told why.
+func TestSlackUseCases_HandleSaveAsDraftClick_WorkspaceAccessDenied(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "risk", Name: "Risk"}})
+	slackMock := &commandTestSlackService{}
+	uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+	usecase.SetSlackWorkspaceAccessForTest(uc, denyingAccess(t, registry, "risk"))
+	caseUC := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+
+	meta, err := json.Marshal(map[string]any{"workspace_id": "risk", "channel_id": "C001"})
+	gt.NoError(t, err).Required()
+	callback := &goslack.InteractionCallback{
+		User: goslack.User{ID: "U-DENIED"},
+		View: goslack.View{
+			PrivateMetadata: string(meta),
+			State:           &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{}},
+		},
+	}
+	gt.NoError(t, uc.HandleSaveAsDraftClick(context.Background(), caseUC, callback)).Required()
+
+	cases, err := repo.Case().List(context.Background(), "risk")
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(0)
+	gt.Value(t, slackMock.ephemeralChannelID).Equal("C001")
+	gt.Value(t, slackMock.ephemeralUserID).Equal("U-DENIED")
+	gt.String(t, slackMock.ephemeralText).NotEqual("")
+}

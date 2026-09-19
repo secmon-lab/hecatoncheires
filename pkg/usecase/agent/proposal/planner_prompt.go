@@ -17,14 +17,10 @@ type plannerPromptWorkspace struct {
 	Description string
 }
 
-// workspacePromptEntries flattens registry into the prompt-template-friendly
-// shape — only id / name / description. Returns nil when registry is nil or
-// empty so the template's "no workspaces" branch fires.
-func workspacePromptEntries(registry *model.WorkspaceRegistry) []plannerPromptWorkspace {
-	if registry == nil {
-		return nil
-	}
-	entries := registry.List()
+// workspacePromptEntries flattens the actor's accessible workspaces into the
+// prompt-template-friendly shape — only id / name / description. Returns nil
+// when entries is empty so the template's "no workspaces" branch fires.
+func workspacePromptEntries(entries []*model.WorkspaceEntry) []plannerPromptWorkspace {
 	if len(entries) == 0 {
 		return nil
 	}

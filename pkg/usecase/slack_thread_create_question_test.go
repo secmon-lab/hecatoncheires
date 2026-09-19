@@ -5,10 +5,57 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	goslack "github.com/slack-go/slack"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
+
+// An answer from a user the workspace's policy denies is not processed: the
+// form is left as it is, no turn resumes, and the user alone is told why.
+func TestHandleThreadCaseQuestionSubmit_WorkspaceAccessDenied(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+	llm := newScriptedClient(nil)
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:            repo,
+		Registry:        reg,
+		LLM:             llm,
+		HistoryRepo:     agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:       agentarchive.NewMemoryTraceRepository(),
+		SlackService:    slackMock,
+		CaseUC:          caseUC,
+		WorkspaceAccess: denyingAccess(t, reg, "support"),
+	})
+	startAgentRuntime(t, agentRuntimeDeps{UC: agentUC, Repo: repo, Registry: reg, LLM: llm})
+
+	const channel = "C-MONITOR"
+	const rootTS = "1700000000.000800"
+	cb := &goslack.InteractionCallback{
+		Type:    goslack.InteractionTypeBlockActions,
+		User:    goslack.User{ID: "U-DENIED"},
+		Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: channel}}},
+		Message: goslack.Message{Msg: goslack.Msg{Timestamp: "1700000000.000900", ThreadTimestamp: rootTS}},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: channel + ":" + rootTS}},
+		},
+	}
+	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()
+	async.Wait()
+
+	gt.Array(t, slackMock.updates()).Length(0)
+	eph := slackMock.ephemerals()
+	gt.Array(t, eph).Length(1).Required()
+	gt.Value(t, eph[0].ChannelID).Equal(channel)
+	gt.Value(t, eph[0].UserID).Equal("U-DENIED")
+}
 
 // TestBuildThreadCreateQuestionBlocks_Fallback locks the notification
 // fallback of the thread-mode question form to the i18n layer: English is

@@ -54,9 +54,20 @@ type UseCases struct {
 	JobRun                   *JobRunUseCase
 	Import                   *ImportUseCase
 	Dashboard                *DashboardUseCase
+	// WorkspaceAccess is the per-workspace authorizer shared by every usecase.
+	// Never nil: without WithWorkspaceAccess it allows every workspace.
+	WorkspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 type Option func(*UseCases)
+
+// WithWorkspaceAccess configures the per-workspace authorizer. Optional: when
+// omitted, New uses one with no policy, which allows every workspace.
+func WithWorkspaceAccess(a interfaces.WorkspaceAuthorizer) Option {
+	return func(uc *UseCases) {
+		uc.WorkspaceAccess = a
+	}
+}
 
 func WithAuth(auth AuthUseCaseInterface) Option {
 	return func(uc *UseCases) {
@@ -240,6 +251,9 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	for _, opt := range opts {
 		opt(uc)
 	}
+	if uc.WorkspaceAccess == nil {
+		uc.WorkspaceAccess = allowAllWorkspaces()
+	}
 
 	// Build the webfetch client only when both the HTTP settings (WithWebFetch)
 	// and an LLM client (WithLLMClient) are present. The LLM screen is the only
@@ -252,8 +266,10 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	}
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
+	uc.Case.workspaceAccess = uc.WorkspaceAccess
 	slotCoord := newNotificationSlotCoordinator(repo.NotificationSlot(), uc.slackService, uc.notificationSlotDuration, nil)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL, slotCoord)
+	uc.Action.workspaceAccess = uc.WorkspaceAccess
 	uc.Memo = NewMemoUseCase(repo, registry)
 	uc.Knowledge = NewKnowledgeUseCase(repo, uc.embedClient)
 	uc.Tag = NewTagUseCase(repo)
@@ -290,25 +306,26 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
 			uc.Agent = NewAgentUseCase(AgentDeps{
-				Repo:           repo,
-				Registry:       registry,
-				LLM:            uc.llmClient,
-				HistoryRepo:    uc.historyRepo,
-				TraceRepo:      uc.traceRepo,
-				ActionUC:       uc.Action,
-				ActionStepUC:   uc.ActionStep,
-				CaseUC:         uc.Case,
-				MemoUC:         uc.Memo,
-				KnowledgeUC:    uc.Knowledge,
-				TagUC:          uc.Tag,
-				SlackService:   uc.slackService,
-				SlackSearch:    uc.slackSearch,
-				SlackRetriever: uc.slackRetriever,
-				NotionTool:     uc.notionTool,
-				GitHubClient:   uc.githubClient,
-				WebFetchClient: uc.webfetchClient,
-				EmbedClient:    uc.embedClient,
-				JiraTools:      uc.jiraTools,
+				Repo:            repo,
+				Registry:        registry,
+				LLM:             uc.llmClient,
+				HistoryRepo:     uc.historyRepo,
+				TraceRepo:       uc.traceRepo,
+				ActionUC:        uc.Action,
+				ActionStepUC:    uc.ActionStep,
+				CaseUC:          uc.Case,
+				MemoUC:          uc.Memo,
+				KnowledgeUC:     uc.Knowledge,
+				TagUC:           uc.Tag,
+				SlackService:    uc.slackService,
+				SlackSearch:     uc.slackSearch,
+				SlackRetriever:  uc.slackRetriever,
+				NotionTool:      uc.notionTool,
+				GitHubClient:    uc.githubClient,
+				WebFetchClient:  uc.webfetchClient,
+				EmbedClient:     uc.embedClient,
+				JiraTools:       uc.jiraTools,
+				WorkspaceAccess: uc.WorkspaceAccess,
 			})
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
@@ -328,9 +345,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// dispatcher will no-op for app_mention in unbound channels).
 		if uc.historyRepo != nil && uc.traceRepo != nil {
 			uc.MentionProposal = NewMentionProposalUseCase(repo, registry, uc.slackService)
+			uc.MentionProposal.workspaceAccess = uc.WorkspaceAccess
 		}
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionProposal, uc.slackService)
+	uc.Slack.workspaceAccess = uc.WorkspaceAccess
 
 	// Dashboard is built last so it sees option-set values (stale threshold,
 	// greeting LLM). The greeting uses a dedicated client when configured,
@@ -341,6 +360,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		homeMessageLLM = uc.llmClient
 	}
 	uc.Dashboard = newDashboardUseCase(repo, registry, uc.dashboardStaleThreshold, homeMessageLLM)
+	uc.Dashboard.workspaceAccess = uc.WorkspaceAccess
 
 	return uc
 }

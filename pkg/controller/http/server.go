@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/frontend"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -29,6 +30,7 @@ type Server struct {
 	slackCommandHandler     *SlackCommandHandler
 	slackSigningSecret      string
 	workspaceRegistry       *model.WorkspaceRegistry
+	workspaceAccess         interfaces.WorkspaceAuthorizer
 	tickHookHandler         *TickHookHandler
 	dbCheckHandler          *DBCheckHandler
 	mcpHandler              http.Handler
@@ -39,6 +41,15 @@ type Options func(*Server)
 func WithWorkspaceRegistry(registry *model.WorkspaceRegistry) Options {
 	return func(s *Server) {
 		s.workspaceRegistry = registry
+	}
+}
+
+// WithWorkspaceAccess sets the authorizer /api/workspaces filters its list
+// through. Without it the list is not filtered, which is correct only for a
+// deployment where no workspace has an [authz] policy.
+func WithWorkspaceAccess(access interfaces.WorkspaceAuthorizer) Options {
+	return func(s *Server) {
+		s.workspaceAccess = access
 	}
 }
 
@@ -152,9 +163,15 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 		})
 	}
 
-	// Workspace list endpoint
+	// Workspace list endpoint. It is authenticated because the list is filtered
+	// by the caller's workspace access.
 	if s.workspaceRegistry != nil {
-		r.Get("/api/workspaces", workspacesHandler(s.workspaceRegistry))
+		handler := workspacesHandler(s.workspaceRegistry, s.workspaceAccess)
+		if s.authUC != nil {
+			r.With(authMiddleware(s.authUC)).Get("/api/workspaces", handler)
+		} else {
+			r.Get("/api/workspaces", handler)
+		}
 	}
 
 	// Slack webhook endpoint (if configured) - No auth required, uses signature verification
@@ -239,7 +256,7 @@ func accessLogger(next http.Handler) http.Handler {
 }
 
 // workspacesHandler returns a handler that serves the workspace list as JSON
-func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
+func workspacesHandler(registry *model.WorkspaceRegistry, access interfaces.WorkspaceAuthorizer) http.HandlerFunc {
 	type workspaceResponse struct {
 		ID    string `json:"id"`
 		Name  string `json:"name"`
@@ -251,16 +268,24 @@ func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		workspaces := registry.Workspaces()
-		resp := response{
-			Workspaces: make([]workspaceResponse, len(workspaces)),
+		entries := registry.List()
+		if access != nil {
+			filtered, err := access.FilterAccessibleForCurrentUser(r.Context(), entries)
+			if err != nil {
+				errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "failed to filter accessible workspaces"), http.StatusInternalServerError)
+				return
+			}
+			entries = filtered
 		}
-		for i, ws := range workspaces {
+		resp := response{
+			Workspaces: make([]workspaceResponse, len(entries)),
+		}
+		for i, e := range entries {
 			resp.Workspaces[i] = workspaceResponse{
-				ID:    ws.ID,
-				Name:  ws.Name,
-				Emoji: ws.Emoji,
-				Color: ws.Color,
+				ID:    e.Workspace.ID,
+				Name:  e.Workspace.Name,
+				Emoji: e.Workspace.Emoji,
+				Color: e.Workspace.Color,
 			}
 		}
 

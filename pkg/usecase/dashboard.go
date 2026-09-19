@@ -48,15 +48,17 @@ type DashboardUseCase struct {
 	staleThreshold time.Duration
 	// homeMessageLLM generates the greeting. Nil disables the greeting
 	// (GenerateHomeMessage returns "").
-	homeMessageLLM gollem.LLMClient
+	homeMessageLLM  gollem.LLMClient
+	workspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 func newDashboardUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, staleThreshold time.Duration, homeMessageLLM gollem.LLMClient) *DashboardUseCase {
 	return &DashboardUseCase{
-		repo:           repo,
-		registry:       registry,
-		staleThreshold: staleThreshold,
-		homeMessageLLM: homeMessageLLM,
+		repo:            repo,
+		registry:        registry,
+		staleThreshold:  staleThreshold,
+		homeMessageLLM:  homeMessageLLM,
+		workspaceAccess: allowAllWorkspaces(),
 	}
 }
 
@@ -68,7 +70,10 @@ func (uc *DashboardUseCase) ListMyOpenCases(ctx context.Context) ([]*model.MyOpe
 		return nil, goerr.Wrap(ErrUnauthenticated, "list my open cases")
 	}
 
-	entries := uc.registry.List()
+	entries, err := uc.workspaceAccess.FilterAccessible(ctx, uc.registry.List(), token.Sub)
+	if err != nil {
+		return nil, goerr.Wrap(err, "filter accessible workspaces for open cases")
+	}
 	partial := make([][]*model.MyOpenCase, len(entries))
 
 	if err := uc.fanOut(ctx, entries, func(fctx context.Context, i int, entry *model.WorkspaceEntry) error {
@@ -120,7 +125,10 @@ func (uc *DashboardUseCase) ListMyDueActions(ctx context.Context) ([]*model.MyDu
 		return nil, goerr.Wrap(ErrUnauthenticated, "list my due actions")
 	}
 
-	entries := uc.registry.List()
+	entries, err := uc.workspaceAccess.FilterAccessible(ctx, uc.registry.List(), token.Sub)
+	if err != nil {
+		return nil, goerr.Wrap(err, "filter accessible workspaces for due actions")
+	}
 	partial := make([][]*model.MyDueAction, len(entries))
 
 	if err := uc.fanOut(ctx, entries, func(fctx context.Context, i int, entry *model.WorkspaceEntry) error {
@@ -218,8 +226,18 @@ func (uc *DashboardUseCase) GetFavoriteWorkspaces(ctx context.Context) ([]string
 
 	result := make([]string, 0, len(pref.FavoriteWorkspaceIDs))
 	for _, id := range pref.FavoriteWorkspaceIDs {
-		if _, err := uc.registry.Get(id); err == nil {
+		if _, err := uc.registry.Get(id); err != nil {
+			continue
+		}
+		// A favorite saved before the workspace's policy denied the caller is
+		// hidden, not deleted: it reappears if access is granted again.
+		err := uc.workspaceAccess.Authorize(ctx, id, token.Sub)
+		switch {
+		case err == nil:
 			result = append(result, id)
+		case isWorkspaceAccessDenied(err):
+		default:
+			return nil, goerr.Wrap(err, "authorize favorite workspace", goerr.V("workspace_id", id))
 		}
 	}
 	return result, nil
@@ -245,6 +263,9 @@ func (uc *DashboardUseCase) SetFavoriteWorkspaces(ctx context.Context, workspace
 		}
 		if _, err := uc.registry.Get(id); err != nil {
 			return nil, goerr.Wrap(model.ErrUserPreferenceValidation, "unknown workspace", goerr.V("workspace_id", id))
+		}
+		if err := uc.workspaceAccess.Authorize(ctx, id, token.Sub); err != nil {
+			return nil, goerr.Wrap(err, "favorite workspace is not accessible", goerr.V("workspace_id", id))
 		}
 		seen[id] = struct{}{}
 		normalized = append(normalized, id)

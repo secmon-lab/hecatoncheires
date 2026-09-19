@@ -169,9 +169,50 @@ func draftWorkspace() *model.WorkspaceEntry {
 	}
 }
 
+// secretWorkspace is registered but denied to every requester by accessStub.
+func secretWorkspace() *model.WorkspaceEntry {
+	return &model.WorkspaceEntry{Workspace: model.Workspace{ID: "secret", Name: "Secret", Description: "Restricted"}}
+}
+
+// accessStub denies the workspaces in denied and records who was asked about.
+type accessStub struct {
+	mu     sync.Mutex
+	denied map[string]bool
+	actors []string
+}
+
+func (s *accessStub) Authorize(_ context.Context, workspaceID, slackUserID string) error {
+	s.mu.Lock()
+	s.actors = append(s.actors, slackUserID)
+	s.mu.Unlock()
+	if s.denied[workspaceID] {
+		return goerr.Wrap(model.ErrWorkspaceAccessDenied, "denied by stub")
+	}
+	return nil
+}
+
+func (s *accessStub) AuthorizeCurrentUser(ctx context.Context, workspaceID string) error {
+	return s.Authorize(ctx, workspaceID, "")
+}
+
+func (s *accessStub) FilterAccessible(_ context.Context, entries []*model.WorkspaceEntry, _ string) ([]*model.WorkspaceEntry, error) {
+	return entries, nil
+}
+
+func (s *accessStub) FilterAccessibleForCurrentUser(_ context.Context, entries []*model.WorkspaceEntry) ([]*model.WorkspaceEntry, error) {
+	return entries, nil
+}
+
+func (s *accessStub) askedActors() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.actors...)
+}
+
 type durableHarness struct {
 	agent   *proposal.Durable
 	host    *durableHost
+	access  *accessStub
 	repo    *memory.Memory
 	kernel  *agentkit.Kernel
 	locator agentkernel.Locator
@@ -187,13 +228,15 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	repo := memory.New()
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(draftWorkspace())
+	registry.Register(secretWorkspace())
 
 	procRepo := agentprocmemory.New()
 	locator, err := agentkernel.NewLocator(procRepo)
 	gt.NoError(t, err).Required()
 
 	host := &durableHost{}
-	d, err := proposal.NewDurable(repo, registry, host, locator, testModelPolicy(t))
+	access := &accessStub{denied: map[string]bool{"secret": true}}
+	d, err := proposal.NewDurable(repo, registry, access, host, locator, testModelPolicy(t))
 	gt.NoError(t, err).Required()
 
 	store := agentarchive.NewMemoryHistoryStore()
@@ -210,7 +253,7 @@ func newDurableHarness(t *testing.T, llm gollem.LLMClient) *durableHarness {
 	gt.NoError(t, err).Required()
 	d.Bind(k, nil)
 
-	return &durableHarness{agent: d, host: host, repo: repo, kernel: k, locator: locator}
+	return &durableHarness{agent: d, host: host, access: access, repo: repo, kernel: k, locator: locator}
 }
 
 // session persists the Session a turn locks on and returns it.
@@ -236,6 +279,9 @@ func (h *durableHarness) request(ssn *model.Session, triggerTS string) proposal.
 		TriggerTS:    triggerTS,
 		ActorUserID:  draftActorID,
 		ProcessingTS: "1700000000.000900",
+		// The requester's accessible workspaces: "secret" is registered but not
+		// among them.
+		Workspaces: []*model.WorkspaceEntry{draftWorkspace()},
 	}
 }
 
@@ -701,28 +747,88 @@ func TestDurableStartsATriggerlessWorkspaceSwitch(t *testing.T) {
 // labels render as plain_text, so the shared Slack formatting rules have to reach
 // the run here too.
 func TestDurablePromptCarriesTheSlackFormatting(t *testing.T) {
-	registry := model.NewWorkspaceRegistry()
-	registry.Register(draftWorkspace())
-
 	for _, wsSwitch := range []bool{false, true} {
-		got, err := proposal.RenderDurablePromptForTest(registry, wsSwitch)
+		got, err := proposal.RenderDurablePromptForTest([]*model.WorkspaceEntry{draftWorkspace()}, wsSwitch)
 		gt.NoError(t, err).Required()
 		gt.String(t, got).Contains(slackfmt.Section())
 		gt.Bool(t, strings.Contains(got, "{{")).False()
 	}
 }
 
+// The planner is shown the requester's accessible workspaces, not the whole
+// registry: a workspace the requester may not access must not be offered.
+func TestDurablePromptListsOnlyTheRequestersWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	llm, calls := recordingLLM(
+		draftPlan,
+		"the deploy failed",
+		draftFinalize,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"It failed."}`,
+	)
+	h := newDurableHarness(t, llm)
+	ssn := h.session(t, ctx)
+	h.run(t, h.request(ssn, "1700000001.000031"))
+
+	seen := calls()
+	gt.Array(t, seen).Length(4).Required()
+	gt.String(t, seen[0].SystemPrompt).Contains("risk")
+	gt.Bool(t, strings.Contains(seen[0].SystemPrompt, "secret")).False()
+	gt.Bool(t, strings.Contains(seen[0].SystemPrompt, "Restricted")).False()
+}
+
+func TestDurableStartTurnRequiresWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(draftPlan))
+	ssn := h.session(t, ctx)
+
+	req := h.request(ssn, "1700000001.000032")
+	req.Workspaces = nil
+	_, err := h.agent.StartTurn(ctx, req)
+	gt.Error(t, err)
+}
+
+// A draft naming a workspace the requester may not access is fed back and
+// regenerated, and the check is made for the run's own actor.
+func TestDurableRegeneratesAnInaccessibleWorkspace(t *testing.T) {
+	ctx := context.Background()
+	h := newDurableHarness(t, durableLLM(
+		draftPlan,
+		"the deploy failed",
+		draftFinalize,
+		`{"workspace_id":"secret","title":"Failed deploy","description":"It failed."}`,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"It failed."}`,
+	))
+	ssn := h.session(t, ctx)
+
+	proc := h.run(t, h.request(ssn, "1700000001.000033"))
+	gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+	calls := h.host.Calls()
+	gt.Array(t, calls).Length(1).Required()
+	gt.Value(t, calls[0].Kind).Equal("propose")
+	gt.String(t, calls[0].Draft.WorkspaceID).Equal("risk")
+
+	actors := h.access.askedActors()
+	gt.Array(t, actors).Length(2).Required()
+	gt.Value(t, actors[0]).Equal(draftActorID)
+	gt.Value(t, actors[1]).Equal(draftActorID)
+}
+
 func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(draftWorkspace())
+	access := &accessStub{}
 
-	_, err := proposal.NewDurable(nil, registry, &durableHost{}, nil, agentkernel.ModelPolicy{})
+	_, err := proposal.NewDurable(nil, registry, access, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 
-	_, err = proposal.NewDurable(memory.New(), nil, &durableHost{}, nil, agentkernel.ModelPolicy{})
+	_, err = proposal.NewDurable(memory.New(), nil, access, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 
-	_, err = proposal.NewDurable(memory.New(), registry, nil, nil, agentkernel.ModelPolicy{})
+	_, err = proposal.NewDurable(memory.New(), registry, nil, &durableHost{}, nil, agentkernel.ModelPolicy{})
+	gt.Error(t, err).Required()
+
+	_, err = proposal.NewDurable(memory.New(), registry, access, nil, nil, agentkernel.ModelPolicy{})
 	gt.Error(t, err).Required()
 }
 
@@ -730,7 +836,7 @@ func TestNewDurableRejectsMissingDependencies(t *testing.T) {
 func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(draftWorkspace())
-	d, err := proposal.NewDurable(memory.New(), registry, &durableHost{}, nil, agentkernel.ModelPolicy{})
+	d, err := proposal.NewDurable(memory.New(), registry, &accessStub{}, &durableHost{}, nil, agentkernel.ModelPolicy{})
 	gt.NoError(t, err).Required()
 
 	_, err = d.StartTurn(context.Background(), proposal.TurnRequest{

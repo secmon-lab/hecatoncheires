@@ -553,11 +553,12 @@ func buildJobRunner(
 	})
 
 	return job.NewJobRunner(job.RunnerDeps{
-		Repo:        repo,
-		Registry:    registry,
-		LLMClient:   llm,
-		ToolBuilder: toolBuilder,
-		Durable:     durable,
+		Repo:            repo,
+		Registry:        registry,
+		LLMClient:       llm,
+		ToolBuilder:     toolBuilder,
+		Durable:         durable,
+		WorkspaceAccess: uc.WorkspaceAccess,
 	})
 }
 

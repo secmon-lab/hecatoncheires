@@ -48,6 +48,14 @@ func (uc *SlackUseCases) HandleSaveAsDraftClick(ctx context.Context, caseUC *Cas
 		return goerr.Wrap(err, "failed to parse save-as-draft private_metadata")
 	}
 
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(), meta.WorkspaceID, callback.User.ID, meta.ChannelID)
+	if err != nil {
+		return goerr.Wrap(err, "authorize save-as-draft")
+	}
+	if !allowed {
+		return nil
+	}
+
 	blockValues := callback.View.State.Values
 
 	title := ""

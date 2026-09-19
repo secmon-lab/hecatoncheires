@@ -99,6 +99,15 @@ func (uc *SlackUseCases) handleReactionEvent(ctx context.Context, event *slackev
 	}
 	ctx = uc.contextWithUserLang(ctx, reporter)
 
+	allowed, err := authorizeSlackActor(ctx, uc.workspaceAccess, uc.ephemeralPoster(),
+		entry.Workspace.ID, reporter, srcChannel)
+	if err != nil {
+		return goerr.Wrap(err, "authorize reaction-triggered case creation")
+	}
+	if !allowed {
+		return nil
+	}
+
 	if srcChannel == entry.SlackMonitorChannelID {
 		return uc.agent.reactionCreateSameChannel(ctx, entry, reporter, srcChannel, srcTS)
 	}
