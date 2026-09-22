@@ -4408,8 +4408,8 @@ func TestGraphQLHandler_DraftsReporterResolvesToSlackUser(t *testing.T) {
 // SlackUser repository has no entry for it (an unsynced thread-mode
 // poster, a stale workspace, a deleted account), the GraphQL response
 // must NOT carry a field-level error. A single missing reporter must
-// not fail the whole list query and blank the page out (Sentry
-// ARGUS-7S). The reporter field resolves to null while reporterID is
+// not fail the whole list query and blank the page out, as it did in
+// production. The reporter field resolves to null while reporterID is
 // still echoed, and ops visibility is preserved out-of-band by the
 // SlackUser dataloader's errutil.Handle report (logs + Sentry).
 func TestGraphQLHandler_DraftsReporterMissingResolvesToNull(t *testing.T) {

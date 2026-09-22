@@ -646,7 +646,7 @@ func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
 // its SlackChannelID points at the shared monitored channel that hosts many
 // threads, so renaming it on a title change would rename that shared channel
 // out from under every other thread (and fails in production with
-// not_authorized — see Sentry ARGUS-82). Only channel-mode Cases, which own a
+// not_authorized). Only channel-mode Cases, which own a
 // dedicated channel, may be renamed.
 func TestCaseUseCase_UpdateCase_SlackChannelRenameByMode(t *testing.T) {
 	newTitle := "New title"
@@ -2323,7 +2323,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 	})
 
 	t.Run("skips connect when configured team ID is empty", func(t *testing.T) {
-		// Regression for ARGUS-80: a workspace with no SlackTeamID configured
+		// Regression: a workspace with no SlackTeamID configured
 		// (teamID empty) previously still entered the cross-workspace connect
 		// branch, passing ["", sourceTeamID] to admin.conversations.setTeams and
 		// failing with not_an_enterprise. Without a home team id the connect must

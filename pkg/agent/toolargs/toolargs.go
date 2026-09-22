@@ -4,7 +4,7 @@
 // gollem validates a call's arguments against the ToolSpec before the tool runs
 // and rejects the whole call on a mismatch ("expected array type"), so a tool
 // never gets the chance to interpret what it was sent. That rejection is fed
-// back to the model, but in production (memo__apply_memo_changes, ARGUS-8S) the
+// back to the model, but in production (memo__apply_memo_changes) the
 // model answered it by re-emitting the same call, and the writes the call
 // carried were never applied while the run reported success.
 //

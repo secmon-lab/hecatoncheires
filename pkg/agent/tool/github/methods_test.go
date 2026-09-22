@@ -80,7 +80,7 @@ var notFoundCallers = []struct {
 // 404, and the agent acts on them differently: it varies the issue number
 // after "not found", but has to correct the owner when the repository is out
 // of reach. Keeping them as one error is what sent a production turn through
-// three consecutive issue numbers under a bad owner (ARGUS-98).
+// three consecutive issue numbers under a bad owner.
 func TestNotFound_UnreachableRepositoryIsDistinguished(t *testing.T) {
 	t.Parallel()
 

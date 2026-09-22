@@ -329,7 +329,7 @@ func (r *caseResolver) Reporter(ctx context.Context, obj *graphql1.Case) (*graph
 	// thread-mode poster, a deleted account, an ID that drifted, ...) resolves
 	// to null rather than a field-level GraphQL error. The frontend prioritises
 	// display: a single missing reporter must not fail the whole `cases` query
-	// and blank out the list (see Sentry ARGUS-7S). Ops visibility is NOT lost
+	// and blank out the list, as it did in production. Ops visibility is NOT lost
 	// — the SlackUser dataloader reports every missing ID through
 	// errutil.Handle (Sentry), so the gap is still surfaced to operators.
 	return user, nil

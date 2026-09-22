@@ -50,8 +50,8 @@ func TestSlackSearch_EmptyBackgroundYieldsNoResults(t *testing.T) {
 }
 
 // The search asks for typed hits so a scenario can describe a Notion database
-// and have the agent reach it through notion__get_database — the path ARGUS-91
-// was about. A plain-text reply still yields a page, because the simulator LLM
+// and have the agent reach it through notion__get_database — the path the
+// production failure was about. A plain-text reply still yields a page, because the simulator LLM
 // is not guaranteed to honour the schema.
 func TestNotionSearch_TypesEachHit(t *testing.T) {
 	rec := toolsim.NewRecorder()
