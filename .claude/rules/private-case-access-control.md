@@ -32,3 +32,33 @@ Note: Knowledge is NOT a Case child — it is a workspace-level entity with no C
 - Access control helpers: `pkg/domain/model/case.go` (`IsCaseAccessible`, `RestrictCase`)
 - UseCase pattern: `pkg/usecase/case.go`, `pkg/usecase/action.go`
 - E2E tests: `pkg/controller/http/graphql_test.go` (`TestGraphQLHandler_PrivateCaseAccessControl`)
+
+## Workspace access control
+
+A workspace's `[authz]` Rego policy decides whether a user may use that
+workspace at all (`docs/configuration.md` § Authorization Section). It sits in
+front of the private-case check above: a user denied the workspace never
+reaches a Case in it. The decision is made by `interfaces.WorkspaceAuthorizer`
+(`pkg/usecase/workspace_access.go`); a denial is `model.ErrWorkspaceAccessDenied`.
+Like the private-case check, a context with no auth token and a bot actor are
+not checked.
+
+When adding an entry point:
+
+- **GraphQL**: a `Query` / `Mutation` root field whose workspace is a top-level
+  `workspaceId` argument is checked automatically by
+  `WorkspaceAccessMiddleware` (`pkg/controller/graphql/workspace_access.go`).
+  A root field that carries the workspace any other way (inside an input
+  object, derived from another id) is NOT covered and must call
+  `AuthorizeCurrentUser` in its usecase.
+- **Slack**: once the handler has resolved the workspace and the acting Slack
+  user, call `authorizeSlackActor` (`pkg/usecase/workspace_access_slack.go`)
+  before doing any work; it posts the denial to the user. Event handlers in the
+  dispatcher use `eventActorAllowed`; view submissions answer with
+  `deniedModalFor`.
+- **Cross-workspace reads** (dashboard, workspace lists, workspace pickers, the
+  agent's workspace tools): pass the candidate workspaces through
+  `FilterAccessible` / `FilterAccessibleForCurrentUser` instead of checking
+  each one ad hoc.
+- **Tests**: cover an allowed user, a denied user (assert nothing was written
+  and the denial reached the user), and the no-token / bot case.

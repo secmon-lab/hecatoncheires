@@ -1,15 +1,20 @@
 package cli_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
@@ -115,4 +120,24 @@ func TestGraphqlErrorStatusMiddleware_MapsClientErrorsTo4xx(t *testing.T) {
 			gt.Number(t, rec.Code).Equal(c.wantStatus)
 		})
 	}
+}
+
+// buildWorkspaceAccess must take the policy of every workspace that declares
+// one, and leave a workspace without [authz] open.
+func TestBuildWorkspaceAccess(t *testing.T) {
+	dir := t.TempDir()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "deny.rego"), []byte("package authz\n\nallow := false\n"), 0o600)).Required()
+	configs, err := config.ParseWorkspaceConfigs([]config.WorkspaceConfigSource{
+		{Name: "open.toml", Data: []byte("[workspace]\nid = \"open\"\n"), BaseDir: dir},
+		{Name: "secured.toml", Data: []byte("[workspace]\nid = \"secured\"\n\n[authz]\npolicy = [\"deny.rego\"]\n"), BaseDir: dir},
+	})
+	gt.NoError(t, err).Required()
+	registry := config.BuildWorkspaceRegistry(configs)
+
+	access, err := cli.BuildWorkspaceAccessForTest(registry, configs, memory.New().SlackUser())
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	gt.NoError(t, access.Authorize(ctx, "open", "U0ALICE"))
+	gt.Error(t, access.Authorize(ctx, "secured", "U0ALICE")).Is(model.ErrWorkspaceAccessDenied)
 }

@@ -89,6 +89,17 @@ var (
 	// case reference, so a required one would make the case un-creatable.
 	ErrRequiredCaseRefUnsupported = goerr.New("case_ref fields cannot be required")
 
+	// --- Workspace authorization ([authz]) ---
+
+	// ErrAuthzPolicyEmpty is returned when [authz] is present but lists no
+	// policy path, or lists an empty one.
+	ErrAuthzPolicyEmpty = goerr.New("[authz] policy must list at least one non-empty path")
+	// ErrAuthzPolicyTrialFailed is returned when a compiled [authz] policy
+	// errors while being evaluated against the sample inputs at load time
+	// (no package authz, a non-boolean allow, a rule producing conflicting
+	// values, ...). The Rego error is joined to it.
+	ErrAuthzPolicyTrialFailed = goerr.New("[authz] policy failed a trial evaluation")
+
 	// --- Global config ([[workspace_group]]) ---
 
 	// ErrMissingWorkspaceGroupID is returned when a [[workspace_group]] omits id.

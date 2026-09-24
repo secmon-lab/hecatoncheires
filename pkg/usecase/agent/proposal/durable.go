@@ -54,8 +54,9 @@ type durablePromptInput struct {
 	SlackFormat string
 }
 
-// renderDurablePrompt builds the persona prompt for one turn.
-func renderDurablePrompt(registry *model.WorkspaceRegistry, wsSwitch bool) (string, error) {
+// renderDurablePrompt builds the persona prompt for one turn; workspaces are
+// the ones the actor may access.
+func renderDurablePrompt(workspaces []*model.WorkspaceEntry, wsSwitch bool) (string, error) {
 	durablePromptOnce.Do(func() {
 		durablePromptTmpl, durablePromptErr = template.New("durable_planner").
 			Parse(durablePlannerPromptSrc)
@@ -65,7 +66,7 @@ func renderDurablePrompt(registry *model.WorkspaceRegistry, wsSwitch bool) (stri
 	}
 	var buf bytes.Buffer
 	if err := durablePromptTmpl.Execute(&buf, durablePromptInput{
-		Workspaces:      workspacePromptEntries(registry),
+		Workspaces:      workspacePromptEntries(workspaces),
 		WorkspaceSwitch: wsSwitch,
 		SlackFormat:     slackfmt.Section(),
 	}); err != nil {
@@ -119,8 +120,12 @@ type Target struct {
 type Durable struct {
 	repo     interfaces.Repository
 	registry *model.WorkspaceRegistry
-	host     Host
-	locator  agentkernel.Locator
+	// access re-checks, inside the regeneration loop, that the workspace the
+	// planner chose is one the requester may access: the prompt and the tools
+	// only show accessible ones, but the model's output is not bound by them.
+	access  interfaces.WorkspaceAuthorizer
+	host    Host
+	locator agentkernel.Locator
 	// models answers what a run may still spend, which is what the planner
 	// divides between the tasks of a round.
 	models agentkernel.ModelPolicy
@@ -136,6 +141,7 @@ type Durable struct {
 // re-delivered Slack event from a busy thread; a nil locator makes every delivery
 // look fresh, which the idempotency key still covers.
 func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
+	access interfaces.WorkspaceAuthorizer,
 	host Host, locator agentkernel.Locator, models agentkernel.ModelPolicy,
 ) (*Durable, error) {
 	if repo == nil {
@@ -144,11 +150,14 @@ func NewDurable(repo interfaces.Repository, registry *model.WorkspaceRegistry,
 	if registry == nil {
 		return nil, goerr.New("workspace registry is required")
 	}
+	if access == nil {
+		return nil, goerr.New("workspace access control is required")
+	}
 	if host == nil {
 		return nil, goerr.New("host is required")
 	}
 	return &Durable{
-		repo: repo, registry: registry, host: host, locator: locator, models: models,
+		repo: repo, registry: registry, access: access, host: host, locator: locator, models: models,
 	}, nil
 }
 
@@ -207,7 +216,7 @@ func (d *Durable) StartTurn(ctx context.Context, req TurnRequest) (*Result, erro
 		return nil, goerr.New("UserInput is required (it is the planner's first message)")
 	}
 
-	systemPrompt, err := renderDurablePrompt(d.registry, req.Trigger == TriggerWSSwitch)
+	systemPrompt, err := renderDurablePrompt(req.Workspaces, req.Trigger == TriggerWSSwitch)
 	if err != nil {
 		return nil, err
 	}
@@ -346,12 +355,18 @@ func (d *Durable) inheritOpts(ctx context.Context, prevID string) []agentkit.Spa
 // preserved. Rejecting here instead would spend regeneration rounds on a draft
 // the human could have fixed with one click. A workspace that does not exist is
 // different: there is no preview to render at all.
-func (d *Durable) validateAgainstRegistry(_ context.Context, _ map[string]string, out *Draft) error {
+func (d *Durable) validateAgainstRegistry(ctx context.Context, meta map[string]string, out *Draft) error {
 	if out == nil {
 		return goerr.New("the draft is empty")
 	}
 	if _, err := d.registry.Get(out.WorkspaceID); err != nil {
 		return goerr.Wrap(err, "the proposed workspace is not registered",
+			goerr.V("workspace_id", out.WorkspaceID))
+	}
+	// Fed back to the model like any other finalizer error, so it picks one of
+	// the workspaces it was actually shown.
+	if err := d.access.Authorize(ctx, out.WorkspaceID, agentkernel.ScopeFrom(meta).ActorUserID); err != nil {
+		return goerr.Wrap(err, "the proposed workspace is not accessible to the requester; choose one of the listed workspaces",
 			goerr.V("workspace_id", out.WorkspaceID))
 	}
 	return nil

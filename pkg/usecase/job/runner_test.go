@@ -970,6 +970,10 @@ func (p *recordingQuestionPoster) UpdateMessage(_ context.Context, _, _ string,
 	return nil
 }
 
+func (p *recordingQuestionPoster) PostEphemeral(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
 func (p *recordingQuestionPoster) posts() int { return int(p.n.Load()) }
 
 // awaitJobRunLogStage waits for the run's log to reach want and returns it.
@@ -1451,6 +1455,7 @@ func TestJobRunner_InteractiveRun_TokenTotalsSpanSuspendAndResume(t *testing.T) 
 		LLMClient:         inertLLM(),
 		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
 		InteractionPoster: poster,
+		WorkspaceAccess:   workspaceAccessStub{},
 		NewRunID:          func() string { return "RUN-1" },
 		NewTraceID:        func() string { return "TRACE-1" },
 		Clock:             func() time.Time { return now },
@@ -2370,6 +2375,7 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		LLMClient:         llm.client(),
 		Durable:           durable,
 		InteractionPoster: poster,
+		WorkspaceAccess:   workspaceAccessStub{},
 		NewRunID:          func() string { return "RUN-1" },
 		NewTraceID:        func() string { return "TRACE-1" },
 		Clock:             func() time.Time { return now },

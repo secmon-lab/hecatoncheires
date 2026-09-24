@@ -40,6 +40,7 @@ type CaseUseCase struct {
 	baseURL           string
 	welcomeRenderers  map[string]*welcomeRenderer
 	eventPublisher    CaseEventPublisher
+	workspaceAccess   interfaces.WorkspaceAuthorizer
 }
 
 func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackAdminService slack.AdminService, baseURL string) *CaseUseCase {
@@ -50,6 +51,7 @@ func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistr
 		slackAdminService: slackAdminService,
 		baseURL:           baseURL,
 		welcomeRenderers:  make(map[string]*welcomeRenderer),
+		workspaceAccess:   allowAllWorkspaces(),
 	}
 
 	// Pre-parse welcome message templates per workspace. Configuration loading
@@ -253,6 +255,13 @@ func (uc *CaseUseCase) verifyCaseRefsExist(ctx context.Context, workspaceID stri
 	// Batch-fetch each reference workspace exactly once.
 	fetched := make(map[string]map[int64]*model.Case, len(idsByWS))
 	for refWS, idSet := range idsByWS {
+		// A reference into a workspace the caller may not access is refused
+		// rather than reported per id: its existence checks would otherwise
+		// tell the caller which of that workspace's case ids exist.
+		if err := uc.workspaceAccess.AuthorizeCurrentUser(ctx, refWS); err != nil {
+			return goerr.Wrap(err, "case reference points into an inaccessible workspace",
+				goerr.V("reference_workspace", refWS))
+		}
 		ids := make([]int64, 0, len(idSet))
 		for id := range idSet {
 			ids = append(ids, id)
@@ -1558,6 +1567,15 @@ func (uc *CaseUseCase) ResolveCaseRefs(ctx context.Context, workspaceID string, 
 func (uc *CaseUseCase) GetReferenceableCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
 	if len(ids) == 0 {
 		return nil, nil
+	}
+	// References into a workspace the caller may not access are omitted, the
+	// same way private and draft cases are: they render as unavailable.
+	if err := uc.workspaceAccess.AuthorizeCurrentUser(ctx, workspaceID); err != nil {
+		if isWorkspaceAccessDenied(err) {
+			return nil, nil
+		}
+		return nil, goerr.Wrap(err, "authorize reference workspace",
+			goerr.V("reference_workspace", workspaceID))
 	}
 	found, err := uc.repo.Case().GetByIDs(ctx, workspaceID, ids)
 	if err != nil {

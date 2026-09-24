@@ -447,3 +447,116 @@ func TestBuildDraftEditModal_PreTicksIsTest(t *testing.T) {
 		gt.Array(t, cg.InitialOptions).Length(0)
 	})
 }
+
+// TestDraftInteractions_WorkspaceAccessDenied drives each draft interaction
+// with a user the draft's workspace denies: nothing is created, opened or
+// switched, and the user alone is told why.
+func TestDraftInteractions_WorkspaceAccessDenied(t *testing.T) {
+	const denied = "U-DENIED"
+
+	setup := func(t *testing.T) (*usecase.MentionProposalUseCase, *usecase.CaseUseCase, *memory.Memory, *collectorOnlyMockSlack, *model.CaseProposal) {
+		t.Helper()
+		repo := memory.New()
+		registry := newTwoWorkspaceRegistry()
+		slackMock := newCollectorOnlyMockSlack()
+		uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock)
+		usecase.SetMentionProposalWorkspaceAccessForTest(uc, denyingAccess(t, registry, "ws-denied"))
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		d := model.NewCaseProposal(time.Now().UTC(), denied)
+		d.SelectedWorkspaceID = "ws-denied"
+		d.Materialization = &model.WorkspaceMaterialization{Title: "Draft", Description: "body"}
+		d.EphemeralChannelID = "C-DRAFT"
+		d.EphemeralMessageTS = "1700000060.000000"
+		gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+		return uc, caseUC, repo, slackMock, d
+	}
+	assertDenied := func(t *testing.T, m *collectorOnlyMockSlack, channel string) {
+		t.Helper()
+		ch, user, text := m.ephemeral()
+		gt.Value(t, ch).Equal(channel)
+		gt.Value(t, user).Equal(denied)
+		gt.String(t, text).NotEqual("")
+	}
+	buttonCallback := func(actionID, value string) *goslack.InteractionCallback {
+		cb := &goslack.InteractionCallback{
+			Type:      goslack.InteractionTypeBlockActions,
+			TriggerID: "trigger-denied",
+			User:      goslack.User{ID: denied},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{{ActionID: actionID, Value: value}},
+			},
+		}
+		cb.Channel.ID = "C-DRAFT"
+		return cb
+	}
+
+	t.Run("S10 switching to a denied workspace", func(t *testing.T) {
+		uc, _, repo, slackMock, d := setup(t)
+		// The switch needs a bound draft runtime; its LLM has no script, so any
+		// turn the switch wrongly started would fail rather than pass silently.
+		bindDraftRuntimeWithoutWorker(t, uc, repo, newTwoWorkspaceRegistry(), newScriptedClient(nil), slackMock)
+		d.SelectedWorkspaceID = "ws-open"
+		gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+		cb := buttonCallback(usecase.ActionIDDraftSelectWS, string(d.ID))
+		cb.ActionCallback.BlockActions[0].BlockID = usecase.BlockIDDraftWSSelect + ":" + string(d.ID)
+		cb.ActionCallback.BlockActions[0].SelectedOption = goslack.OptionBlockObject{Value: "ws-denied"}
+
+		gt.NoError(t, uc.HandleSelectWorkspace(context.Background(), cb, cb.ActionCallback.BlockActions[0])).Required()
+
+		stored, err := repo.CaseProposal().Get(context.Background(), d.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.SelectedWorkspaceID).Equal("ws-open")
+		gt.Bool(t, stored.InferenceInProgress).False()
+		assertDenied(t, slackMock, "C-DRAFT")
+	})
+
+	t.Run("S11 submitting a draft for a denied workspace", func(t *testing.T) {
+		uc, caseUC, repo, slackMock, d := setup(t)
+		cb := buttonCallback(usecase.ActionIDDraftSubmit, string(d.ID))
+
+		gt.NoError(t, uc.HandleSubmit(context.Background(), caseUC, cb, cb.ActionCallback.BlockActions[0])).Required()
+
+		cases, err := repo.Case().List(context.Background(), "ws-denied")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(0)
+		assertDenied(t, slackMock, "C-DRAFT")
+	})
+
+	t.Run("S11 opening the edit modal for a denied workspace", func(t *testing.T) {
+		uc, _, _, slackMock, d := setup(t)
+		cb := buttonCallback(usecase.ActionIDDraftEdit, string(d.ID))
+
+		gt.NoError(t, uc.HandleEdit(context.Background(), cb, cb.ActionCallback.BlockActions[0])).Required()
+
+		gt.Array(t, slackMock.openViewCalls).Length(0)
+		assertDenied(t, slackMock, "C-DRAFT")
+	})
+
+	t.Run("S11 submitting the edit modal for a denied workspace", func(t *testing.T) {
+		uc, caseUC, repo, slackMock, d := setup(t)
+		meta, err := json.Marshal(map[string]string{
+			"workspace_id":         "ws-denied",
+			"proposal_id":          string(d.ID),
+			"ephemeral_channel_id": d.EphemeralChannelID,
+			"ephemeral_message_ts": d.EphemeralMessageTS,
+		})
+		gt.NoError(t, err).Required()
+		cb := &goslack.InteractionCallback{
+			Type: goslack.InteractionTypeViewSubmission,
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				CallbackID:      usecase.SlackCallbackIDDraftEdit,
+				PrivateMetadata: string(meta),
+				State:           &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{}},
+			},
+		}
+
+		gt.NoError(t, uc.HandleEditSubmit(context.Background(), caseUC, cb)).Required()
+
+		cases, err := repo.Case().List(context.Background(), "ws-denied")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(0)
+		assertDenied(t, slackMock, "C-DRAFT")
+	})
+}

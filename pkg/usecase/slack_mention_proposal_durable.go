@@ -115,12 +115,16 @@ func (h proposalHost) handler(ctx context.Context, target proposal.Target) (*sla
 	if creator == "" {
 		creator = target.ActorUserID
 	}
-	// The candidate list is the whole registry: which workspaces were plausible was
-	// the run's own judgement, and it has already made it.
+	// The preview's workspace selector offers what the requester may access;
+	// which of those was plausible was the run's own judgement, already made.
+	candidates, err := h.uc.accessibleWorkspaces(ctx, target.ActorUserID)
+	if err != nil {
+		return nil, nil, err
+	}
 	return newSlackDraftHandler(
 		h.uc.repo, h.uc.registry, h.uc.slackService,
 		target.ChannelID, target.ThreadTS, "", creator,
-		h.uc.registry.List(), target.ProposalID,
+		candidates, target.ProposalID,
 		target.ProcessingTS, target.PreviewTS,
 	), session, nil
 }
@@ -132,6 +136,17 @@ func (uc *MentionProposalUseCase) runDraftTurn(ctx context.Context, req proposal
 	if uc.durableDraft == nil {
 		return nil, goerr.New("the case-draft agent is not bound")
 	}
+	// Resolved per turn, not carried from the first mention, so a policy change
+	// reaches a reply, an answer or a workspace switch too.
+	workspaces, err := uc.accessibleWorkspaces(ctx, req.ActorUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(workspaces) == 0 {
+		uc.notifyNoWorkspace(ctx, req.Session.ChannelID, req.Session.ThreadTS)
+		return &proposal.Result{Status: proposal.StatusNoWorkspace}, nil
+	}
+	req.Workspaces = workspaces
 	return uc.durableDraft.StartTurn(ctx, req)
 }
 

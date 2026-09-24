@@ -108,6 +108,19 @@ type AgentDeps struct {
 	// plain tool slice rather than a client type). nil/empty means Jira is
 	// not configured.
 	JiraTools []gollem.Tool
+
+	// WorkspaceAccess decides whether the Slack user submitting a form may act
+	// on its workspace. Optional: nil allows every workspace.
+	WorkspaceAccess interfaces.WorkspaceAuthorizer
+}
+
+// workspaceAccess returns the configured authorizer, or one that allows every
+// workspace when none was supplied.
+func (uc *AgentUseCase) workspaceAccess() interfaces.WorkspaceAuthorizer {
+	if uc.deps.WorkspaceAccess == nil {
+		return allowAllWorkspaces()
+	}
+	return uc.deps.WorkspaceAccess
 }
 
 // NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.

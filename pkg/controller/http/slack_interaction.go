@@ -3,9 +3,11 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	jobuc "github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
@@ -104,6 +106,10 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 			async.Dispatch(ctx, func(ctx context.Context) error {
 				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					if errors.Is(err, model.ErrWorkspaceAccessDenied) {
+						h.slackUC.NotifyWorkspaceAccessDenied(ctx, cb.Channel.ID, cb.User.ID, err)
+						return nil
+					}
 					return goerr.Wrap(err, "failed to update action status from Slack",
 						goerr.V("workspace_id", workspaceID),
 						goerr.V("action_id", actionID))
@@ -131,6 +137,10 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 			async.Dispatch(ctx, func(ctx context.Context) error {
 				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					if errors.Is(err, model.ErrWorkspaceAccessDenied) {
+						h.slackUC.NotifyWorkspaceAccessDenied(ctx, cb.Channel.ID, cb.User.ID, err)
+						return nil
+					}
 					return goerr.Wrap(err, "failed to update action assignee from Slack",
 						goerr.V("workspace_id", workspaceID),
 						goerr.V("action_id", actionID))

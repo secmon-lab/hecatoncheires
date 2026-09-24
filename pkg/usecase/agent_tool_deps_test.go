@@ -34,6 +34,7 @@ var knownToolDepFields = []string{
 	"ActionUC", "ActionStepUC", "CaseUC", "CaseRefUC",
 	"CaseMultiUC", "CaseMultiActionUC", "MemoUC",
 	"KnowledgeAccessor", "KnowledgeMutator",
+	"WorkspaceAccess",
 }
 
 func TestAgentToolDeps_CoversEveryToolDepField(t *testing.T) {
@@ -61,6 +62,9 @@ func TestAgentToolDeps_PopulatesTheUnconditionalFields(t *testing.T) {
 		"ActionUC", "ActionStepUC", "CaseUC", "CaseRefUC",
 		"CaseMultiUC", "CaseMultiActionUC", "MemoUC",
 		"KnowledgeAccessor", "KnowledgeMutator",
+		// Never nil: without WithWorkspaceAccess the UseCases holds one that
+		// allows every workspace.
+		"WorkspaceAccess",
 	}
 	for _, name := range unconditional {
 		field := v.FieldByName(name)

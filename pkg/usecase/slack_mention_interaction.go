@@ -75,6 +75,11 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 	if err != nil {
 		return goerr.Wrap(err, "selected workspace not found")
 	}
+	// The selector only lists accessible workspaces, but access may have been
+	// revoked since the preview was posted.
+	if allowed, err := uc.authorizeDraftActor(ctx, newWorkspaceID, callback.User.ID, callback.Channel.ID); err != nil || !allowed {
+		return err
+	}
 
 	// (1) Lock the preview UI immediately. The user sees a "materializing…"
 	// row while the planner runs.
@@ -180,6 +185,9 @@ func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *Case
 	if draft.Materialization == nil {
 		return goerr.New("draft has no materialization to submit", goerr.V("proposal_id", draft.ID))
 	}
+	if allowed, err := uc.authorizeDraftActor(ctx, draft.SelectedWorkspaceID, callback.User.ID, callback.Channel.ID); err != nil || !allowed {
+		return err
+	}
 
 	// Brief lock during creation to prevent double-submit.
 	lockBlocks, _ := buildSubmittingBlocks()
@@ -210,9 +218,13 @@ func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *Case
 		// Re-render preview so user can retry / Edit.
 		entry, getErr := uc.registry.Get(draft.SelectedWorkspaceID)
 		if getErr == nil {
-			candidates := uc.accessibleWorkspaces(callback.User.ID)
-			blocks, fallback := buildPreviewBlocks(ctx, draft, entry, candidates)
-			_ = uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback+i18n.T(ctx, i18n.MsgMentionSubmitFailed))
+			candidates, candErr := uc.accessibleWorkspaces(ctx, callback.User.ID)
+			if candErr != nil {
+				errutil.Handle(ctx, candErr, "failed to resolve workspaces for the retry preview")
+			} else {
+				blocks, fallback := buildPreviewBlocks(ctx, draft, entry, candidates)
+				_ = uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback+i18n.T(ctx, i18n.MsgMentionSubmitFailed))
+			}
 		}
 		return goerr.Wrap(err, "failed to create case from draft",
 			goerr.V("proposal_id", draft.ID),
@@ -244,6 +256,9 @@ func (uc *MentionProposalUseCase) HandleEdit(ctx context.Context, callback *gosl
 	entry, err := uc.registry.Get(draft.SelectedWorkspaceID)
 	if err != nil {
 		return goerr.Wrap(err, "selected workspace not found for Edit")
+	}
+	if allowed, err := uc.authorizeDraftActor(ctx, draft.SelectedWorkspaceID, callback.User.ID, callback.Channel.ID); err != nil || !allowed {
+		return err
 	}
 
 	meta := editMetadata{
@@ -329,6 +344,11 @@ func (uc *MentionProposalUseCase) HandleEditSubmit(ctx context.Context, caseUC *
 	var meta editMetadata
 	if err := json.Unmarshal([]byte(callback.View.PrivateMetadata), &meta); err != nil {
 		return goerr.Wrap(err, "failed to parse edit metadata")
+	}
+	// A view_submission carries no channel; the denial goes to the thread the
+	// preview lives in.
+	if allowed, err := uc.authorizeDraftActor(ctx, meta.WorkspaceID, callback.User.ID, meta.EphemeralChannelID); err != nil || !allowed {
+		return err
 	}
 
 	draft, err := uc.repo.CaseProposal().Get(ctx, model.CaseProposalID(meta.ProposalID))

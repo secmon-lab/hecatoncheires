@@ -49,12 +49,24 @@ func TestClassifyUserError(t *testing.T) {
 		gt.Value(t, got.Cause).Equal("Priority, Due date")
 	})
 
-	t.Run("no accessible workspace maps to config", func(t *testing.T) {
+	t.Run("no accessible workspace", func(t *testing.T) {
 		err := goerr.Wrap(usecase.ErrNoAccessibleWorkspace, "resolve workspace")
 		got, ok := usecase.ClassifyUserErrorForTest(err)
 		gt.Bool(t, ok).True()
 		gt.Value(t, got.Kind).Equal(uierr.KindPermission)
-		gt.Value(t, got.What).Equal(i18n.MsgUIErrConfigWhat)
+		gt.Value(t, got.What).Equal(i18n.MsgUIErrNoAccessibleWorkspaceWhat)
+		gt.Value(t, got.Detail).Equal(i18n.MsgUIErrNoAccessibleWorkspaceDetail)
+		gt.Value(t, got.Remediation).Equal(i18n.MsgUIErrNoAccessibleWorkspaceFix)
+	})
+
+	t.Run("workspace access denied", func(t *testing.T) {
+		err := goerr.Wrap(model.ErrWorkspaceAccessDenied, "workspace policy denied the user")
+		got, ok := usecase.ClassifyUserErrorForTest(err)
+		gt.Bool(t, ok).True()
+		gt.Value(t, got.Kind).Equal(uierr.KindPermission)
+		gt.Value(t, got.What).Equal(i18n.MsgUIErrWorkspaceAccessDeniedWhat)
+		gt.Value(t, got.Detail).Equal(i18n.MsgUIErrWorkspaceAccessDeniedDetail)
+		gt.Value(t, got.Remediation).Equal(i18n.MsgUIErrWorkspaceAccessDeniedFix)
 	})
 
 	t.Run("unrecognized error is not classified", func(t *testing.T) {

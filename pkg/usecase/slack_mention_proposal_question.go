@@ -390,6 +390,19 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 		return nil
 	}
 
+	// Decided before the form is consumed: an answer from a user no workspace
+	// allows must leave the question open, not rewrite the form and clear the
+	// pending snapshot only for runDraftTurn to refuse the turn afterwards.
+	workspaces, err := uc.accessibleWorkspaces(ctx, callback.User.ID)
+	if err != nil {
+		return goerr.Wrap(err, "decide workspaces for question submit",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	if len(workspaces) == 0 {
+		uc.notifyNoWorkspace(ctx, channelID, threadTS)
+		return nil
+	}
+
 	pq := session.PendingQuestion
 	answers := parseDraftQuestionAnswers(pq, callback.BlockActionState)
 	requesterID := session.CreatorUserID

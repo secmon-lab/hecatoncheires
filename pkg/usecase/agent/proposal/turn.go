@@ -49,6 +49,11 @@ type TurnRequest struct {
 	// its own record — but it must see the request, the investigation and the
 	// question that produced it. Empty starts a fresh conversation.
 	InheritFrom string
+
+	// Workspaces are the workspaces the actor may access: the only ones the
+	// planner is shown and may choose. Required and non-empty; the host
+	// resolves them per turn so a policy change reaches the next turn.
+	Workspaces []*model.WorkspaceEntry
 }
 
 // Status discriminates what StartTurn did.
@@ -63,6 +68,9 @@ const (
 	// StatusIdempotent means the trigger duplicates a turn already started; drop
 	// it silently.
 	StatusIdempotent
+	// StatusNoWorkspace means the actor may access no workspace, so no turn was
+	// spawned; the host has already told the user.
+	StatusNoWorkspace
 )
 
 // Result is the outcome of StartTurn.
@@ -76,6 +84,9 @@ func validateTurnRequest(req *TurnRequest) error {
 	}
 	if req.Session == nil {
 		return goerr.New("Session is required")
+	}
+	if len(req.Workspaces) == 0 {
+		return goerr.New("Workspaces is required (the actor's accessible workspaces)")
 	}
 	// TriggerTS may be empty for synthetic triggers (ws-switch), which carry no
 	// Slack event to deduplicate on.

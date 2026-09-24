@@ -27,6 +27,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
@@ -117,6 +119,32 @@ func classifyError(err error) string {
 
 func isClientError(err error) bool {
 	return gqlctrl.IsClientError(err)
+}
+
+// Bounds of the per-instance workspace access decision cache: a decision lives
+// for a minute, and at most this many users' decisions are kept.
+const (
+	workspaceAccessCacheTTL  = time.Minute
+	workspaceAccessCacheSize = 4096
+)
+
+// buildWorkspaceAccess builds the per-workspace authorizer from every
+// workspace config that carries an [authz] policy.
+func buildWorkspaceAccess(registry *model.WorkspaceRegistry, configs []*config.WorkspaceConfig, users interfaces.SlackUserRepository) (*usecase.WorkspaceAccessUseCase, error) {
+	policies := make(map[string]interfaces.PolicyClient)
+	for _, wc := range configs {
+		if wc.AuthzPolicy != nil {
+			policies[wc.ID] = wc.AuthzPolicy
+		}
+	}
+	access, err := usecase.NewWorkspaceAccessUseCase(registry, policies, users, usecase.WorkspaceAccessCacheConfig{
+		TTL:  workspaceAccessCacheTTL,
+		Size: workspaceAccessCacheSize,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to build workspace access control")
+	}
+	return access, nil
 }
 
 func statusForExtensionCode(code string) int {
@@ -529,6 +557,11 @@ func cmdServe() *cli.Command {
 			}()
 
 			ucOpts = append(ucOpts, usecase.WithWorkspaceGroups(groupRegistry))
+			workspaceAccess, err := buildWorkspaceAccess(registry, workspaceConfigs, repo.SlackUser())
+			if err != nil {
+				return err
+			}
+			ucOpts = append(ucOpts, usecase.WithWorkspaceAccess(workspaceAccess))
 			uc := usecase.New(repo, registry, ucOpts...)
 
 			// Interactive Jobs suspend a run and resume it from a later Slack
@@ -617,7 +650,7 @@ func cmdServe() *cli.Command {
 				// needs the persistent History/Trace archive, which a deployment without
 				// Cloud Storage does not have.
 				if uc.MentionProposal != nil {
-					d, dErr := proposal.NewDurable(repo, registry,
+					d, dErr := proposal.NewDurable(repo, registry, uc.WorkspaceAccess,
 						uc.MentionProposal.DurableDraftHost(), locator, modelSetup.Policy)
 					if dErr != nil {
 						return goerr.Wrap(dErr, "failed to build the case-draft agent")
@@ -728,6 +761,9 @@ func cmdServe() *cli.Command {
 			srv := handler.NewDefaultServer(
 				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
+			// Every workspace-scoped Query / Mutation root field is checked here,
+			// so a field added later cannot skip the per-workspace policy.
+			srv.AroundFields(gqlctrl.WorkspaceAccessMiddleware(uc.WorkspaceAccess))
 
 			// Configure error presenter with stack traces and client/server
 			// classification (extensions.code is read by graphqlErrorStatusMiddleware
@@ -794,6 +830,7 @@ func cmdServe() *cli.Command {
 				httpctrl.WithGraphiQL(enableGraphiQL),
 				httpctrl.WithAuth(authUC),
 				httpctrl.WithWorkspaceRegistry(registry),
+				httpctrl.WithWorkspaceAccess(uc.WorkspaceAccess),
 			}
 
 			// Add Slack service if configured

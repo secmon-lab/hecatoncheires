@@ -9,7 +9,9 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/authz"
 	domainConfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -233,6 +235,7 @@ type AppConfig struct {
 	Case      *CaseSection        `toml:"case"`
 	Memo      *MemoSection        `toml:"memo"`
 	Jobs      []JobSection        `toml:"job"`
+	Authz     *AuthzSection       `toml:"authz"`
 }
 
 // MemoSection represents the [memo] section in a TOML config. When omitted
@@ -265,6 +268,9 @@ type ActionStatusConfigRow struct {
 
 // WorkspaceConfig represents a fully resolved workspace configuration
 type WorkspaceConfig struct {
+	// AuthzPolicy is the compiled [authz] policy, nil when the section is absent
+	// or when the document was parsed without a BaseDir (structural validation).
+	AuthzPolicy          interfaces.PolicyClient
 	ID                   string
 	Name                 string
 	Description          string
@@ -872,6 +878,11 @@ func parseWorkspaceConfig(src WorkspaceConfigSource) (*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(err, "failed to resolve jobs", goerr.V(ConfigPathKey, path))
 	}
 
+	authzPolicy, err := appCfg.Authz.compile(baseDir, authz.WorkspaceRef{ID: wsID, Name: wsName})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to load [authz] policy", goerr.V(ConfigPathKey, path))
+	}
+
 	caseMode := model.CaseMode(appCfg.Slack.Mode).Normalize()
 	caseTrigger := model.CaseTrigger(appCfg.Slack.Trigger).Normalize()
 	caseStatusSet, err := appCfg.resolveCaseStatusSet()
@@ -926,6 +937,7 @@ func parseWorkspaceConfig(src WorkspaceConfigSource) (*WorkspaceConfig, error) {
 	}
 
 	return &WorkspaceConfig{
+		AuthzPolicy:          authzPolicy,
 		ID:                   wsID,
 		Name:                 wsName,
 		Description:          appCfg.Workspace.Description,

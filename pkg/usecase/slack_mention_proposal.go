@@ -44,7 +44,8 @@ type MentionProposalUseCase struct {
 	// durableDraft runs the case-draft agent on the agentkit runtime. It is filled
 	// by BindDurableDraft rather than by the constructor, because registering the
 	// agent needs this usecase as its completion handler.
-	durableDraft *proposal.Durable
+	durableDraft    *proposal.Durable
+	workspaceAccess interfaces.WorkspaceAuthorizer
 }
 
 // NewMentionProposalUseCase constructs a MentionProposalUseCase. All dependencies
@@ -57,10 +58,11 @@ func NewMentionProposalUseCase(
 	slackService slacksvc.Service,
 ) *MentionProposalUseCase {
 	return &MentionProposalUseCase{
-		repo:         repo,
-		registry:     registry,
-		slackService: slackService,
-		collector:    slacksvc.NewMessageCollector(slackService),
+		repo:            repo,
+		registry:        registry,
+		slackService:    slackService,
+		collector:       slacksvc.NewMessageCollector(slackService),
+		workspaceAccess: allowAllWorkspaces(),
 	}
 }
 
@@ -104,10 +106,15 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		), "could not show 'processing…' message to user")
 	}
 
-	candidates := uc.accessibleWorkspaces(ev.User)
+	candidates, candErr := uc.accessibleWorkspaces(ctx, ev.User)
+	if candErr != nil {
+		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		return goerr.Wrap(candErr, "resolve the mentioning user's workspaces")
+	}
 	if len(candidates) == 0 {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-		return uc.notifyNoWorkspace(ctx, ev)
+		uc.notifyNoWorkspace(ctx, ev.Channel, threadTS)
+		return nil
 	}
 
 	mentionTime := parseSlackTS(ev.TimeStamp)
@@ -424,26 +431,27 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 	return nil
 }
 
-func (uc *MentionProposalUseCase) accessibleWorkspaces(_ string) []*model.WorkspaceEntry {
-	// Currently every registered workspace is treated as accessible. Per-user
-	// workspace authorization is out of scope for this feature; refining it
-	// would feed in here without changing the rest of the flow.
+// accessibleWorkspaces returns the registered workspaces userID may access:
+// the candidates a draft may be filed in.
+func (uc *MentionProposalUseCase) accessibleWorkspaces(ctx context.Context, userID string) ([]*model.WorkspaceEntry, error) {
 	if uc.registry == nil {
-		return nil
+		return nil, nil
 	}
-	return uc.registry.List()
+	entries, err := uc.workspaceAccess.FilterAccessible(ctx, uc.registry.List(), userID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "filter accessible workspaces", goerr.V("user_id", userID))
+	}
+	return entries, nil
 }
 
-func (uc *MentionProposalUseCase) notifyNoWorkspace(ctx context.Context, ev *slackevents.AppMentionEvent) error {
-	threadTS := ev.ThreadTimeStamp
-	if threadTS == "" {
-		threadTS = ev.TimeStamp
-	}
-	text := "No workspace is available for creating a Case from this channel."
-	if _, err := uc.slackService.PostThreadMessage(ctx, ev.Channel, threadTS, nil, text); err != nil {
+// notifyNoWorkspace tells the thread that no workspace is available to file
+// the draft in — none is configured, or none allows the user.
+func (uc *MentionProposalUseCase) notifyNoWorkspace(ctx context.Context, channelID, threadTS string) {
+	text, _ := prepareUserError(ctx, goerr.Wrap(ErrNoAccessibleWorkspace, "no workspace for the draft"),
+		"no accessible workspace for the draft")
+	if _, err := uc.slackService.PostThreadMessage(ctx, channelID, threadTS, nil, text); err != nil {
 		errutil.Handle(ctx, err, "failed to post no-workspace thread message")
 	}
-	return nil
 }
 
 // notifyMaterializationFailed posts a thread reply telling the user that AI

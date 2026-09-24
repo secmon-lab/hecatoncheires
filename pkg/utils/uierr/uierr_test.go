@@ -43,6 +43,20 @@ func TestSlackError(t *testing.T) {
 	}
 }
 
+// The Job runner and the usecase classifier both render a workspace policy
+// denial from this value, so it must be a permission error carrying the
+// workspace-denial messages.
+func TestWorkspaceAccessDenied(t *testing.T) {
+	uf := uierr.WorkspaceAccessDenied()
+	gt.Value(t, uf.Kind).Equal(uierr.KindPermission)
+
+	ctx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
+	out := uierr.Render(ctx, uf, "abc12345")
+	gt.String(t, out).Contains(i18n.T(ctx, i18n.MsgUIErrWorkspaceAccessDeniedWhat))
+	gt.String(t, out).Contains(i18n.T(ctx, i18n.MsgUIErrWorkspaceAccessDeniedDetail))
+	gt.String(t, out).Contains(i18n.T(ctx, i18n.MsgUIErrWorkspaceAccessDeniedFix))
+}
+
 func TestRender(t *testing.T) {
 	uf := uierr.UserFacing{
 		Kind:        uierr.KindPermission,

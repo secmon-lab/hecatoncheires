@@ -39,7 +39,10 @@ describe('WorkspaceChooser', () => {
   it('shows the empty state when there are no workspaces', () => {
     renderChooser({ workspaces: [], isLoading: false })
     expect(screen.getByTestId('workspace-chooser-empty')).toBeInTheDocument()
-    expect(screen.getByText('No workspaces configured')).toBeInTheDocument()
+    // An empty list can mean either "none configured" or "none this viewer
+    // may access", so the copy must not claim the configuration is empty.
+    expect(screen.getByText('No workspaces available')).toBeInTheDocument()
+    expect(screen.getByText(/not allowed to access any workspace/)).toBeInTheDocument()
   })
 
   it('renders each workspace as a card linking to its case list', () => {

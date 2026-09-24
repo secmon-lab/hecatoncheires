@@ -26,11 +26,16 @@ var ErrHomeMessageValidation = goerr.New("home message validation failed")
 // usecase by comparing CreatedAt against a window. Keeping the history lets the
 // generator avoid repeating recent phrasings.
 type HomeMessage struct {
-	ID        HomeMessageID
-	UserID    string // Slack User ID (auth token Sub). Required.
-	Message   string // Generated one-liner. Required.
-	Lang      string // Language at generation ("en"/"ja"); used for reuse matching.
-	CreatedAt time.Time
+	ID      HomeMessageID
+	UserID  string // Slack User ID (auth token Sub). Required.
+	Message string // Generated one-liner. Required.
+	Lang    string // Language at generation ("en"/"ja"); used for reuse matching.
+	// WorkspaceIDs are the workspaces the user could access when the message
+	// was generated, sorted ascending. The message may name any of them, so it
+	// is reused only while the user's access is still exactly this set.
+	// Empty on messages stored before this was recorded.
+	WorkspaceIDs []string
+	CreatedAt    time.Time
 }
 
 // Validate enforces the invariants the repository relies on before every write.

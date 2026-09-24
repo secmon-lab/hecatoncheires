@@ -123,6 +123,39 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 	})
 }
 
+// A Slack actor the workspace's policy denies cannot update an action (the
+// Slack status / assignee selects reach UpdateAction without the GraphQL
+// field middleware), while a system actor is not checked.
+func TestActionUseCase_UpdateAction_WorkspaceAccess(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"}})
+	uc := usecase.New(repo, registry, usecase.WithWorkspaceAccess(denyingAccess(t, registry, testWorkspaceID)))
+
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{ReporterID: "U-REPORTER", Title: "Case"})
+	gt.NoError(t, err).Required()
+	created, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{CaseID: c.ID, Title: "Action", Status: types.ActionStatusTodo})
+	gt.NoError(t, err).Required()
+
+	newStatus := types.ActionStatusInProgress
+	_, err = uc.Action.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+		ID: created.ID, Status: &newStatus, SlackSync: usecase.SlackSyncSkip,
+		Actor: usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "U-DENIED"},
+	})
+	gt.Error(t, err).Is(model.ErrWorkspaceAccessDenied)
+	stored, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, stored.Status).Equal(types.ActionStatusTodo)
+
+	updated, err := uc.Action.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+		ID: created.ID, Status: &newStatus, SlackSync: usecase.SlackSyncSkip,
+		Actor: usecase.ActorRef{Kind: usecase.ActorKindSystem},
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, updated.Status).Equal(types.ActionStatusInProgress)
+}
+
 func TestActionUseCase_UpdateAction(t *testing.T) {
 	t.Run("update action title and status", func(t *testing.T) {
 		repo := memory.New()

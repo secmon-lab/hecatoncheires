@@ -49,6 +49,7 @@ type agentTestSlackService struct {
 	postID                   atomic.Int32
 	postedMessages           []agentPostedMessage
 	updatedMessages          []agentUpdatedMessage
+	ephemeralMessages        []agentEphemeralMessage
 	permalinkCalls           []agentPermalinkCall
 }
 
@@ -155,8 +156,26 @@ func (m *agentTestSlackService) UpdateView(_ context.Context, _ goslack.ModalVie
 	return nil
 }
 
-func (m *agentTestSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
+func (m *agentTestSlackService) PostEphemeral(_ context.Context, channelID string, userID string, text string) error {
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
+	m.ephemeralMessages = append(m.ephemeralMessages, agentEphemeralMessage{ChannelID: channelID, UserID: userID, Text: text})
 	return nil
+}
+
+// ephemerals returns a snapshot of every ephemeral message posted.
+func (m *agentTestSlackService) ephemerals() []agentEphemeralMessage {
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
+	out := make([]agentEphemeralMessage, len(m.ephemeralMessages))
+	copy(out, m.ephemeralMessages)
+	return out
+}
+
+type agentEphemeralMessage struct {
+	ChannelID string
+	UserID    string
+	Text      string
 }
 
 func (m *agentTestSlackService) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {

@@ -1,0 +1,3 @@
+package authz
+
+allow if {

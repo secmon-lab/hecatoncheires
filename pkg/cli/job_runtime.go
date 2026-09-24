@@ -645,6 +645,9 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner, error) 
 		SlackNotifier: slackNotifier,
 		Reflector:     reflector,
 		Durable:       deps.Durable,
+		// The same authorizer every other Slack entry point uses, so an answer
+		// to an interactive Job's question is held to the workspace's policy.
+		WorkspaceAccess: deps.UC.WorkspaceAccess,
 	}
 	// The interactive-Job question form is Block Kit posted/updated directly
 	// via the Slack service (the narrow SlackNotifier cannot carry blocks).

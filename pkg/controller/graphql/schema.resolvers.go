@@ -1360,7 +1360,10 @@ func (r *queryResolver) Workspace(ctx context.Context, workspaceID string) (*gra
 
 // Workspaces is the resolver for the workspaces field.
 func (r *queryResolver) Workspaces(ctx context.Context) ([]*graphql1.Workspace, error) {
-	entries := r.UseCases.WorkspaceRegistry().List()
+	entries, err := r.UseCases.WorkspaceAccess.FilterAccessibleForCurrentUser(ctx, r.UseCases.WorkspaceRegistry().List())
+	if err != nil {
+		return nil, err
+	}
 	result := make([]*graphql1.Workspace, len(entries))
 	for i, entry := range entries {
 		result[i] = &graphql1.Workspace{
@@ -1374,19 +1377,32 @@ func (r *queryResolver) Workspaces(ctx context.Context) ([]*graphql1.Workspace, 
 // WorkspaceGroups is the resolver for the workspaceGroups field.
 func (r *queryResolver) WorkspaceGroups(ctx context.Context) ([]*graphql1.WorkspaceGroup, error) {
 	groups := r.UseCases.WorkspaceGroups().List()
-	wsReg := r.UseCases.WorkspaceRegistry()
+	accessible, err := r.UseCases.WorkspaceAccess.FilterAccessibleForCurrentUser(ctx, r.UseCases.WorkspaceRegistry().List())
+	if err != nil {
+		return nil, err
+	}
+	accessibleByID := make(map[string]*model.WorkspaceEntry, len(accessible))
+	for _, e := range accessible {
+		accessibleByID[e.Workspace.ID] = e
+	}
 
 	result := make([]*graphql1.WorkspaceGroup, 0, len(groups))
 	for _, g := range groups {
 		members := make([]*graphql1.Workspace, 0, len(g.MemberIDs))
 		for _, wsID := range g.MemberIDs {
-			entry, err := wsReg.Get(wsID)
-			if err != nil {
-				// Members are validated to exist at config load, so a miss here is
-				// unexpected; skipping keeps the [Workspace!]! contract non-null-safe.
+			// Members are validated to exist at config load, so a miss here means
+			// the caller may not access the workspace; skipping also keeps the
+			// [Workspace!]! contract non-null-safe.
+			entry, ok := accessibleByID[wsID]
+			if !ok {
 				continue
 			}
 			members = append(members, &graphql1.Workspace{ID: entry.Workspace.ID, Name: entry.Workspace.Name})
+		}
+		// A group whose every member was filtered out would only reveal that
+		// workspaces the caller cannot see exist; a group configured empty is kept.
+		if len(g.MemberIDs) > 0 && len(members) == 0 {
+			continue
 		}
 
 		var desc *string

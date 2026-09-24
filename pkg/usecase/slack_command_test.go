@@ -2127,3 +2127,184 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		gt.Value(t, err).NotNil()
 	})
 }
+
+// TestSlackUseCases_WorkspaceAccess_Commands drives the slash command and every
+// modal submission with a user the "risk" workspace's policy denies; "ops"
+// and "infra" have no policy.
+func TestSlackUseCases_WorkspaceAccess_Commands(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	const denied = "U-DENIED"
+
+	setup := func(t *testing.T, ids ...string) (*usecase.SlackUseCases, *memory.Memory, *model.WorkspaceRegistry, *commandTestSlackService) {
+		t.Helper()
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		for _, id := range ids {
+			registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: id, Name: "WS " + id}})
+		}
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		usecase.SetSlackWorkspaceAccessForTest(uc, denyingAccess(t, registry, "risk"))
+		return uc, repo, registry, slackMock
+	}
+	assertEphemeral := func(t *testing.T, m *commandTestSlackService, channel string) {
+		t.Helper()
+		gt.Value(t, m.ephemeralChannelID).Equal(channel)
+		gt.Value(t, m.ephemeralUserID).Equal(denied)
+		gt.String(t, m.ephemeralText).NotEqual("")
+	}
+	metadata := func(t *testing.T, fields map[string]any) string {
+		t.Helper()
+		raw, err := json.Marshal(fields)
+		gt.NoError(t, err).Required()
+		return string(raw)
+	}
+
+	t.Run("S12 explicit workspace is refused", func(t *testing.T) {
+		uc, _, _, slackMock := setup(t, "risk")
+		gt.NoError(t, uc.HandleSlashCommand(context.Background(), "trigger-1", denied, "C001", "risk", "", "")).Required()
+		gt.Bool(t, slackMock.openViewCalled).False()
+		assertEphemeral(t, slackMock, "C001")
+	})
+
+	t.Run("S12 case channel of a denied workspace is refused", func(t *testing.T) {
+		uc, repo, _, slackMock := setup(t, "risk")
+		_, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID: "U-REPORTER", Title: "Case", SlackChannelID: "C-CASE", ChannelUserIDs: []string{denied},
+		})
+		gt.NoError(t, err).Required()
+		gt.NoError(t, uc.HandleSlashCommand(context.Background(), "trigger-1", denied, "C-CASE", "", "", "")).Required()
+		gt.Bool(t, slackMock.openViewCalled).False()
+		assertEphemeral(t, slackMock, "C-CASE")
+	})
+
+	t.Run("S12 without a workspace, a single accessible one opens its modal", func(t *testing.T) {
+		uc, _, _, slackMock := setup(t, "risk", "ops")
+		gt.NoError(t, uc.HandleSlashCommand(context.Background(), "trigger-1", denied, "C001", "", "", "")).Required()
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDCreateCase)
+		var meta struct {
+			WorkspaceID string `json:"workspace_id"`
+		}
+		gt.NoError(t, json.Unmarshal([]byte(slackMock.openViewRequest.PrivateMetadata), &meta)).Required()
+		gt.Value(t, meta.WorkspaceID).Equal("ops")
+	})
+
+	t.Run("S12 without a workspace, the picker lists only accessible ones", func(t *testing.T) {
+		uc, _, _, slackMock := setup(t, "risk", "ops", "infra")
+		gt.NoError(t, uc.HandleSlashCommand(context.Background(), "trigger-1", denied, "C001", "", "", "")).Required()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDSelectWorkspace)
+		raw, err := json.Marshal(slackMock.openViewRequest.Blocks)
+		gt.NoError(t, err).Required()
+		gt.String(t, string(raw)).Contains(`"value":"ops"`)
+		gt.String(t, string(raw)).Contains(`"value":"infra"`)
+		gt.Bool(t, strings.Contains(string(raw), `"value":"risk"`)).False()
+	})
+
+	t.Run("S12 without a workspace and none accessible", func(t *testing.T) {
+		uc, _, _, slackMock := setup(t, "risk")
+		gt.NoError(t, uc.HandleSlashCommand(context.Background(), "trigger-1", denied, "C001", "", "", "")).Required()
+		gt.Bool(t, slackMock.openViewCalled).False()
+		assertEphemeral(t, slackMock, "C001")
+	})
+
+	t.Run("S13 workspace selection is replaced by the denial modal", func(t *testing.T) {
+		uc, _, _, _ := setup(t, "risk", "ops")
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				PrivateMetadata: metadata(t, map[string]any{"channel_id": "C001"}),
+				State: &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{
+					usecase.SlackBlockIDWorkspaceSelect: {
+						usecase.SlackActionIDWorkspaceRadio: {SelectedOption: goslack.OptionBlockObject{Value: "risk"}},
+					},
+				}},
+			},
+		}
+		view, err := uc.HandleWorkspaceSelectSubmit(context.Background(), callback)
+		gt.NoError(t, err).Required()
+		gt.Value(t, view).NotNil().Required()
+		gt.Value(t, view.Title.Text).Equal("Access denied")
+		gt.Value(t, view.CallbackID).NotEqual(usecase.SlackCallbackIDCreateCase)
+	})
+
+	t.Run("S13 command choice is replaced by the denial modal", func(t *testing.T) {
+		uc, repo, _, _ := setup(t, "risk")
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{ReporterID: "U-REPORTER", Title: "Case"})
+		gt.NoError(t, err).Required()
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				PrivateMetadata: metadata(t, map[string]any{"workspace_id": "risk", "channel_id": "C-CASE", "case_id": created.ID}),
+				State: &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{
+					usecase.SlackBlockIDCommandChoice: {
+						usecase.SlackActionIDCommandChoice: {SelectedOption: goslack.OptionBlockObject{Value: "update_case"}},
+					},
+				}},
+			},
+		}
+		view, err := uc.HandleCommandChoiceSubmit(context.Background(), callback)
+		gt.NoError(t, err).Required()
+		gt.Value(t, view).NotNil().Required()
+		gt.Value(t, view.Title.Text).Equal("Access denied")
+	})
+
+	t.Run("S14 case creation submit creates nothing", func(t *testing.T) {
+		uc, repo, registry, slackMock := setup(t, "risk")
+		caseUC := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				PrivateMetadata: metadata(t, map[string]any{"workspace_id": "risk", "channel_id": "C001"}),
+				State: &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{
+					usecase.SlackBlockIDCaseTitle: {usecase.SlackActionIDCaseTitle: {Value: "Should not exist"}},
+				}},
+			},
+		}
+		gt.NoError(t, uc.HandleCaseCreationSubmit(context.Background(), caseUC, callback)).Required()
+		cases, err := repo.Case().List(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(0)
+		assertEphemeral(t, slackMock, "C001")
+	})
+
+	t.Run("S14 case edit submit changes nothing", func(t *testing.T) {
+		uc, repo, registry, slackMock := setup(t, "risk")
+		caseUC := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{ReporterID: "U-REPORTER", Title: "Original"})
+		gt.NoError(t, err).Required()
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				PrivateMetadata: metadata(t, map[string]any{"workspace_id": "risk", "channel_id": "C-CASE", "case_id": created.ID}),
+				State: &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{
+					usecase.SlackBlockIDCaseTitle: {usecase.SlackActionIDCaseTitle: {Value: "Changed"}},
+				}},
+			},
+		}
+		gt.NoError(t, uc.HandleCaseEditSubmit(context.Background(), caseUC, callback)).Required()
+		stored, err := repo.Case().Get(context.Background(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("Original")
+		assertEphemeral(t, slackMock, "C-CASE")
+	})
+
+	t.Run("S14 action creation submit creates nothing", func(t *testing.T) {
+		uc, repo, registry, slackMock := setup(t, "risk")
+		actionUC := usecase.NewActionUseCase(repo, registry, slackMock, "", nil)
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{ReporterID: "U-REPORTER", Title: "Case"})
+		gt.NoError(t, err).Required()
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: denied},
+			View: goslack.View{
+				PrivateMetadata: metadata(t, map[string]any{"workspace_id": "risk", "channel_id": "C-CASE", "case_id": created.ID}),
+				State:           &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{}},
+			},
+		}
+		gt.NoError(t, uc.HandleActionCreationSubmit(context.Background(), actionUC, callback)).Required()
+		actions, err := repo.Action().GetByCase(context.Background(), "risk", created.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, actions).Length(0)
+		assertEphemeral(t, slackMock, "C-CASE")
+	})
+}

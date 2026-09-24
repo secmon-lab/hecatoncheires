@@ -165,10 +165,11 @@ func cmdAssist() *cli.Command {
 					// The Bot client alone binds slack__get_messages, so the
 					// assist agent reads Slack message text and needs the same
 					// bounds on it as every other host.
-					SlackLimits:  slackToolCfg.Limits(),
-					ActionUC:     usecase.NewActionToolAdapter(uc.Action),
-					ActionStepUC: usecase.NewActionStepToolAdapter(uc.ActionStep),
-					CaseRefUC:    uc.Case,
+					SlackLimits:     slackToolCfg.Limits(),
+					ActionUC:        usecase.NewActionToolAdapter(uc.Action),
+					ActionStepUC:    usecase.NewActionStepToolAdapter(uc.ActionStep),
+					CaseRefUC:       uc.Case,
+					WorkspaceAccess: uc.WorkspaceAccess,
 				},
 			})
 			if err != nil {

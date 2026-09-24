@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/uierr"
 )
 
 // Slack identifiers for the interactive-Job question form. They are the
@@ -84,6 +85,7 @@ func decodeJobQuestionRef(value string) (jobQuestionRef, error) {
 type jobQuestionPoster interface {
 	PostThreadMessage(ctx context.Context, channelID, threadTS string, blocks []goslack.Block, text string, opts ...slacksvc.PostThreadOption) (string, error)
 	UpdateMessage(ctx context.Context, channelID, timestamp string, blocks []goslack.Block, text string) error
+	PostEphemeral(ctx context.Context, channelID, userID, text string) error
 }
 
 // JobInteractor is the interaction.Interactor for a single interactive Job
@@ -483,6 +485,18 @@ func (r *JobRunner) HandleQuestionSubmit(ctx context.Context, callback *goslack.
 	channelID := callback.Channel.ID
 	messageTS := callback.Message.Timestamp
 
+	if r.deps.WorkspaceAccess == nil {
+		return goerr.New("workspace access control is not configured for job question submit")
+	}
+	if err := r.deps.WorkspaceAccess.Authorize(ctx, ref.WorkspaceID, callback.User.ID); err != nil {
+		if !errors.Is(err, model.ErrWorkspaceAccessDenied) {
+			return goerr.Wrap(err, "authorize job question submit",
+				goerr.V("workspace_id", ref.WorkspaceID), goerr.V("user_id", callback.User.ID))
+		}
+		r.notifyWorkspaceAccessDenied(ctx, channelID, callback.User.ID, err)
+		return nil
+	}
+
 	logRec, err := r.deps.Repo.JobRunLog().Get(ctx, key, ref.RunID)
 	if err != nil {
 		if errors.Is(err, interfaces.ErrJobRunLogNotFound) {
@@ -515,6 +529,24 @@ func (r *JobRunner) HandleQuestionSubmit(ctx context.Context, callback *goslack.
 	}
 
 	return r.Resume(ctx, key, ref.RunID, answers)
+}
+
+// notifyWorkspaceAccessDenied tells the answering user, and only them, that
+// the Job's workspace policy refused the answer. The denial is expected flow,
+// so it is reported benign.
+func (r *JobRunner) notifyWorkspaceAccessDenied(ctx context.Context, channelID, userID string, cause error) {
+	ref := uierr.NewRef()
+	errutil.Handle(ctx, goerr.Wrap(cause, "job question answer denied by workspace policy",
+		goerr.V("ref_id", ref), goerr.T(errutil.TagBenign)), "workspace access denied")
+	if r.deps.InteractionPoster == nil || channelID == "" {
+		return
+	}
+	text := uierr.Render(ctx, uierr.WorkspaceAccessDenied(), ref)
+	if err := r.deps.InteractionPoster.PostEphemeral(ctx, channelID, userID, text); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to post job question denial",
+			goerr.V("channel_id", channelID), goerr.V("user_id", userID)),
+			"failed to post job question denial")
+	}
 }
 
 // markJobQuestionStale rewrites the form into a single "no longer active"

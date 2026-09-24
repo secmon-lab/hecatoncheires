@@ -1,15 +1,18 @@
 package http_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	gollemmock "github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -350,6 +353,124 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.Status).Equal(types.ActionStatusTodo)
+	})
+}
+
+// ephemeralRecordingSlack records every plain-text ephemeral so a test can
+// assert who was told what.
+type ephemeralRecordingSlack struct {
+	mockSlackServiceForCommand
+	mu         sync.Mutex
+	ephemerals []recordedEphemeral
+}
+
+type recordedEphemeral struct {
+	channelID, userID, text string
+}
+
+func (m *ephemeralRecordingSlack) PostEphemeral(_ context.Context, channelID, userID, text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ephemerals = append(m.ephemerals, recordedEphemeral{channelID: channelID, userID: userID, text: text})
+	return nil
+}
+
+func (m *ephemeralRecordingSlack) recorded() []recordedEphemeral {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]recordedEphemeral(nil), m.ephemerals...)
+}
+
+// A status or assignee change from a user the workspace's policy denies
+// leaves the Action untouched and tells that user alone why.
+func TestSlackInteractionHandler_WorkspaceAccessDenied(t *testing.T) {
+	setup := func(t *testing.T) (*memory.Memory, *httpctrl.SlackInteractionHandler, *ephemeralRecordingSlack, int64) {
+		t.Helper()
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"}})
+		gt.NoError(t, repo.SlackUser().SaveMany(t.Context(), []*model.SlackUser{
+			{ID: "U001", Name: "alice", RealName: "Alice"},
+			{ID: "U999", Name: "bob", RealName: "Bob"},
+		})).Required()
+
+		// Seed the Action through usecases with no policy, as an allowed user would.
+		seedCaseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedActionUC := usecase.NewActionUseCase(repo, registry, nil, "", nil)
+		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
+		c, err := seedCaseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		action, err := seedActionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// usecase.New refuses Slack without an LLM; this path never calls it.
+		slackMock := &ephemeralRecordingSlack{}
+		uc := usecase.New(repo, registry,
+			usecase.WithWorkspaceAccess(newDenyingWorkspaceAccess(t, registry, testWorkspaceID)),
+			usecase.WithSlackService(slackMock),
+			usecase.WithLLMClient(&gollemmock.LLMClientMock{}))
+		handler := newTestSlackHandler(t, repo, registry, uc.Action, uc.Slack, uc.Case)
+		return repo, handler, slackMock, action.ID
+	}
+
+	post := func(t *testing.T, handler *httpctrl.SlackInteractionHandler, callback goslack.InteractionCallback) {
+		t.Helper()
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
+	}
+
+	channel := goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C-CASE"}}}
+
+	t.Run("status_select", func(t *testing.T) {
+		repo, handler, slackMock, actionID := setup(t)
+		post(t, handler, goslack.InteractionCallback{
+			Type:    goslack.InteractionTypeBlockActions,
+			User:    goslack.User{ID: "U001"},
+			Channel: channel,
+			ActionCallback: goslack.ActionCallbacks{BlockActions: []*goslack.BlockAction{{
+				ActionID:       usecase.SlackActionIDStatusSelect,
+				BlockID:        "hc_action_status_block",
+				SelectedOption: goslack.OptionBlockObject{Value: testWorkspaceID + ":" + itoa(actionID) + ":COMPLETED"},
+			}}},
+		})
+
+		stored, err := repo.Action().Get(t.Context(), testWorkspaceID, actionID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.ActionStatusTodo)
+		eph := slackMock.recorded()
+		gt.Array(t, eph).Length(1).Required()
+		gt.Value(t, eph[0].channelID).Equal("C-CASE")
+		gt.Value(t, eph[0].userID).Equal("U001")
+		gt.String(t, eph[0].text).NotEqual("")
+	})
+
+	t.Run("users_select", func(t *testing.T) {
+		repo, handler, slackMock, actionID := setup(t)
+		post(t, handler, goslack.InteractionCallback{
+			Type:    goslack.InteractionTypeBlockActions,
+			User:    goslack.User{ID: "U001"},
+			Channel: channel,
+			ActionCallback: goslack.ActionCallbacks{BlockActions: []*goslack.BlockAction{{
+				ActionID:     usecase.SlackActionIDAssigneeSelect,
+				BlockID:      usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID),
+				SelectedUser: "U999",
+			}}},
+		})
+
+		stored, err := repo.Action().Get(t.Context(), testWorkspaceID, actionID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.AssigneeID).Equal("U001")
+		eph := slackMock.recorded()
+		gt.Array(t, eph).Length(1).Required()
+		gt.Value(t, eph[0].channelID).Equal("C-CASE")
+		gt.Value(t, eph[0].userID).Equal("U001")
 	})
 }
 

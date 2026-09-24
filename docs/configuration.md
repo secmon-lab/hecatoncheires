@@ -1414,6 +1414,109 @@ channel and no Job runs against them).
 
 ---
 
+## Authorization Section (`[authz]`)
+
+The optional `[authz]` section restricts which users may use a workspace. It
+names one or more Rego policy files; the policy decides, per user, whether that
+user may access this workspace at all.
+
+```toml
+[authz]
+policy = ["policies/authz"]   # files or directories, relative to this config file
+```
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `policy` | array of strings | yes (when the section is present) | Rego files or directories. A directory is read recursively and every `.rego` file in it is loaded. A relative path is resolved against the directory of the config file that declares it; an absolute path is used as is. |
+
+A workspace **without** an `[authz]` section allows every user, which is the
+behavior of a deployment that predates this section.
+
+### Writing the policy
+
+The policy must declare `package authz` and a boolean `allow` rule. The
+application evaluates the whole `data.authz` document and reads only `allow`:
+
+- `allow` is `true` → the user may access the workspace.
+- `allow` is `false` or undefined (no `allow` rule matched) → denied.
+- Other rules in the package are ignored.
+
+The policy receives this `input`:
+
+| Field | Description |
+|-------|-------------|
+| `input.workspace.id` | Workspace ID (`[workspace] id`) |
+| `input.workspace.name` | Workspace name (`[workspace] name`) |
+| `input.user.id` | Slack user ID of the user being checked (e.g. `U01234567`) |
+| `input.user.email` | Email address of the Slack user |
+| `input.user.name` | Slack handle |
+| `input.user.display_name` | Slack display name, falling back to the real name |
+
+Every `input.user` field except `id` comes from the Slack user list the server
+already synchronises into its database (every 10 minutes, and at startup). No
+Slack API call is made to answer an authorization question. A user who is not
+in that list yet — someone who joined Slack after the last synchronisation —
+is evaluated with `email`, `name` and `display_name` set to `""`, so a policy
+that matches on those fields denies them until the next synchronisation.
+
+Example: allow members of one email domain, plus a fixed list of Slack users.
+
+```rego
+package authz
+
+allow if endswith(input.user.email, "@example.com")
+
+allow if input.user.id in {"U0123ABCD", "U0456EFGH"}
+```
+
+### Where the policy is enforced
+
+The decision applies to every path on which a human user acts on the
+workspace:
+
+- **Web UI / GraphQL** — the workspace list shows only permitted workspaces,
+  and every operation that names a denied workspace is answered with the
+  `FORBIDDEN` error code. `GET /api/workspaces` requires a signed-in session
+  when authentication is enabled and lists only permitted workspaces. The
+  home-screen greeting is reused (for up to an hour) only while the user's
+  permitted workspaces are exactly those it was generated for, so a revoked
+  workspace stops appearing in it as soon as the decision below expires.
+- **Slack** — mentions, messages, reactions, slash commands, modals, buttons
+  and select menus in a denied workspace are not processed. The user is told so
+  in a message only they can see (an ephemeral message, or a modal when the
+  interaction opened one). When a mention or slash command must choose a
+  workspace, only permitted workspaces are offered.
+- **Agent** — the workspace-listing tools list only the workspaces the
+  requesting user may access.
+
+The policy is **not** applied to:
+
+- operations with no human user behind them: scheduled Jobs, `tick`,
+  `export`, and messages posted by bots;
+- the MCP endpoint (`/mcp`), which has its own policy (see
+  [MCP Server](mcp.md)).
+
+### Decision caching and failure handling
+
+- A decision is cached for **60 seconds** per server instance, keyed on the
+  Slack user. A policy or Slack-profile change therefore takes effect within a
+  minute; each instance keeps its own cache. A user who is not in the synced
+  Slack user list yet is not cached, so their decision updates as soon as the
+  next synchronisation stores them.
+- If a decision cannot be made — the policy errors at evaluation time, or the
+  Slack user list cannot be read — access is **denied** and nothing is cached.
+
+### Startup check
+
+At startup each workspace's policy is compiled and evaluated once against two
+sample inputs: a user with a synced Slack record, and a user without one (all
+fields but `id` empty). Startup fails if the policy does not compile or if
+either evaluation returns an error — for example, `allow` is not a boolean, or
+two rules assign `allow` conflicting values. The check verifies only that the
+policy evaluates; it does not check what the policy decides.
+
+---
+
 ## Validation Rules
 
 The configuration file is validated at startup. The following rules are enforced:
@@ -1434,6 +1537,9 @@ The configuration file is validated at startup. The following rules are enforced
 | `[action] initial` must reference a defined `[[action.status]] id` | (action status validation) |
 | Each entry in `[action] closed` must reference a defined `[[action.status]] id` | (action status validation) |
 | `[[action.status]] color` must be a preset name or `#RRGGBB` / `#RGB` | (action status validation) |
+| `[authz] policy` must list at least one path, and no empty path | `ErrAuthzPolicyEmpty` |
+| `[authz]` policy files must exist and compile | (policy compile error) |
+| `[authz]` policy must evaluate without error against the startup sample inputs | `ErrAuthzPolicyTrialFailed` |
 
 If any validation fails, the application exits with a descriptive error message including the field ID and context.
 

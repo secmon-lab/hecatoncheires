@@ -1,0 +1,3 @@
+package other
+
+allow := true

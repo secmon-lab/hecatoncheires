@@ -4,12 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/adapter/policy"
 	controllerhttp "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
@@ -74,7 +80,7 @@ func TestWorkspacesHandler_EmojiAndColor(t *testing.T) {
 		Workspace: model.Workspace{ID: "plain", Name: "Plain Workspace"},
 	})
 
-	handler := controllerhttp.WorkspacesHandlerForTest(registry)
+	handler := controllerhttp.WorkspacesHandlerForTest(registry, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -106,7 +112,7 @@ func TestWorkspacesHandler_OmitsEmptyEmojiColor(t *testing.T) {
 		Workspace: model.Workspace{ID: "plain", Name: "Plain Workspace"},
 	})
 
-	handler := controllerhttp.WorkspacesHandlerForTest(registry)
+	handler := controllerhttp.WorkspacesHandlerForTest(registry, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -124,4 +130,61 @@ func TestWorkspacesHandler_OmitsEmptyEmojiColor(t *testing.T) {
 	_, hasColor := first["color"]
 	gt.Bool(t, hasEmoji).False()
 	gt.Bool(t, hasColor).False()
+}
+
+// newDenyingWorkspaceAccess builds a real authorizer over registry in which
+// every workspace named in denied has a policy that allows nobody.
+func newDenyingWorkspaceAccess(t *testing.T, registry *model.WorkspaceRegistry, denied ...string) interfaces.WorkspaceAuthorizer {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "deny.rego")
+	gt.NoError(t, os.WriteFile(path, []byte("package authz\n\nallow := false\n"), 0o600)).Required()
+	pc, err := policy.New([]string{path})
+	gt.NoError(t, err).Required()
+	policies := make(map[string]interfaces.PolicyClient, len(denied))
+	for _, id := range denied {
+		policies[id] = pc
+	}
+	access, err := usecase.NewWorkspaceAccessUseCase(registry, policies, memory.New().SlackUser(),
+		usecase.WorkspaceAccessCacheConfig{TTL: time.Minute, Size: 16})
+	gt.NoError(t, err).Required()
+	return access
+}
+
+func TestServer_WorkspacesRequiresAuthentication(t *testing.T) {
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "a", Name: "A"}})
+
+	srv, err := controllerhttp.New(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		controllerhttp.WithWorkspaceRegistry(registry),
+		controllerhttp.WithAuth(usecase.NewAuthUseCase(memory.New(), "client-id", "client-secret", "http://localhost/api/auth/callback")),
+	)
+	gt.NoError(t, err).Required()
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+	gt.Number(t, rec.Code).Equal(http.StatusUnauthorized)
+}
+
+func TestServer_WorkspacesFilteredByAccess(t *testing.T) {
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "a", Name: "A"}})
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "b", Name: "B"}})
+
+	srv, err := controllerhttp.New(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		controllerhttp.WithWorkspaceRegistry(registry),
+		controllerhttp.WithWorkspaceAccess(newDenyingWorkspaceAccess(t, registry, "b")),
+		controllerhttp.WithAuth(usecase.NewNoAuthnUseCase(memory.New(), "U0ALICE", "alice@example.com", "Alice")),
+	)
+	gt.NoError(t, err).Required()
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+	gt.Number(t, rec.Code).Equal(http.StatusOK)
+
+	var payload workspacesPayload
+	gt.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload)).Required()
+	gt.Array(t, payload.Workspaces).Length(1).Required()
+	gt.Value(t, payload.Workspaces[0].ID).Equal("a")
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
@@ -70,6 +72,74 @@ func fixtureRegistry() *model.WorkspaceRegistry {
 		},
 	})
 	return r
+}
+
+// tokenAccess denies one workspace to any caller carrying an auth token and
+// checks nothing without one, mirroring the real authorizer's contract.
+type tokenAccess struct {
+	denied string
+}
+
+func (a tokenAccess) Authorize(_ context.Context, workspaceID, _ string) error {
+	if workspaceID == a.denied {
+		return goerr.Wrap(model.ErrWorkspaceAccessDenied, "denied")
+	}
+	return nil
+}
+
+func (a tokenAccess) AuthorizeCurrentUser(ctx context.Context, workspaceID string) error {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return nil
+	}
+	return a.Authorize(ctx, workspaceID, "")
+}
+
+func (a tokenAccess) FilterAccessible(ctx context.Context, entries []*model.WorkspaceEntry, _ string) ([]*model.WorkspaceEntry, error) {
+	out := make([]*model.WorkspaceEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Workspace.ID != a.denied {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (a tokenAccess) FilterAccessibleForCurrentUser(ctx context.Context, entries []*model.WorkspaceEntry) ([]*model.WorkspaceEntry, error) {
+	if _, err := auth.TokenFromContext(ctx); err != nil {
+		return entries, nil
+	}
+	return a.FilterAccessible(ctx, entries, "")
+}
+
+func TestWorkspaceTools_FilterByTheRunsActor(t *testing.T) {
+	tools := wsmeta.New(wsmeta.Deps{Registry: fixtureRegistry(), Access: tokenAccess{denied: "ws-task"}})
+	actorCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U0ALICE"})
+
+	out, err := tools[0].Run(actorCtx, nil)
+	gt.NoError(t, err).Required()
+	wsRaw, ok := out["workspaces"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, wsRaw).Length(1).Required()
+	gt.Value(t, wsRaw[0]["id"]).Equal("ws-sec")
+
+	// A denied workspace is answered exactly like an unknown one.
+	_, err = tools[1].Run(actorCtx, map[string]any{"workspace_id": "ws-task"})
+	gt.Error(t, err).Is(model.ErrWorkspaceNotFound)
+	_, err = tools[1].Run(actorCtx, map[string]any{"workspace_id": "ws-sec"})
+	gt.NoError(t, err)
+}
+
+func TestWorkspaceTools_NoTokenSeesEverything(t *testing.T) {
+	tools := wsmeta.New(wsmeta.Deps{Registry: fixtureRegistry(), Access: tokenAccess{denied: "ws-task"}})
+
+	out, err := tools[0].Run(context.Background(), nil)
+	gt.NoError(t, err).Required()
+	wsRaw, ok := out["workspaces"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, wsRaw).Length(2)
+
+	_, err = tools[1].Run(context.Background(), map[string]any{"workspace_id": "ws-task"})
+	gt.NoError(t, err)
 }
 
 func TestListWorkspaces_RegistryEmpty(t *testing.T) {
