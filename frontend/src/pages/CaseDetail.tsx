@@ -170,8 +170,8 @@ export default function CaseDetail() {
   // sets location.state.fromStatus / fromPage when the user clicks into a
   // row; if the detail page was opened by direct URL (e.g. Slack deep link),
   // the state is absent and we fall back to the default Open tab, page 1.
-  const fromState = location.state as { fromStatus?: string; fromPage?: number } | null
-  const ALLOWED_FROM_STATUS = ['closed', 'draft', 'all'] as const
+  const fromState = location.state as { fromStatus?: string; fromPage?: number; fromFieldFilters?: string } | null
+  const ALLOWED_FROM_STATUS = ['closed', 'draft', 'all', 'archived'] as const
   const safeFromStatus = ALLOWED_FROM_STATUS.find((s) => s === fromState?.fromStatus)
   // Page 1 is the implicit default and is never emitted, matching CaseList.
   const fromPage = Number(fromState?.fromPage)
@@ -179,11 +179,16 @@ export default function CaseDetail() {
   const caseListUrl = useMemo(() => {
     if (!currentWorkspace) return '/'
     const params = new URLSearchParams()
+    if (typeof fromState?.fromFieldFilters === 'string') {
+      for (const [key, value] of new URLSearchParams(fromState.fromFieldFilters)) {
+        if (key.startsWith('field.')) params.append(key, value)
+      }
+    }
     if (safeFromStatus) params.set(CASE_LIST_STATUS_PARAM, safeFromStatus)
     if (safeFromPage) params.set(CASE_LIST_PAGE_PARAM, String(safeFromPage))
     const query = params.toString()
     return `/ws/${currentWorkspace.id}/cases${query ? `?${query}` : ''}`
-  }, [currentWorkspace, safeFromStatus, safeFromPage])
+  }, [currentWorkspace, safeFromStatus, safeFromPage, fromState?.fromFieldFilters])
 
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])

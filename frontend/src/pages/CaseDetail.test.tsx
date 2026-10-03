@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 
 import { I18nProvider } from '../i18n'
 import { ARCHIVE_CASE, GET_CASE, UNARCHIVE_CASE } from '../graphql/case'
@@ -121,14 +121,14 @@ function supportingMocks(): MockedResponse[] {
   ]
 }
 
-function renderDetail(mocks: MockedResponse[]) {
+function renderDetail(mocks: MockedResponse[], state?: { fromStatus?: string; fromPage?: number; fromFieldFilters?: string }) {
   return render(
-    <MemoryRouter initialEntries={[`/ws/${WORKSPACE}/cases/${CASE_ID}`]}>
+    <MemoryRouter initialEntries={[{ pathname: `/ws/${WORKSPACE}/cases/${CASE_ID}`, state }]}>
       <MockedProvider mocks={mocks} addTypename={false}>
         <I18nProvider defaultLang="en">
           <Routes>
             <Route path="/ws/:workspaceId/cases/:id" element={<CaseDetail />} />
-            <Route path="/ws/:workspaceId/cases" element={<div data-testid="case-list-stub" />} />
+            <Route path="/ws/:workspaceId/cases" element={<CaseListLocation />} />
           </Routes>
         </I18nProvider>
       </MockedProvider>
@@ -219,5 +219,23 @@ describe('CaseDetail archive controls', () => {
     await waitFor(() => {
       expect(called).toBe(true)
     })
+  })
+})
+
+
+function CaseListLocation() {
+  const location = useLocation()
+  return <div data-testid="case-list-stub">{location.pathname}{location.search}</div>
+}
+
+describe('CaseDetail returning to a filtered list', () => {
+  it.each(['closed', 'archived'])('restores field conditions, %s tab and page on Back', async (tab) => {
+    renderDetail([getCaseMock('CLOSED', null), ...supportingMocks()], {
+      fromStatus: tab, fromPage: 3,
+      fromFieldFilters: 'field.category=it&field.category=sales&field.priority=high&ignored=keep',
+    })
+    await screen.findByText('Suspicious login')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByTestId('case-list-stub')).toHaveTextContent(`/ws/risk/cases?field.category=it&field.category=sales&field.priority=high&status=${tab}&page=3`)
   })
 })

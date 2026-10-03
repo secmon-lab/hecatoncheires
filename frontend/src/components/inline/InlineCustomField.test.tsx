@@ -181,3 +181,23 @@ describe('InlineCustomField — MULTI_CASE_REF', () => {
     expect(screen.getByTestId('mcr')).not.toHaveTextContent('Unavailable (#2)')
   })
 })
+
+
+describe('InlineCustomField — DATE', () => {
+  it('displays and edits the stored day and saves RFC3339 rather than date-only text', async () => {
+    const onSave = vi.fn()
+    renderWithProviders(<InlineCustomField field={{ id: 'due', name: 'Due', type: 'DATE' }} value="2026-10-01T00:00:00+09:00" onSave={onSave} testId="date" />, [])
+    expect(screen.getByTestId('date')).toHaveTextContent(new Date('2026-10-01T00:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' }))
+    fireEvent.click(screen.getByTestId('date'))
+    const input = screen.getByTestId('date-input')
+    expect(input).toHaveValue('2026-10-01')
+    fireEvent.change(input, { target: { value: '2026-10-02' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('2026-10-02T00:00:00Z'))
+    await waitFor(() => expect(screen.queryByTestId('date-input')).toBeNull())
+    fireEvent.click(screen.getByTestId('date'))
+    fireEvent.change(screen.getByTestId('date-input'), { target: { value: '' } })
+    fireEvent.blur(screen.getByTestId('date-input'))
+    await waitFor(() => expect(onSave).toHaveBeenLastCalledWith(null))
+  })
+})

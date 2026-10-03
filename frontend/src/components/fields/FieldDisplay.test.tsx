@@ -86,3 +86,11 @@ describe('FieldDisplay MARKDOWN', () => {
     }
   })
 })
+
+it('displays a custom date as its stored calendar day and retains malformed values', () => {
+  const field = { id: 'due', name: 'Due', type: 'DATE' }
+  const { rerender } = render(<FieldDisplay field={field} value="2026-10-01T00:00:00+09:00" />)
+  expect(screen.getByText(new Date('2026-10-01T00:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' }))).toBeVisible()
+  rerender(<FieldDisplay field={field} value="invalid" />)
+  expect(screen.getByText('invalid')).toBeVisible()
+})

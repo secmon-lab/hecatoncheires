@@ -1,3 +1,4 @@
+import { formatCalendarDate } from '../../utils/calendarDate'
 import { useQuery } from '@apollo/client'
 import { Avatar } from '../Primitives'
 import { IconExt } from '../Icons'
@@ -163,11 +164,7 @@ function FieldValueView({ field, value, users = [] }: Omit<Props, 'display'>) {
       return <span className="mono" style={{ fontSize: 13 }}>{String(value)}</span>
 
     case 'DATE': {
-      const d = new Date(String(value))
-      const label = Number.isNaN(d.getTime())
-        ? String(value)
-        : d.toLocaleDateString()
-      return <span className="mono" style={{ fontSize: 13 }}>{label}</span>
+      return <span className="mono" style={{ fontSize: 13 }}>{formatCalendarDate(value)}</span>
     }
 
     case 'URL':

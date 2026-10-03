@@ -42,3 +42,50 @@ options = [
   { id = "code", name = "Code" },
   { id = "design", name = "Design" },
 ]
+
+# Optional fields for shared, compound Case field filters.
+[[fields]]
+id = "priority"
+name = "Priority"
+type = "select"
+required = false
+options = [
+  { id = "low", name = "Low" },
+  { id = "medium", name = "Medium" },
+  { id = "high", name = "High" },
+]
+
+[[fields]]
+id = "teams"
+name = "Teams"
+type = "multi-select"
+required = false
+options = [
+  { id = "platform", name = "Platform" },
+  { id = "product", name = "Product" },
+]
+
+[[fields]]
+id = "ticket"
+name = "Ticket"
+type = "text"
+required = false
+
+[[fields]]
+id = "estimate"
+name = "Estimate"
+type = "number"
+required = false
+
+[[fields]]
+id = "due"
+name = "Due"
+type = "date"
+required = false
+
+[[fields]]
+id = "related"
+name = "Related"
+type = "multi_case_ref"
+reference_workspace = "test"
+required = false

@@ -398,3 +398,34 @@ describe('ActionList completed-column bulk archive', () => {
     expect(archiveItem).toBeDisabled()
   })
 })
+
+
+describe('ActionList case field filters', () => {
+  it('filters actions by their parent case, including a case outside the open-case picker', async () => {
+    const config = {
+      ...fieldConfigMock,
+      result: { data: { fieldConfiguration: {
+        ...fieldConfigMock.result.data.fieldConfiguration,
+        fields: [{ id: 'category', name: 'Category', type: 'SELECT', options: [{ id: 'it', name: 'IT' }, { id: 'sales', name: 'Sales' }] }],
+      } } },
+    }
+    const rows = [
+      { ...actionRow(201, 9, 'Closed IT case', 'Selected action'), case: { id: 9, title: 'Closed IT case', accessDenied: false, fields: [{ fieldId: 'category', value: 'it' }] } },
+      { ...actionRow(202, 4, 'Sales', 'Excluded action'), case: { id: 4, title: 'Sales', accessDenied: false, fields: [{ fieldId: 'category', value: 'sales' }] } },
+    ]
+    const mocks = [config, openCasesMock, {
+      request: { query: GET_ACTIONS_BY_CASE, variables: { workspaceId: 'risk', caseID: 9 } },
+      result: { data: { actionsByCase: rows } },
+    }]
+    render(<MemoryRouter initialEntries={['/ws/risk/actions/case/9?field.category=it']}>
+      <MockedProvider mocks={mocks} addTypename={false}><I18nProvider defaultLang="en">
+        <Routes><Route path="/ws/:workspaceId/actions/case/:caseId" element={<ActionList />} /></Routes>
+      </I18nProvider></MockedProvider>
+    </MemoryRouter>)
+    expect(await screen.findByText('Selected action')).toBeInTheDocument()
+    expect(screen.queryByText('Excluded action')).toBeNull()
+    fireEvent.click(screen.getByTestId('case-field-filters-button'))
+    fireEvent.click(screen.getByTestId('case-field-filters-clear'))
+    expect(await screen.findByText('Excluded action')).toBeInTheDocument()
+  })
+})

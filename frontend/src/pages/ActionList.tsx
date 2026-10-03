@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useLocation } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { BULK_ARCHIVE_ACTIONS, GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -25,12 +25,15 @@ import CaseFilterSelect from '../components/CaseFilterSelect'
 import { activateOnEnterOrSpace } from '../utils/keyboard'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
+import CaseFieldFilters from '../components/CaseFieldFilters'
+import { useCaseFieldFilters } from '../hooks/useCaseFieldFilters'
+import { matchesCaseFields, type CaseFieldDefinition } from '../utils/caseFieldFilters'
 import styles from './ActionList.module.css'
 
 interface ActionRow {
   id: number
   caseID: number
-  case?: { id: number; title: string }
+  case?: { id: number; title: string; accessDenied?: boolean; fields?: { fieldId: string; value: unknown }[] }
   title: string
   description: string
   assigneeID: string | null
@@ -55,10 +58,12 @@ function formatDue(iso?: string | null) {
 
 export default function ActionList() {
   const navigate = useNavigate()
+  const { search: queryString } = useLocation()
   const { actionId, caseId } = useParams<{ actionId?: string; caseId?: string }>()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
+  const fieldFilter = useCaseFieldFilters()
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [draggingId, setDraggingId] = useState<number | null>(null)
@@ -106,6 +111,7 @@ export default function ActionList() {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
   })
+  const fieldDefs: CaseFieldDefinition[] = useMemo(() => configData?.fieldConfiguration?.fields ?? [], [configData])
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
   const refetchActionsQuery = useMemo(
     () =>
@@ -126,6 +132,8 @@ export default function ActionList() {
     if (filterCaseId != null) return byCaseData?.actionsByCase || []
     return openData?.openCaseActions || []
   }, [filterCaseId, byCaseData, openData])
+
+  const filterCases = useMemo(() => actions.map((a) => a.case), [actions])
 
   const openCases = useMemo(
     () =>
@@ -151,14 +159,15 @@ export default function ActionList() {
     const visible = archivingIds.size === 0
       ? actions
       : actions.filter((a) => !archivingIds.has(a.id))
-    if (!search.trim()) return visible
+    const matching = visible.filter((a) => matchesCaseFields(a.case, fieldFilter.filters, fieldDefs))
+    if (!search.trim()) return matching
     const q = search.toLowerCase()
-    return visible.filter((a) =>
+    return matching.filter((a) =>
       a.title.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
       (a.case?.title || '').toLowerCase().includes(q),
     )
-  }, [actions, search, archivingIds])
+  }, [actions, search, archivingIds, fieldFilter.filters, fieldDefs])
 
   const grouped = useMemo(() => {
     const map: Record<string, ActionRow[]> = {}
@@ -215,7 +224,7 @@ export default function ActionList() {
     }
   }
 
-  const openCount = actions.filter((a) => !isClosed(a.status)).length
+  const openCount = filtered.filter((a) => !isClosed(a.status)).length
 
   // Thread-mode workspaces bind the configurable status to the Case itself, so
   // the board renders Cases instead of Actions.
@@ -243,8 +252,8 @@ export default function ActionList() {
           selectedCaseId={filterCaseId}
           onSelect={(id) => {
             if (!rootUrl) return
-            if (id == null) navigate(rootUrl)
-            else navigate(`${rootUrl}/case/${id}`)
+            if (id == null) navigate(`${rootUrl}${queryString}`)
+            else navigate(`${rootUrl}/case/${id}${queryString}`)
           }}
           caseLabel={t('labelCaseFilter', { caseLabel })}
           allLabel={t('filterAllCases', { caseLabel })}
@@ -255,6 +264,7 @@ export default function ActionList() {
           extraOption={extraOption}
           testId="action-case-filter"
         />
+        <CaseFieldFilters key={currentWorkspace?.id} fields={fieldDefs} cases={filterCases} {...fieldFilter} />
         <div className="h-search" style={{ width: 280, marginLeft: 0 }}>
           <IconSearch size={13} />
           <input
@@ -342,7 +352,7 @@ export default function ActionList() {
             </div>
             <div className="kan-list">
               {(grouped[col.id] ?? []).map((a) => {
-                const openModal = () => navigate(`${baseUrl}/${a.id}`)
+                const openModal = () => navigate(`${baseUrl}/${a.id}${queryString}`)
                 return (
                   <div
                     key={a.id}
@@ -370,7 +380,7 @@ export default function ActionList() {
                         onClick={(e) => {
                           e.stopPropagation()
                           if (filterCaseId === a.case!.id) return
-                          navigate(`${rootUrl}/case/${a.case!.id}`)
+                          navigate(`${rootUrl}/case/${a.case!.id}${queryString}`)
                         }}
                       >
                         #{a.case.id} {a.case.title}
@@ -441,7 +451,7 @@ export default function ActionList() {
       {detailActionId && (
         <ActionModal
           actionId={detailActionId}
-          onClose={() => navigate(baseUrl)}
+          onClose={() => navigate(`${baseUrl}${queryString}`)}
         />
       )}
     </div>

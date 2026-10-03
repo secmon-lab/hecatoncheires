@@ -140,7 +140,7 @@ export class CaseFormPage extends BasePage {
     // TEXT / NUMBER / etc.
     const fieldLabel = fieldId.charAt(0).toUpperCase() + fieldId.slice(1);
     const inputField = this.page.locator(
-      `#${fieldId}, [name="${fieldId}"], [data-field-id="${fieldId}"], input[placeholder*="${fieldLabel}"]`,
+      `#${fieldId}, input[name="${fieldId}"], textarea[name="${fieldId}"], [data-field-id="${fieldId}"], input[placeholder*="${fieldLabel}"]`,
     ).first();
     await inputField.fill(value);
   }

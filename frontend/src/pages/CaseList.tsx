@@ -1,3 +1,4 @@
+import { formatCalendarDate } from '../utils/calendarDate'
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import { Link, useNavigate, useSearchParams } from 'react-router'
@@ -41,6 +42,9 @@ import {
   type BulkActionKind,
   type BulkActionResult,
 } from '../hooks/useBulkDraftAction'
+import CaseFieldFilters from '../components/CaseFieldFilters'
+import { useCaseFieldFilters } from '../hooks/useCaseFieldFilters'
+import { matchesCaseFields } from '../utils/caseFieldFilters'
 import styles from './CaseList.module.css'
 
 // Rows rendered per page. 20 stays the default so the list opens as compactly
@@ -109,6 +113,7 @@ interface FieldDef {
   name: string
   type: string
   options?: FieldOption[] | null
+  referenceWorkspaceId?: string | null
 }
 interface CaseUser {
   id: string
@@ -191,7 +196,7 @@ function renderFieldValue(value: any, def: FieldDef): React.ReactNode {
   if (isBlankFieldValue(value)) return <span className="soft">—</span>
   switch (def.type) {
     case 'SELECT': {
-      const opt = def.options?.find((o) => o.id === value || o.name === value)
+      const opt = def.options?.find((o) => o.id === value) ?? def.options?.find((o) => o.name === value)
       const text = opt?.name ?? String(value)
       return <span className="badge">{text}</span>
     }
@@ -200,14 +205,14 @@ function renderFieldValue(value: any, def: FieldDef): React.ReactNode {
       return (
         <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
           {arr.map((v) => {
-            const opt = def.options?.find((o) => o.id === v || o.name === v)
+            const opt = def.options?.find((o) => o.id === v) ?? def.options?.find((o) => o.name === v)
             return <span key={String(v)} className="chip" style={{ height: 20, fontSize: 11 }}>{opt?.name ?? String(v)}</span>
           })}
         </div>
       )
     }
     case 'DATE': {
-      try { return <span className="mono soft" style={{ fontSize: 12 }}>{new Date(value).toLocaleDateString()}</span> } catch { return String(value) }
+      return <span className="mono soft" style={{ fontSize: 12 }}>{formatCalendarDate(value)}</span>
     }
     case 'NUMBER':
       return <span className="mono">{String(value)}</span>
@@ -377,6 +382,9 @@ export default function CaseList() {
   // makes Back from a case detail land on the page it was opened from.
   const setPageIndex = useCallback(
     (next: number) => {
+      // Search and other local filters often reset an already-first page.
+      // Avoid a redundant navigation that can overwrite a pending URL filter.
+      if (next === 0 && !searchParams.has(CASE_LIST_PAGE_PARAM)) return
       setSearchParams(
         (prev) => {
           const params = new URLSearchParams(prev)
@@ -387,9 +395,10 @@ export default function CaseList() {
         { replace: true },
       )
     },
-    [setSearchParams],
+    [setSearchParams, searchParams],
   )
 
+  const fieldFilter = useCaseFieldFilters()
   const [searchText, setSearchText] = useState('')
   // `YYYY-MM-DD` (the <input type="date"> value), or '' for no date filter.
   const [updatedOn, setUpdatedOn] = useState('')
@@ -566,13 +575,16 @@ export default function CaseList() {
       : options
   }, [cases, t])
 
+  const fieldDefs: FieldDef[] = useMemo(() => configData?.fieldConfiguration?.fields ?? [], [configData])
+
   const filtered = useMemo(() => {
     const visible = pendingIds.size === 0 ? cases : cases.filter((c) => !pendingIds.has(c.id))
     const q = searchText.trim().toLowerCase()
     const byStatus = boardStatusFilter.length > 0
     const byAssignee = assigneeFilter.length > 0
-    if (!q && !updatedOn && !byStatus && !byAssignee) return visible
+    if (!q && !updatedOn && !byStatus && !byAssignee && fieldFilter.filters.size === 0) return visible
     return visible.filter((c) => {
+      if (!matchesCaseFields(c, fieldFilter.filters, fieldDefs)) return false
       // A restricted row carries no readable title, so the title search drops
       // it rather than matching against the redacted value. The other filters
       // have no such problem and leave those rows to stand on their own values.
@@ -591,7 +603,7 @@ export default function CaseList() {
       }
       return true
     })
-  }, [cases, searchText, updatedOn, boardStatusFilter, assigneeFilter, pendingIds])
+  }, [cases, searchText, updatedOn, boardStatusFilter, assigneeFilter, pendingIds, fieldFilter.filters, fieldDefs])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   // The URL can name a page that does not exist right now — the page size was
@@ -601,7 +613,6 @@ export default function CaseList() {
   const page = Math.min(requestedPage, totalPages - 1)
   const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize)
 
-  const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
 
   // Bulk selection state — used on the Drafts, Closed and Archived tabs.
@@ -794,6 +805,7 @@ export default function CaseList() {
   const rowLinkState = {
     fromStatus: statusToQuery(statusFilter),
     fromPage: page > 0 ? page + 1 : undefined,
+    ...(fieldFilter.filters.size > 0 ? { fromFieldFilters: searchParams.toString() } : {}),
   }
 
   // Rows the user is allowed to select. accessDenied rows have an opaque
@@ -1126,6 +1138,7 @@ export default function CaseList() {
             testId="status-filter"
           />
         )}
+        <CaseFieldFilters key={currentWorkspace?.id} fields={fieldDefs} cases={cases} {...fieldFilter} />
         <MultiSelectFilter
           label={t('filterAssignee')}
           options={assigneeOptions}

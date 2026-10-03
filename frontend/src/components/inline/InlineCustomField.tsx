@@ -262,7 +262,7 @@ function InlineFieldEditor({
       return (
         <InlineDate
           value={value || null}
-          onSave={(v) => onSave(v)}
+          onSave={(v) => onSave(v ? `${v}T00:00:00Z` : v)}
           ariaLabel={ariaLabel}
           placeholder={placeholder}
           disabled={disabled}

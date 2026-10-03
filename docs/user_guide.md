@@ -25,6 +25,59 @@ Inside a workspace, `/ws/{workspace}/cases` lists its Cases as a table with the 
 
 The column picker's selection is also stored in your browser, per workspace, because the available custom-field columns differ between workspaces.
 
+## Case field filters (Web UI)
+
+The Case list and both boards have a **Case fields** control. Use **Add condition**
+to choose just the fields you need. Search and select multiple configured options
+(for example, your team's categories), users by name, or reference Cases by title.
+For text, number and date fields, enter each exact value and press **Add** or Enter
+to append it without replacing existing values. Active conditions and removable
+value chips stay visible below the toolbar when the editor is closed. Remove a
+single value, remove a whole condition, or clear all field filters.
+
+Within one field, multiple values match **any** selection (OR); different fields must **all** match (AND). A
+multi-value field matches when any of its values is selected. Title search and
+the existing filters narrow the result further. The list applies field filters
+before pagination and the boards apply them before grouping cards into columns.
+The Action board matches the fields of each Action's parent Case, including
+closed Cases when the board is opened for a specific Case.
+
+Field filters live in the URL, so reload, browser Back/Forward, bookmarks and
+shared links restore them. Changing or clearing a field filter resets the Case
+list to page 1, keeps its current tab, and preserves unrelated query parameters.
+The Case detail **Back** button also restores the originating list's fields.
+
+| Example | URL |
+| --- | --- |
+| One category, open Cases | `/ws/support/cases?field.category=it` |
+| Either category | `/ws/support/cases?field.category=it&field.category=sales` |
+| Either category and either priority | `/ws/support/cases?field.category=it&field.category=sales&field.priority=high&field.priority=urgent` |
+| Category and priority, closed Cases | `/ws/support/cases?status=closed&field.category=it&field.priority=high` |
+| The same category on a board | `/ws/support/actions?field.category=it` |
+
+Use `field.<field-id>=<value>` and repeat the parameter for additional values;
+values are not split on commas. Use stable field / option **IDs**, not display
+names, and percent-encode special characters in keys and values. Number fields
+compare numerically, date fields compare `YYYY-MM-DD`, and text / Markdown / URL
+fields compare exact, case-sensitive strings. Dates use the stored calendar day
+in inputs, displays and filters, regardless of the viewer's timezone. User fields use Slack user IDs;
+Case reference fields use the stored reference ID. Multi-user and multi-case
+reference fields support repeated parameters too. An empty value removes that
+condition; filtering specifically for an unset field is not supported.
+
+Unknown fields or removed select options produce no matches, and remain
+removable in **Case fields**. This prevents an old team link from silently
+showing the whole workspace. Restricted private Cases cannot match a field
+filter. Filters narrow the Web UI's existing access-controlled results; they do
+not change permissions or the GraphQL API, and they do not persist workspace
+configuration or database state.
+
+Reference filter choices come from references already present in the current
+unfiltered tab or board. Search them by title or ID; readable archived targets
+remain selectable. Missing or inaccessible targets are omitted from choices,
+while a selected URL value remains removable. Creating or editing a reference
+continues to use the separate picker that excludes archived targets.
+
 ## Archiving a Case
 
 Closed Cases pile up in the **Closed** tab and in the closed columns of the Case board. Archiving puts one away without deleting it: the Case keeps every field, every Action, every Memo and its Slack channel or thread, and can be restored at any time. `deleteCase` remains the only permanent removal.

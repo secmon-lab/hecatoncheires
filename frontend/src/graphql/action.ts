@@ -8,6 +8,11 @@ const ACTION_FIELDS = `
     id
     workspaceId
     title
+    accessDenied
+    fields {
+      fieldId
+      value
+    }
     slackChannelID
     slackChannelURL
   }

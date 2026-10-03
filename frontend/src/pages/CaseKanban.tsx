@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
+import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_CASES } from '../graphql/case'
 import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -10,12 +11,17 @@ import { actionStatusColorStyle, actionStatusSlug } from '../utils/actionStatusS
 import Button from '../components/Button'
 import { IconSearch } from '../components/Icons'
 import { activateOnEnterOrSpace } from '../utils/keyboard'
+import CaseFieldFilters from '../components/CaseFieldFilters'
+import { useCaseFieldFilters } from '../hooks/useCaseFieldFilters'
+import { matchesCaseFields, type CaseFieldDefinition } from '../utils/caseFieldFilters'
 import styles from './ActionList.module.css'
 
 interface CaseRow {
   id: number
   title: string
   boardStatus: string | null
+  accessDenied?: boolean
+  fields?: { fieldId: string; value: unknown }[]
 }
 
 // CaseKanban renders the thread-mode Kanban: one column per configurable Case
@@ -26,6 +32,7 @@ export default function CaseKanban() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
+  const fieldFilter = useCaseFieldFilters()
   const [search, setSearch] = useState('')
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<string | null>(null)
@@ -41,25 +48,25 @@ export default function CaseKanban() {
     skip: !currentWorkspace,
   })
 
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
+  })
+  const fieldDefs: CaseFieldDefinition[] = useMemo(() => configData?.fieldConfiguration?.fields ?? [], [configData])
+
   const [updateCaseStatus] = useMutation(UPDATE_CASE_STATUS, {
     refetchQueries: [{ query: GET_CASES, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
-  const cases: CaseRow[] = useMemo(
-    () =>
-      (casesData?.cases ?? []).map((c: { id: number; title: string; boardStatus: string | null }) => ({
-        id: c.id,
-        title: c.title,
-        boardStatus: c.boardStatus,
-      })),
-    [casesData],
-  )
+  const cases: CaseRow[] = useMemo(() => casesData?.cases ?? [], [casesData])
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return cases
-    const q = search.toLowerCase()
-    return cases.filter((c) => c.title.toLowerCase().includes(q))
-  }, [cases, search])
+    const q = search.trim().toLowerCase()
+    return cases.filter((c) =>
+      matchesCaseFields(c, fieldFilter.filters, fieldDefs)
+      && (!q || (!c.accessDenied && c.title.toLowerCase().includes(q))),
+    )
+  }, [cases, search, fieldFilter.filters, fieldDefs])
 
   const grouped = useMemo(() => {
     const map: Record<string, CaseRow[]> = {}
@@ -101,7 +108,7 @@ export default function CaseKanban() {
     }
   }
 
-  const openCount = cases.filter((c) => !isClosed(c.boardStatus ?? '')).length
+  const openCount = filtered.filter((c) => !isClosed(c.boardStatus ?? '')).length
 
   return (
     <div className="h-main-inner" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -126,6 +133,7 @@ export default function CaseKanban() {
             }}
           />
         </div>
+        <CaseFieldFilters key={currentWorkspace?.id} fields={fieldDefs} cases={cases} {...fieldFilter} />
         {search && (
           <Button size="sm" variant="ghost" onClick={() => setSearch('')} data-testid="case-board-filter-clear">
             {t('btnClear')}

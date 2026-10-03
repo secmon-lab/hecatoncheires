@@ -1,3 +1,4 @@
+import { calendarDate, formatCalendarDate } from '../../utils/calendarDate'
 import { useEffect, useRef, useState } from 'react'
 import InlineFieldFrame from './InlineFieldFrame'
 import { commitOnEnter } from '../../utils/keyboard'
@@ -13,32 +14,16 @@ interface Props {
   testId?: string
 }
 
-function toDateInputValue(v: string | null | undefined): string {
-  if (!v) return ''
-  // Accept "YYYY-MM-DD" or full ISO; truncate at "T".
-  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/)
-  return m ? m[1] : ''
-}
-
-function formatDisplay(v: string | null | undefined): string {
-  if (!v) return ''
-  const iso = toDateInputValue(v)
-  if (!iso) return String(v)
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString()
-}
-
 export default function InlineDate({
   value, onSave, ariaLabel, placeholder, disabled, testId,
 }: Props) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(toDateInputValue(value))
+  const [draft, setDraft] = useState(calendarDate(value))
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (!editing) setDraft(toDateInputValue(value))
+    if (!editing) setDraft(calendarDate(value))
   }, [value, editing])
 
   useEffect(() => {
@@ -49,7 +34,7 @@ export default function InlineDate({
 
   const commit = async (next: string) => {
     const normalized = next === '' ? null : next
-    if (normalized === toDateInputValue(value)) {
+    if (normalized === calendarDate(value)) {
       setEditing(false)
       return
     }
@@ -78,7 +63,7 @@ export default function InlineDate({
         onKeyDown={commitOnEnter({
           onCommit: () => void commit(draft),
           onCancel: () => {
-            setDraft(toDateInputValue(value))
+            setDraft(calendarDate(value))
             setEditing(false)
           },
         })}
@@ -87,7 +72,7 @@ export default function InlineDate({
     )
   }
 
-  const display = formatDisplay(value)
+  const display = formatCalendarDate(value)
   const isEmpty = !display
   return (
     <InlineFieldFrame
