@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gollem-dev/agentkit"
@@ -359,7 +360,70 @@ func Register[T Validatable](
 		progress:  progress,
 		cfg:       cfg,
 	}
+	// The schema depends on T alone, so it is derived and checked here: a type no
+	// provider can be sent fails the process at startup instead of failing every
+	// run at its terminal call.
+	if !cfg.TextOnly {
+		schema, err := outputSchemaOf[T]()
+		if err != nil {
+			// Joined so the error matches agentkit.ErrInvalidAgentDef, like the
+			// other registration failures, and still the gollem error behind it.
+			return agentkit.Agent[Input]{}, goerr.Wrap(errors.Join(agentkit.ErrInvalidAgentDef, err),
+				"planexec: invalid final output type", goerr.V("agent", name))
+		}
+		s.outputSchema = schema
+	}
 	return agentkit.Register(reg, name, version, s, opts...)
+}
+
+// outputSchemaOf derives the terminal output schema of T and rejects one a
+// provider would refuse: a schema gollem cannot build or validate, or one
+// holding a map. Which model a run uses is operator configuration, and Claude
+// structured outputs and OpenAI strict mode both reject a map, so a map is
+// refused whatever the provider.
+func outputSchemaOf[T any]() (*gollem.Parameter, error) {
+	var zero T
+	schema, err := gollem.ToSchema(zero)
+	if err != nil {
+		return nil, goerr.Wrap(err, "derive the final output schema from its type")
+	}
+	if err := schema.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "validate the final output schema")
+	}
+	if path, found := findMap(schema, ""); found {
+		return nil, goerr.New(
+			fmt.Sprintf("the final output schema holds a map at %q, which structured outputs cannot express", path),
+			goerr.V("path", path))
+	}
+	return schema, nil
+}
+
+// findMap returns the path of the first schema node carrying
+// AdditionalProperties, walking Properties in name order and then Items. Paths
+// join property names with "." and mark an array element with "[]", e.g.
+// "items[].m".
+func findMap(p *gollem.Parameter, path string) (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	if p.AdditionalProperties != nil {
+		return path, true
+	}
+	names := make([]string, 0, len(p.Properties))
+	for name := range p.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		child := name
+		if path != "" {
+			child = path + "." + name
+		}
+		if found, ok := findMap(p.Properties[name], child); ok {
+			return found, true
+		}
+	}
+	return findMap(p.Items, path+"[]")
 }
 
 type strategy[T Validatable] struct {
@@ -368,6 +432,9 @@ type strategy[T Validatable] struct {
 	taskAgent agentkit.Agent[react.Input]
 	progress  Progress
 	cfg       Config[T]
+	// outputSchema is the terminal output schema derived from T at Register; nil
+	// when cfg.TextOnly.
+	outputSchema *gollem.Parameter
 }
 
 func (s *strategy[T]) Version() int { return s.version }
@@ -932,13 +999,7 @@ func (s *strategy[T]) stepFinal(ctx context.Context, sys agentkit.Syscalls, st s
 		agentkit.WithRole(RoleFinalizer),
 	}
 	if !s.cfg.TextOnly {
-		var zero T
-		schema, serr := gollem.ToSchema(zero)
-		if serr != nil {
-			return st, agentkit.Decision[Output[T]]{}, goerr.Wrap(serr,
-				"planexec: derive the final output schema from its type")
-		}
-		opts = append(opts, agentkit.WithSchema(schema))
+		opts = append(opts, agentkit.WithSchema(s.outputSchema))
 	}
 
 	res, err := sys.Session().Generate(ctx, input, opts...)

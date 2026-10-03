@@ -41,7 +41,7 @@ const draftReplanDone = `{"message":"ready to draft","finalize":{"reason":"enoug
 // draftFinal renders the terminal Draft JSON for the given workspace.
 func draftFinal(workspaceID, title, description, fieldsJSON string) string {
 	return `{"workspace_id":"` + workspaceID + `","title":"` + title +
-		`","description":"` + description + `","custom_field_values":` + fieldsJSON + `}`
+		`","description":"` + description + `","fields":` + fieldsJSON + `}`
 }
 
 // stubDraftScriptTitled is one complete draft turn: investigate once, then
@@ -59,7 +59,7 @@ func stubDraftScriptTitled(workspaceID, title, description, fieldsJSON string) [
 // that assert on the flow rather than on what was drafted.
 func stubDraftScript(workspaceID string) []string {
 	return stubDraftScriptTitled(workspaceID,
-		"AI suggested title", "AI suggested description", `{"severity":"high"}`)
+		"AI suggested title", "AI suggested description", `[{"field_id":"severity","value":"high"}]`)
 }
 
 // bindDraftRuntime registers the durable case-draft agent, builds the Kernel it
@@ -1073,7 +1073,7 @@ func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) 
 		`{"message":"user answered","tasks":[{"id":"inv-2","title":"confirm","description":"confirm the answer","acceptance_criteria":"confirmed","tools":["slack_ro"],"budget_usd":0.01}]}`,
 		"summary: the user says the severity is high.",
 		`{"message":"ready","finalize":{"reason":"severity known"}}`,
-		draftFinal("ws-1", "Outage X", "Service degraded since morning.", `{"severity":"high"}`),
+		draftFinal("ws-1", "Outage X", "Service degraded since morning.", `[{"field_id":"severity","value":"high"}]`),
 	})
 
 	h := newLifecycleHarness(t, registry, llm)
@@ -1141,7 +1141,7 @@ func TestLifecycle_DraftFlow_QuestionFormSubmitResumesPlanner(t *testing.T) {
 		draftPlan,
 		"summary: the user says the severity is high.",
 		draftReplanDone,
-		draftFinal("ws-1", "Outage F", "Service degraded.", `{"severity":"high"}`),
+		draftFinal("ws-1", "Outage F", "Service degraded.", `[{"field_id":"severity","value":"high"}]`),
 	})
 
 	h := newLifecycleHarness(t, registry, llm)
@@ -1218,12 +1218,12 @@ func TestLifecycle_DraftFlow_MaterializeThenWorkspaceSwitch(t *testing.T) {
 		draftPlan,
 		"summary: an issue was reported.",
 		draftReplanDone,
-		draftFinal("ws-A", "Issue title", "Initial description", `{"severity":"low"}`),
+		draftFinal("ws-A", "Issue title", "Initial description", `[{"field_id":"severity","value":"low"}]`),
 		// Turn 2 (ws-switch) → redraft for the ws-B schema.
 		draftPlan,
 		"summary: the same issue, seen through the ws-B schema.",
 		draftReplanDone,
-		draftFinal("ws-B", "Issue title", "Initial description", `{"team":"platform"}`),
+		draftFinal("ws-B", "Issue title", "Initial description", `[{"field_id":"team","value":"platform"}]`),
 	})
 
 	h := newLifecycleHarness(t, registry, llm)
@@ -1326,7 +1326,7 @@ func TestLifecycle_DraftFlow_ParallelInvestigationsThenMaterialize(t *testing.T)
 		"summary: high signal",
 		"summary: confirms",
 		draftReplanDone,
-		draftFinal("ws-1", "Combined finding", "From thread + channel.", `{"severity":"high"}`),
+		draftFinal("ws-1", "Combined finding", "From thread + channel.", `[{"field_id":"severity","value":"high"}]`),
 	})
 
 	h := newLifecycleHarness(t, registry, llm)
@@ -1358,7 +1358,7 @@ func TestLifecycle_DraftFlow_MaterializeEndsThenReplyIsDropped(t *testing.T) {
 	// Exactly ONE turn is scripted. The dispatcher must drop the follow-up
 	// MessageEvent (F8: LastAction != post_question) so no second turn starts;
 	// a leaked dispatch would overrun the script and fail its turn.
-	llm := newScriptedClient(stubDraftScriptTitled("ws-1", "Case D", "Done.", `{"severity":"low"}`))
+	llm := newScriptedClient(stubDraftScriptTitled("ws-1", "Case D", "Done.", `[{"field_id":"severity","value":"low"}]`))
 
 	h := newLifecycleHarness(t, registry, llm)
 
@@ -1390,6 +1390,47 @@ func TestLifecycle_DraftFlow_MaterializeEndsThenReplyIsDropped(t *testing.T) {
 	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMaterialize)
 }
 
+// The agent writes every field value as a string or a list of strings; the
+// preview stores each in its field's own type. A value that cannot be coerced,
+// or a field the workspace does not define, is left out while the rest of the
+// draft is still stored.
+func TestLifecycle_DraftFlow_FieldValuesAreStoredInTheirFieldTypes(t *testing.T) {
+	const channelID = "C-LIFE-G"
+	const mentionTS = "1700000070.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", &config.FieldSchema{Fields: []config.FieldDefinition{
+		{ID: "severity", Type: types.FieldTypeSelect,
+			Options: []config.FieldOption{{ID: "low", Name: "Low"}, {ID: "high", Name: "High"}}},
+		{ID: "score", Type: types.FieldTypeNumber},
+		{ID: "impact", Type: types.FieldTypeNumber},
+		{ID: "tags", Type: types.FieldTypeMultiSelect,
+			Options: []config.FieldOption{{ID: "a", Name: "A"}, {ID: "b", Name: "B"}}},
+	}})
+
+	llm := newScriptedClient(stubDraftScriptTitled("ws-1", "Case G", "Typed fields.",
+		`[{"field_id":"severity","value":"high"},`+
+			`{"field_id":"score","value":"3"},`+
+			`{"field_id":"impact","value":"NaN"},`+
+			`{"field_id":"tags","values":["a","b"]},`+
+			`{"field_id":"ghost","value":"x"}]`))
+
+	h := newLifecycleHarness(t, registry, llm)
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> case please", mentionTS))).Required()
+	async.Wait()
+
+	ssn := waitForDraftSessionEnd(t, h.repo, channelID, mentionTS, model.SessionEndedWithMaterialize)
+	d, err := h.repo.CaseProposal().Get(context.Background(), ssn.ProposalID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d.Materialization).NotNil().Required()
+	gt.Value(t, d.Materialization.Title).Equal("Case G")
+
+	gt.Value(t, d.Materialization.CustomFieldValues).Equal(map[string]model.FieldValue{
+		"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+		"score":    {FieldID: "score", Type: types.FieldTypeNumber, Value: float64(3)},
+		"tags":     {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"a", "b"}},
+	})
+}
+
 // --- Scenario E: mention → materialize → HandleSubmit creates the Case ---
 func TestLifecycle_DraftFlow_MaterializeThenSubmitCreatesCase(t *testing.T) {
 	const channelID = "C-LIFE-E"
@@ -1397,7 +1438,7 @@ func TestLifecycle_DraftFlow_MaterializeThenSubmitCreatesCase(t *testing.T) {
 	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
 
 	llm := newScriptedClient(stubDraftScriptTitled(
-		"ws-1", "Quick incident", "Something broke briefly.", `{"severity":"high"}`))
+		"ws-1", "Quick incident", "Something broke briefly.", `[{"field_id":"severity","value":"high"}]`))
 
 	h := newLifecycleHarness(t, registry, llm)
 	seedSlackUsers(t, h.repo, "U-AUTHOR")

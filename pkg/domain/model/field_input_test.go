@@ -67,6 +67,20 @@ func TestCoerceFieldInputs(t *testing.T) {
 		gt.Map(t, out).Length(0)
 	})
 
+	// strconv.ParseFloat accepts these, but encoding/json cannot marshal the
+	// result, so a stored one would break every later read of the entity.
+	for _, raw := range []string{"NaN", "Inf", "-Inf", "Infinity"} {
+		t.Run("non-finite number "+raw+" is reported as a violation", func(t *testing.T) {
+			out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
+				{FieldID: "score", Value: raw},
+			})
+			gt.Array(t, violations).Length(1).Required()
+			gt.String(t, violations[0]).Contains(`"score"`)
+			gt.String(t, violations[0]).Contains(raw)
+			gt.Map(t, out).Length(0)
+		})
+	}
+
 	t.Run("unparseable number is reported as a violation", func(t *testing.T) {
 		out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
 			{FieldID: "score", Value: "not-a-number"},

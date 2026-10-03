@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -80,7 +81,9 @@ func CoerceFieldInputs(schema *config.FieldSchema, in []FieldInput) (map[string]
 				continue
 			}
 			n, err := strconv.ParseFloat(trimmed, 64)
-			if err != nil {
+			// ParseFloat accepts "NaN" and "Inf", which encoding/json cannot
+			// marshal, so a stored value would break every later read of the entity.
+			if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
 				violations = append(violations,
 					"field "+strconv.Quote(fi.FieldID)+": value must be a number, got "+strconv.Quote(fi.Value))
 				continue

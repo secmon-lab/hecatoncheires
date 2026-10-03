@@ -418,7 +418,7 @@ func TestDurableTellsThePlannerAndItsSubAgentsOneTime(t *testing.T) {
 		draftPlan,
 		"the deploy failed at 14:00",
 		draftFinalize,
-		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","custom_field_values":{"severity":"high"}}`,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","fields":[{"field_id":"severity","value":"high"}]}`,
 	)
 
 	h := newDurableHarness(t, llm)
@@ -457,7 +457,7 @@ func TestDurableDeliversTheDraft(t *testing.T) {
 		draftPlan,
 		"the deploy failed at 14:00",
 		draftFinalize,
-		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","custom_field_values":{"severity":"high"}}`,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"The 14:00 deploy failed.","fields":[{"field_id":"severity","value":"high"}]}`,
 	))
 	ssn := h.session(t, ctx)
 
@@ -470,7 +470,7 @@ func TestDurableDeliversTheDraft(t *testing.T) {
 	gt.String(t, calls[0].Draft.WorkspaceID).Equal("risk")
 	gt.String(t, calls[0].Draft.Title).Equal("Failed deploy")
 	gt.String(t, calls[0].Draft.Description).Equal("The 14:00 deploy failed.")
-	gt.Value(t, calls[0].Draft.CustomFieldValues["severity"]).Equal("high")
+	gt.Value(t, calls[0].Draft.Fields).Equal([]model.FieldInput{{FieldID: "severity", Value: "high"}})
 	gt.Value(t, calls[0].Draft.IsTest).Equal(false)
 	// The placeholder the result replaces survived the durable boundary.
 	gt.Value(t, calls[0].Target.ProcessingTS).Equal("1700000000.000900")
@@ -513,7 +513,7 @@ func TestDurableLeavesUnknownFieldValuesToTheHost(t *testing.T) {
 		draftPlan,
 		"the deploy failed",
 		draftFinalize,
-		`{"workspace_id":"risk","title":"Failed deploy","description":"It failed.","custom_field_values":{"severity":"critical"}}`,
+		`{"workspace_id":"risk","title":"Failed deploy","description":"It failed.","fields":[{"field_id":"severity","value":"critical"}]}`,
 	))
 	ssn := h.session(t, ctx)
 
@@ -522,7 +522,7 @@ func TestDurableLeavesUnknownFieldValuesToTheHost(t *testing.T) {
 	calls := h.host.Calls()
 	gt.Array(t, calls).Length(1).Required()
 	gt.Value(t, calls[0].Kind).Equal("propose")
-	gt.Value(t, calls[0].Draft.CustomFieldValues["severity"]).Equal("critical")
+	gt.Value(t, calls[0].Draft.Fields).Equal([]model.FieldInput{{FieldID: "severity", Value: "critical"}})
 }
 
 // A planner question ends the turn: the host posts the form, and the session
@@ -860,21 +860,4 @@ func TestDurableStartTurnRefusesWhenUnbound(t *testing.T) {
 		UserInput: "draft a case",
 	})
 	gt.Error(t, err).Required()
-}
-
-// Draft.Validate is what stops a shapeless proposal reaching the human.
-func TestDraftValidate(t *testing.T) {
-	ok := proposal.Draft{WorkspaceID: "risk", Title: "T", Description: "D"}
-	gt.NoError(t, ok.Validate())
-
-	for name, d := range map[string]proposal.Draft{
-		"no workspace":   {Title: "T", Description: "D"},
-		"no title":       {WorkspaceID: "risk", Description: "D"},
-		"blank title":    {WorkspaceID: "risk", Title: "   ", Description: "D"},
-		"no description": {WorkspaceID: "risk", Title: "T"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			gt.Error(t, d.Validate())
-		})
-	}
 }

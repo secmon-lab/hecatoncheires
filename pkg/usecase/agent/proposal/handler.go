@@ -1,5 +1,7 @@
 package proposal
 
+import "github.com/m-mizutani/hecatoncheires/pkg/domain/model"
+
 // Trigger discriminates how the host started a turn for a given Session.
 // The prompt may use it (e.g. WSSwitch should redraft from the conversation
 // rather than investigating again).
@@ -58,10 +60,12 @@ type QuestionItem struct {
 
 // MaterializePayload is the pure-domain shape passed to Host.Propose.
 type MaterializePayload struct {
-	WorkspaceID       string
-	Title             string
-	Description       string
-	CustomFieldValues map[string]any
+	WorkspaceID string
+	Title       string
+	Description string
+	// Fields are the proposed custom-field values as the agent wrote them; the
+	// host coerces each to its field's type against the workspace schema.
+	Fields []model.FieldInput
 	// IsTest marks the proposed case as a test case. Defaults to false.
 	IsTest bool
 }

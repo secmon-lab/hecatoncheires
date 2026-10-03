@@ -6,8 +6,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/hecatoncheires/pkg/domain/interfaces"
 	"github.com/m-mizutani/hecatoncheires/pkg/domain/model"
-	"github.com/m-mizutani/hecatoncheires/pkg/domain/model/config"
-	"github.com/m-mizutani/hecatoncheires/pkg/domain/types"
 	slacksvc "github.com/m-mizutani/hecatoncheires/pkg/service/slack"
 	"github.com/m-mizutani/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/m-mizutani/hecatoncheires/pkg/utils/errutil"
@@ -148,30 +146,20 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 		CustomFieldValues: map[string]model.FieldValue{},
 	}
 	if entry.FieldSchema != nil {
-		defByID := make(map[string]config.FieldDefinition, len(entry.FieldSchema.Fields))
-		for _, fd := range entry.FieldSchema.Fields {
-			defByID[fd.ID] = fd
+		coerced, violations := model.CoerceFieldInputs(entry.FieldSchema, m.Fields)
+		for _, v := range violations {
+			errutil.Handle(ctx, goerr.New("planner returned a field value that cannot be coerced",
+				goerr.V("workspace_id", m.WorkspaceID),
+				goerr.V("violation", v),
+			), "draft handler: field coercion failed; skipping field")
 		}
-		for fieldID, raw := range m.CustomFieldValues {
-			fd, ok := defByID[fieldID]
-			if !ok {
-				// Field hallucinated outside schema — drop silently.
+		for fieldID, fv := range coerced {
+			// CoerceFieldInputs leaves Type unset for an id the schema does not
+			// define: a field hallucinated outside the schema, dropped silently.
+			if fv.Type == "" {
 				continue
 			}
-			coerced, ok := coerceFieldValue(raw, fd.Type)
-			if !ok {
-				errutil.Handle(ctx, goerr.New("planner returned a value of unexpected type for field",
-					goerr.V("field_id", fieldID),
-					goerr.V("expected_type", fd.Type),
-					goerr.V("raw_value", raw),
-				), "draft handler: field coercion failed; skipping field")
-				continue
-			}
-			mat.CustomFieldValues[fieldID] = model.FieldValue{
-				FieldID: types.FieldID(fieldID),
-				Type:    fd.Type,
-				Value:   coerced,
-			}
+			mat.CustomFieldValues[fieldID] = fv
 		}
 	}
 

@@ -182,11 +182,6 @@ var CommentExcerptForTest = commentExcerpt
 // Action comment notifications so an external test can pin it.
 const ActionCommentBroadcastsForTest = actionCommentBroadcasts
 
-// CoerceFieldValueForTest exposes the unexported coerceFieldValue helper so
-// external tests can verify the JSON-decoded value → canonical Go shape
-// contract per field type (notably markdown → string).
-var CoerceFieldValueForTest = coerceFieldValue
-
 // ClampSlackOptionDescriptionForTest exposes the unexported
 // clampSlackOptionDescription helper so external tests can verify the
 // 75-rune option-description contract.

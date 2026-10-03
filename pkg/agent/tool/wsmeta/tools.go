@@ -105,7 +105,7 @@ type getWorkspaceTool struct {
 func (t *getWorkspaceTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "get_workspace",
-		Description: "Return a workspace's identity, its complete custom field schema (each select / multi-select option carries its description and any metadata), and its configured external sources. Call this before materialising so you fill custom_field_values with the correct field IDs and option IDs.",
+		Description: "Return a workspace's identity, its complete custom field schema (each select / multi-select option carries its description and any metadata), and its configured external sources. Call this before materialising so you fill the draft's fields with the correct field IDs and option IDs.",
 		Parameters: map[string]*gollem.Parameter{
 			"workspace_id": {
 				Type:        gollem.TypeString,

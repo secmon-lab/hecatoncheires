@@ -173,9 +173,11 @@ func (d *Durable) Register(
 	handle, err := planexec.Register(reg, agentkernel.AgentProposal, proposalAgentVersion,
 		taskAgent, progress, limiter,
 		planexec.Config[Draft]{
-			// The workspace and its field values are checked against the registry
-			// inside the regeneration loop, so a bad option id is fed back and the
-			// draft re-emitted rather than reaching the human as a broken preview.
+			// The workspace is checked against the registry and the requester's
+			// access inside the regeneration loop, so a draft naming an unknown or
+			// inaccessible workspace is fed back and re-emitted rather than reaching
+			// the human with no preview to render. Field values are not checked here
+			// (see Draft.Validate).
 			Finalizers: []planexec.Finalizer[Draft]{d.validateAgainstRegistry},
 			Remaining:  d.models.RemainingFunc(),
 		},
@@ -444,11 +446,11 @@ func (d *Durable) deliver(ctx context.Context, target Target, draft *Draft) {
 		return
 	}
 	if err := d.host.Propose(ctx, target, MaterializePayload{
-		WorkspaceID:       draft.WorkspaceID,
-		Title:             draft.Title,
-		Description:       draft.Description,
-		CustomFieldValues: draft.CustomFieldValues,
-		IsTest:            draft.IsTest,
+		WorkspaceID: draft.WorkspaceID,
+		Title:       draft.Title,
+		Description: draft.Description,
+		Fields:      draft.fieldInputs(),
+		IsTest:      draft.IsTest,
 	}); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "render the case draft"), "render the case draft")
 		d.reportFallback(ctx, target, err.Error())

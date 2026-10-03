@@ -54,7 +54,10 @@ type scriptedPlanner struct {
 	// the input is just the task text — so this is where a test checks WHICH prompt
 	// a child was spawned as.
 	systemPrompts []string
-	n             atomic.Int32
+	// schemas records the response schema each call was made under, aligned by
+	// index with inputs; nil for a call that asked for none.
+	schemas []*gollem.Parameter
+	n       atomic.Int32
 }
 
 func (p *scriptedPlanner) client() gollem.LLMClient {
@@ -75,6 +78,7 @@ func (p *scriptedPlanner) client() gollem.LLMClient {
 					p.mu.Lock()
 					p.inputs = append(p.inputs, b.String())
 					p.systemPrompts = append(p.systemPrompts, cfg.SystemPrompt())
+					p.schemas = append(p.schemas, cfg.ResponseSchema())
 					p.mu.Unlock()
 					if i >= len(p.replies) {
 						return nil, goerr.New("unexpected extra generate call", goerr.V("call_index", i))
@@ -94,6 +98,15 @@ func (p *scriptedPlanner) seen() []string {
 	defer p.mu.Unlock()
 	out := make([]string, len(p.inputs))
 	copy(out, p.inputs)
+	return out
+}
+
+// seenSchemas returns the response schema of each call, in call order.
+func (p *scriptedPlanner) seenSchemas() []*gollem.Parameter {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]*gollem.Parameter, len(p.schemas))
+	copy(out, p.schemas)
 	return out
 }
 
@@ -2048,6 +2061,99 @@ func TestRegisterRequiresALimiterAndATaskAgent(t *testing.T) {
 		agentkit.Agent[react.Input]{}, nil, cfg.Limiter(testSpend()),
 		planexec.Config[planexec.TextResult]{TextOnly: true})
 	gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
+}
+
+// labeledDraft holds a map with a fixed value type: gollem can build its schema,
+// but Claude structured outputs and OpenAI strict mode reject it.
+type labeledDraft struct {
+	Title  string            `json:"title"`
+	Labels map[string]string `json:"labels"`
+}
+
+func (labeledDraft) Validate() error { return nil }
+
+// looseDraft holds a map gollem cannot build a schema for at all.
+type looseDraft struct {
+	Values map[string]any `json:"values"`
+}
+
+func (looseDraft) Validate() error { return nil }
+
+// nestedMapDraft hides the map inside an array element.
+type nestedMapDraft struct {
+	Items []struct {
+		M map[string]int `json:"m"`
+	} `json:"items"`
+}
+
+func (nestedMapDraft) Validate() error { return nil }
+
+func registerStructured[T planexec.Validatable](t *testing.T) error {
+	t.Helper()
+	reg := agentkit.NewRegistry()
+	cfg := generousBudget()
+	taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend()))
+	gt.NoError(t, err).Required()
+	_, err = planexec.Register(reg, agentkernel.AgentProposal, 1, taskAgent, nil,
+		cfg.Limiter(testSpend()), planexec.Config[T]{})
+	return err
+}
+
+// A terminal output type no provider can be sent must fail the process at
+// startup. Otherwise every run of the agent fails at its terminal call, and
+// nothing before production notices.
+func TestRegisterRejectsAnOutputTypeHoldingAMap(t *testing.T) {
+	t.Run("map with a fixed value type", func(t *testing.T) {
+		err := registerStructured[labeledDraft](t)
+		gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
+		gt.String(t, err.Error()).Contains(`"labels"`)
+	})
+
+	t.Run("map gollem cannot convert", func(t *testing.T) {
+		err := registerStructured[looseDraft](t)
+		gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
+		gt.Error(t, err).Is(gollem.ErrUnsupportedType)
+	})
+
+	t.Run("map inside an array element", func(t *testing.T) {
+		err := registerStructured[nestedMapDraft](t)
+		gt.Error(t, err).Is(agentkit.ErrInvalidAgentDef)
+		gt.String(t, err.Error()).Contains(`"items[].m"`)
+	})
+
+	t.Run("no map", func(t *testing.T) {
+		gt.NoError(t, registerStructured[caseDraft](t))
+	})
+
+	t.Run("the terminal call carries the schema derived from the type", func(t *testing.T) {
+		planner := &scriptedPlanner{replies: []string{
+			`{"tasks":[{"id":"t1","title":"Read","description":"read it","acceptance_criteria":"done","tools":["slack_ro"],"budget_usd":0.01}]}`,
+			`read it`,
+			`{"finalize":{"reason":"done"}}`,
+			`{"title":"Outage"}`,
+		}}
+		rt := newRuntime(t, planner.client(), generousBudget(), nil, nil, planexec.Config[caseDraft]{})
+		proc := rt.run(t, textInput(), nil)
+		gt.Value(t, proc.Status).Equal(agentkit.ProcessSucceeded)
+
+		want, err := gollem.ToSchema(caseDraft{})
+		gt.NoError(t, err).Required()
+		schemas := planner.seenSchemas()
+		gt.Array(t, schemas).Length(4).Required()
+		gt.Value(t, schemas[3]).Equal(want)
+	})
+
+	t.Run("text only derives no schema", func(t *testing.T) {
+		reg := agentkit.NewRegistry()
+		cfg := generousBudget()
+		taskAgent, err := react.Register(reg, agentkernel.AgentTask, 1, cfg.Limiter(testSpend()))
+		gt.NoError(t, err).Required()
+		// looseDraft would be refused as a structured output; TextOnly never
+		// builds its schema.
+		_, err = planexec.Register(reg, agentkernel.AgentProposal, 1, taskAgent, nil,
+			cfg.Limiter(testSpend()), planexec.Config[looseDraft]{TextOnly: true})
+		gt.NoError(t, err)
+	})
 }
 
 func TestInputValidate(t *testing.T) {

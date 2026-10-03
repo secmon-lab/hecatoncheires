@@ -447,12 +447,12 @@ with workspace selector + Submit / Edit / Cancel buttons.
    the planner pulls the field schema and source list per turn via the
    `pkg/agent/tool/wsmeta` tools (`list_workspaces`, `get_workspace`).
    Each round, the planner emits a JSON plan with one of three actions:
-   `investigate` (parallel sub-agent fan-out under read-only tool sets),
-   `question`, or `materialize`. The terminal action for a normal mention
-   is `materialize`, which produces `Title`, `Description`, an optional
-   `is_test` flag (set only for explicit test/drill requests), and a
-   `custom_field_values` map for the **planner-selected** workspace's
-   `FieldSchema`. Loop budgets (planner / sub-agent / sub-agent inner)
+   `tasks` (parallel sub-agent fan-out under read-only tool sets),
+   `question`, or `finalize`. After `finalize`, a separate terminal call
+   produces the draft: `Title`, `Description`, an optional `is_test` flag
+   (set only for explicit test/drill requests), and a `fields` list (one
+   `field_id` with a `value` or `values` per entry) for the
+   **planner-selected** workspace's `FieldSchema`. Loop budgets (planner / sub-agent / sub-agent inner)
    bound runaway turns; when exhausted, the runtime returns
    `StatusFallback` and the host posts a system fallback message.
 
